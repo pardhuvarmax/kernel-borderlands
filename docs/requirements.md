@@ -1,4 +1,3 @@
-Let me compile this comprehensively.
 
 ---
 
@@ -341,8 +340,4 @@ Kernel 5.8+
 
 ---
 
-**One important note**
 
-The D3.js swarm topology network graph (Image 14 in your screenshots) is one of the most complex frontend pieces. Person 5 should prototype that early — it's not trivial and will take longer than expected.
-
-Want me to break any of these sections down further or generate a phased implementation order?
