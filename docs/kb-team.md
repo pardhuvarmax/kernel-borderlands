@@ -17,7 +17,7 @@ The project follows a **subsystem ownership model**, where each major component 
 Kernel Borderlands is architecturally centered around **two primary engineering pillars**:
 
 * **kb-core** — The systems and runtime foundation of the project kb.
-* **kb-aads** — The Autonomous Agentic Defense System (AADS), providing the intelligence layer of project kb.
+* **kb-aads** — The AADS Subsystem, providing the intelligence layer of project kb.
 
 All remaining subsystems extend, orchestrate, validate, or provide operational interfaces for these two foundational components.
 
