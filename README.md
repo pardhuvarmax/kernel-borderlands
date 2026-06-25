@@ -82,7 +82,3 @@ The recommended reading order for new contributors is:
 7. `docs/KB_Synopsis-1.pdf`
 
 ---
-
-### License
-
-This project is currently under active development. Licensing information will be published as the project matures.
