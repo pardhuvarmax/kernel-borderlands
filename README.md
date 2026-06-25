@@ -6,11 +6,10 @@ The project combines kernel observability, behavioral analytics, distributed age
 
 ![Linux-Kernel](https://img.shields.io/badge/Linux-5.8+-black?logo=linux)
 ![eBPF](https://img.shields.io/badge/eBPF(C)-CO--RE-blue)
-![libbpf](https://img.shields.io/badge/libbpf-Latest-orange)
+![libbpf](https://img.shields.io/badge/libbpf-Latest-purple)
 ![Go](https://img.shields.io/badge/Go-Control--Plane-00ADD8?logo=go)
 ![Python](https://img.shields.io/badge/Python-AADS-3776AB?logo=python)
 ![Documentation](https://img.shields.io/badge/Docs-Developer-green)
-![Architecture](https://img.shields.io/badge/Architecture-x86__64%20%7C%20ARM64-lightgrey)
 ![License](https://img.shields.io/github/license/PardhuSreeRushiVarma20060119/kernel-borderlands)
 ![Status](https://img.shields.io/badge/Status-Active-success)
 
