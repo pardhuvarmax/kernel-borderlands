@@ -18,7 +18,7 @@ The project combines kernel observability, behavioral analytics, distributed age
 
 ---
 
-# Repository Structure
+### Repository Structure
 
 | Directory           | Language           | Description                                                                            |
 | ------------------- | ------------------ | -------------------------------------------------------------------------------------- |
@@ -33,7 +33,7 @@ The project combines kernel observability, behavioral analytics, distributed age
 
 ---
 
-# Getting Started
+### Getting Started
 
 Complete installation instructions, dependency setup, project architecture, development workflow, and contributor documentation are maintained within the project's documentation.
 
@@ -71,7 +71,7 @@ npm run dev
 
 ---
 
-# Documentation
+### Documentation
 
 The complete documentation for Kernel Borderlands is located in the `docs/` directory.
 
@@ -87,6 +87,6 @@ The recommended reading order for new contributors is:
 
 ---
 
-# License
+### License
 
 This project is currently under active development. Licensing information will be published as the project matures.
