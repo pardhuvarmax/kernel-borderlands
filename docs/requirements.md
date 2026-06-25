@@ -1,25 +1,23 @@
 
----
+<img align="right" width="300" src="https://github.com/user-attachments/assets/ba4fdc53-151c-4477-b146-bc37b6859749" alt="Kernel Borderlands">
 
-# Kernel Borderlands + AADS Technical Requirements
+**Kernel Borderlands + AADS Technical Requirements**
 
----
-
-## 1. System Requirements
+**System Requirements:**
 
 **Development Machine (each member)**
-- OS: Ubuntu 22.04 LTS (mandatory, not optional)
+- OS: Ubuntu 22/24.04 LTS (mandatory, not optional)
 - RAM: minimum 16GB recommended
 - Storage: minimum 50GB free
 - Linux Kernel: 5.8+ (BTF + BPF ring buffer support)
 
-**Lab/Attack VM (Person 2)**
+**Lab/Attack VM**
 - Isolated network environment
 - Multiple VMs for attack simulation
 - VMware/VirtualBox/QEMU
 - Snapshot capability for repeatable experiments
 
-**GPU (Person 1)**
+**GPU**
 - University HPC preferred
 - Fallback: Google Colab Pro / RunPod
 - Minimum: 8GB VRAM for QLoRA fine-tuning
@@ -27,7 +25,7 @@
 
 ---
 
-## 2. KB Layer — C + Go
+## 1. KB Layer — C + Go
 
 **eBPF / Kernel (C)**
 ```
@@ -73,7 +71,7 @@ SIGKILL
 
 ---
 
-## 3. AADS Layer — Python
+## 2. AADS Layer — Python
 
 **Core Runtime**
 ```
@@ -138,7 +136,7 @@ Label studio or custom labeling tool
 
 ---
 
-## 4. Event Bus & Infrastructure
+## 3. Event Bus & Infrastructure
 
 ```
 Apache Kafka 3.x
@@ -152,7 +150,7 @@ Docker + Docker Compose (local dev)
 
 ---
 
-## 5. Dashboard — React + TypeScript
+## 4. Dashboard — React + TypeScript
 
 **Core**
 ```
@@ -190,7 +188,7 @@ System Heartbeat → Recharts line chart
 
 ---
 
-## 6. Security & Governance
+## 5. Security & Governance
 
 ```
 RBAC implementation (custom)
@@ -204,7 +202,7 @@ Immutable audit trail verification
 
 ---
 
-## 7. DevOps & Tooling
+## 6. DevOps & Tooling
 
 **Version Control**
 ```
@@ -243,7 +241,7 @@ Weights & Biases (ML training)
 
 ---
 
-## 8. Communication Interfaces
+## 7. Communication Interfaces
 
 **KB ↔ AADS**
 ```
@@ -272,61 +270,7 @@ JSON (data format)
 
 ---
 
-## 9. Per-Person Specific Requirements
-
-**Person 1 (Systems & Security / ML)**
-```
-clang, LLVM, libbpf, bpftool
-PyTorch, Transformers, PEFT, TRL
-CUDA (if GPU available)
-bitsandbytes
-Weights & Biases account
-```
-
-**Person 2 (Offensive)**
-```
-Metasploit Framework
-Isolated VM network (no internet)
-Attack tool suite
-Custom dataset collection scripts
-Label annotation tooling
-ADFA-LD + BETH datasets downloaded
-```
-
-**Person 3 (Defensive)**
-```
-Go 1.21+
-gRPC toolchain
-libseccomp-dev
-Linux kernel headers
-cgroup v2 enabled on dev machine
-PostgreSQL
-```
-
-**Person 4 (Backend)**
-```
-Python 3.11+
-Ray RLlib
-Apache Kafka
-ZeroMQ
-Redis
-FastAPI
-AsyncIO proficiency
-```
-
-**Person 5 (Frontend)**
-```
-Node.js 20+
-React 18 + TypeScript
-D3.js (important — topology graph is complex)
-Tailwind + shadcn/ui
-WebSocket implementation
-Figma access (reference for all screens)
-```
-
----
-
-## 10. Minimum Viable Environment
+## 8. Minimum Viable Environment
 
 To run the full stack locally:
 ```
