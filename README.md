@@ -2,8 +2,6 @@
 
 Kernel Borderlands (KB) is a kernel-level runtime defense framework designed to detect, classify, and contain anomalous process behavior directly at **Ring 0** on Linux systems. Rather than relying solely on signatures or predefined rules, KB continuously observes kernel telemetry through **eBPF instrumentation**, constructs behavioral context, and coordinates an intelligent multi-agent defense architecture capable of adaptive runtime response.
 
-The project combines kernel observability, behavioral analytics, distributed agent orchestration, reinforcement learning, and modern systems programming into a unified security platform intended for research, experimentation, and next-generation host defense.
-
 ![Linux-Kernel](https://img.shields.io/badge/Linux-5.8+-black?logo=linux)
 ![eBPF](https://img.shields.io/badge/eBPF-CO--RE-blue)
 ![libbpf](https://img.shields.io/badge/libbpf-Latest-orange)
@@ -15,6 +13,8 @@ The project combines kernel observability, behavioral analytics, distributed age
 ![Architecture](https://img.shields.io/badge/Architecture-x86__64%20%7C%20ARM64-lightgrey)
 ![License](https://img.shields.io/github/license/PardhuSreeRushiVarma20060119/kernel-borderlands)
 ![Status](https://img.shields.io/badge/Status-Active-success)
+
+The project combines kernel observability, behavioral analytics, distributed agent orchestration, reinforcement learning, and modern systems programming into a unified security platform intended for research, experimentation, and next-generation host defense.
 
 ---
 
