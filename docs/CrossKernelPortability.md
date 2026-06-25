@@ -45,7 +45,7 @@ The compilation process is independent of the target kernel. Kernel-specific ada
 
 # Compile Once – Run Everywhere (CO-RE)
 
-CO-RE allows a single compiled eBPF object to execute on multiple Linux kernel versions without recompilation.
+**CO-RE** allows a single compiled eBPF object to execute on multiple Linux kernel versions without recompilation.
 
 Traditional eBPF programs embed assumptions regarding kernel memory layouts.
 
