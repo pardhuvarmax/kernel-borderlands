@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Knowledge Base (KB) is designed to operate on any Linux kernel that provides sufficient eBPF support without maintaining kernel-specific implementations. This portability is achieved through **BPF Compile Once – Run Everywhere (CO-RE)**, **BTF (BPF Type Format)**, **libbpf**, runtime feature detection, and capability-based fallbacks.
+The Kernel Borderlands (KB) is designed to operate on any Linux kernel that provides sufficient eBPF support without maintaining kernel-specific implementations. This portability is achieved through **BPF Compile Once – Run Everywhere (CO-RE)**, **BTF (BPF Type Format)**, **libbpf**, runtime feature detection, and capability-based fallbacks.
 
 Unlike traditional kernel modules, which depend on exact kernel versions and kernel structure layouts, KB targets **kernel capabilities** rather than specific Linux releases.
 
