@@ -1,6 +1,8 @@
-# Kernel Borderlands (KB)
+<img width="1000" height="1000" alt="KB" src="https://github.com/user-attachments/assets/ba4fdc53-151c-4477-b146-bc37b6859749" />
 
-**Behavioral Defense at Ring Zero with Agent-Assisted Orchestration**
+
+
+---
 
 Kernel Borderlands (KB) is a kernel-level runtime defense framework designed to detect, classify, and contain anomalous process behavior directly at **Ring 0** on Linux systems. Rather than relying solely on signatures or predefined rules, KB continuously observes kernel telemetry through **eBPF instrumentation**, constructs behavioral context, and coordinates an intelligent multi-agent defense architecture capable of adaptive runtime response.
 
