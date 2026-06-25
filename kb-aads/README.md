@@ -25,4 +25,6 @@ python main.py
 ```
 
 ## Owner
-Tejaswini — Backend/Communication (collab)
+Karthik — AI & Agentic Systems,
+Pardhu Varma — ML & Systems (Collab)
+

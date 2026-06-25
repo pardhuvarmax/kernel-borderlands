@@ -19,4 +19,5 @@ go run cmd/kbd/main.go
 ```
 
 ## Owner
-Tejaswini — Defensive Security
+Tejaswini — Defensive Security, Control & Communication Pipelines.
+Pardhu Varma — Security, gRPC support (Collab)

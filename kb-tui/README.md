@@ -23,4 +23,5 @@ go run cmd/main.go
 ```
 
 ## Owner
-Tejaswini — Go (collab)
+Tejaswini — Golang, TUI Design
+Rupa — TUI Design & CLI Tooling (collab)

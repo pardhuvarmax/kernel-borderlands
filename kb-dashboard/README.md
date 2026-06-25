@@ -28,4 +28,5 @@ npm run dev
 ```
 
 ## Owner
-Tejaswini — Frontend (collab)
+Rupa —  Design & Frontend 
+Tejaswini — Frontend & Backend (collab)
