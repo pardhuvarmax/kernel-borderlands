@@ -26,4 +26,5 @@ sudo ./kb_process
 ```
 
 ## Owner
-Person 1 — Systems & Security / ML
+Pardhu Varma — Systems & Security
+Karthik — Systems Integration & Subsystem Testing (Collab)
