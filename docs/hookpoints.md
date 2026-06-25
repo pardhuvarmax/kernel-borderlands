@@ -1,3 +1,5 @@
+<img align="right" width="200" src="https://github.com/user-attachments/assets/ba4fdc53-151c-4477-b146-bc37b6859749" alt="Kernel Borderlands">
+
 Looking at the existing hook points:  
 
 - `tracepoint:syscalls` — (all syscall entry/exit),
