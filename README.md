@@ -4,6 +4,18 @@ Kernel Borderlands (KB) is a kernel-level runtime defense framework designed to 
 
 The project combines kernel observability, behavioral analytics, distributed agent orchestration, reinforcement learning, and modern systems programming into a unified security platform intended for research, experimentation, and next-generation host defense.
 
+![Linux-Kernel](https://img.shields.io/badge/Linux-5.8+-black?logo=linux)
+![eBPF](https://img.shields.io/badge/eBPF-CO--RE-blue)
+![libbpf](https://img.shields.io/badge/libbpf-Latest-orange)
+![C](https://img.shields.io/badge/C-eBPF-blue?logo=c)
+![Go](https://img.shields.io/badge/Go-Control--Plane-00ADD8?logo=go)
+![Rust](https://img.shields.io/badge/Rust-Checker-black?logo=rust)
+![Python](https://img.shields.io/badge/Python-AADS-3776AB?logo=python)
+![Documentation](https://img.shields.io/badge/Docs-Developer-green)
+![Architecture](https://img.shields.io/badge/Architecture-x86__64%20%7C%20ARM64-lightgrey)
+![License](https://img.shields.io/github/license/PardhuSreeRushiVarma20060119/kernel-borderlands)
+![Status](https://img.shields.io/badge/Status-Active-success)
+
 ---
 
 # Repository Structure
