@@ -9,9 +9,6 @@ Looking at the existing hook points:
 
 Captured events are emitted into a perf ring buffer for zero-copy delivery to userland.
 
-
-
-
 here are additions worth considering:
 
 **Process & Execution**
