@@ -1,13 +1,6 @@
-<p align="left">
-  <img
-    width="150"
-    height="150"
-    alt="Kernel Borderlands"
-    src="https://github.com/user-attachments/assets/ba4fdc53-151c-4477-b146-bc37b6859749"
-  />
-</p>
+<img align="right" width="240" src="https://github.com/user-attachments/assets/ba4fdc53-151c-4477-b146-bc37b6859749" alt="Kernel Borderlands">
 
-# Quick Start
+**Quick Start**
 
 Clone the repository and run the automated installation script to prepare a complete Kernel Borderlands development environment.
 
