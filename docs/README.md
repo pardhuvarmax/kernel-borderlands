@@ -30,6 +30,10 @@ Provides detailed installation instructions, supported platforms, required softw
 
 Defines the software stack, hardware recommendations, compiler requirements, runtime dependencies, development tools, and version requirements for every subsystem within the project.
 
+### `docs/cross-kernel-portability.md`
+
+Documents the cross-kernel portability architecture of KB. It explains how the framework achieves compatibility across multiple Linux kernels through BPF Compile Once – Run Everywhere (CO-RE), BTF, libbpf, runtime capability discovery, and feature fallback mechanisms. The document describes the portability architecture, kernel compatibility model, distribution support, runtime initialization pipeline, capability resolution process, architecture support, and developer guidelines for implementing portable eBPF instrumentation modules.
+
 ### `docs/hookpoints.md`
 
 Describes the Linux kernel hook points monitored by Kernel Borderlands, including the associated eBPF instrumentation strategy, kernel events of interest, telemetry collection mechanisms, and behavioral observation pipeline used by the framework.
