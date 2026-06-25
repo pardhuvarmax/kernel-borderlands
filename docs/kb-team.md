@@ -1,9 +1,11 @@
-# Team Kernal Borderlands
+<img align="right" width="200" src="https://github.com/user-attachments/assets/ba4fdc53-151c-4477-b146-bc37b6859749" alt="Kernel Borderlands">
 
-- K.Pardhu 2311CS040089
-- K.Tejaswini 2311CS040077
-- 
-- 
+**Team Kernel Borderlands**
+
+- K. Pardhu — 2311CS040089
+- K. Tejaswini — 2311CS040077
+- Karthik
+- Rupa
 
 
 
