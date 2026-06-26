@@ -1,0 +1,12 @@
+# Process allowlist — comm names that are exempt from default scoring
+# thresholds because they are known, trusted, and have unusual-but-legitimate
+# behavioral signatures (e.g. init systems, package managers).
+#
+# Not yet consumed by the daemon — wire this into the Policy Engine
+# alongside policy.yaml.
+
+allow:
+  - comm: systemd
+    reason: "PID 1 / init system"
+  - comm: sshd
+    reason: "Trusted remote access daemon"

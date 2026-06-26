@@ -1,0 +1,25 @@
+# Default behavioral policies for the KB Policy Engine.
+#
+# NOTE: The Policy Engine itself (the code that loads and evaluates this
+# file) hasn't been implemented in internal/controlplane yet — this file
+# documents the intended schema so policy authoring can start in parallel.
+# See Technical Design Doc, Sec 6.4 for the worked examples below.
+
+policies:
+  - name: web_server_baseline
+    match:
+      comm: nginx
+      parent_comm: systemd
+    allow:
+      syscalls: [accept, read, write, close, sendfile]
+      network: [bind, listen, accept]
+    thresholds:
+      suspicious: 55   # higher tolerance for nginx
+      borderlands: 85
+
+  - name: strict_database
+    match:
+      comm: postgres
+    deny:
+      network_outbound: true        # no outbound connections
+      auto_terminate_on_exec: true  # kill if it execves

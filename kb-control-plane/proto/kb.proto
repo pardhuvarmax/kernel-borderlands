@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package kb;
+
+option go_package = "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/proto";
+
+// Zone classification
+enum Zone {
+    SAFE        = 0;
+    SUSPICIOUS  = 1;
+    BORDERLANDS = 2;
+}
+
+// Containment level
+enum ContainmentLevel {
+    NONE        = 0;
+    CGROUP      = 1;
+    SECCOMP     = 2;
+    NAMESPACE   = 3;
+    TERMINATE   = 4;
+}
+
+// Process state
+message ProcessState {
+    uint32 pid              = 1;
+    uint32 ppid             = 2;
+    string comm             = 3;
+    float  score            = 4;
+    Zone   zone             = 5;
+    uint32 uid              = 6;
+    ContainmentLevel containment = 7;
+    int64  first_seen       = 8;
+    int64  last_seen        = 9;
+}
+
+// KB Event from eBPF layer
+message KBEvent {
+    uint32 pid          = 1;
+    uint32 ppid         = 2;
+    string comm         = 3;
+    string event_type   = 4;
+    float  score_delta  = 5;
+    int64  timestamp    = 6;
+    map<string, string> metadata = 7;
+}
+
+// Alert
+message Alert {
+    string alert_id     = 1;
+    string alert_type   = 2;
+    uint32 pid          = 3;
+    string comm         = 4;
+    float  confidence   = 5;
+    string severity     = 6;
+    int64  timestamp    = 7;
+    repeated string evidence = 8;
+}
+
+// Agent decision
+message AgentDecision {
+    string decision_id      = 1;
+    string agent_id         = 2;
+    uint32 pid              = 3;
+    string action           = 4;
+    float  confidence       = 5;
+    repeated string authorized_by = 6;
+}
+
+// Requests/Responses
+message PidRequest     { uint32 pid  = 1; }
+message ZoneRequest    { Zone zone   = 1; }
+message EventFilter    { repeated string event_types = 1; }
+message DecisionAck    { bool success = 1; string message = 2; }
+message ContainmentRequest {
+    uint32 pid              = 1;
+    ContainmentLevel level  = 2;
+    string reason           = 3;
+}
+message ContainmentResponse { bool success = 1; }
+
+// KB Control Plane Service
+service KernelBorderlands {
+    // Query process state
+    rpc GetProcessState(PidRequest)
+        returns (ProcessState);
+
+    // List processes in a zone
+    rpc ListZone(ZoneRequest)
+        returns (stream ProcessState);
+
+    // Set containment level
+    rpc SetContainment(ContainmentRequest)
+        returns (ContainmentResponse);
+
+    // Stream real-time events
+    rpc StreamEvents(EventFilter)
+        returns (stream KBEvent);
+
+    // Submit agent decision
+    rpc SubmitAgentDecision(AgentDecision)
+        returns (DecisionAck);
+
+    // Stream alerts
+    rpc StreamAlerts(EventFilter)
+        returns (stream Alert);
+}
