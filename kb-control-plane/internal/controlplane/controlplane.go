@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/kb-research/kb-control-plane/proto"
+	pb "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/proto"
 )
 
 // Zone mirrors pb.Zone but lives independently in this package so the

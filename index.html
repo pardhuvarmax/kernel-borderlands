@@ -1,0 +1,3121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kernel Borderlands — Behavioral Defense at Ring Zero</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:ital,wght@0,300;0,400;0,500;0,600;1,300&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --black:   #000000;
+      --s1:      #080808;
+      --s2:      #101010;
+      --s3:      #181818;
+      --ember:   #FF4500;
+      --volt:    #BFFF00;
+      --text:    #EDEAE3;
+      --muted:   #5A5A5A;
+      --dim:     #2E2E2E;
+      --border:  #161616;
+      --border2: #242424;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--black);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      overflow-x: hidden;
+      cursor: none;
+    }
+
+    /* ── CURSOR ── */
+    #cur  { position:fixed;width:9px;height:9px;background:var(--ember);border-radius:50%;pointer-events:none;z-index:9999;transform:translate(-50%,-50%);transition:width .15s,height .15s,background .15s; }
+    #ring { position:fixed;width:34px;height:34px;border:1px solid rgba(255,69,0,.4);border-radius:50%;pointer-events:none;z-index:9998;transform:translate(-50%,-50%);transition:all .11s ease; }
+    body:has(a:hover) #cur,body:has(button:hover) #cur { width:16px;height:16px;background:var(--volt); }
+    body:has(a:hover) #ring,body:has(button:hover) #ring { width:50px;height:50px;border-color:rgba(191,255,0,.35); }
+
+    /* ── NOISE ── */
+    .noise { position:fixed;inset:0;pointer-events:none;z-index:9990;opacity:.028;
+      background:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0/180px 180px;
+      animation: ns .12s steps(1) infinite; }
+    @keyframes ns { 0%{transform:translate(0,0)}25%{transform:translate(-2px,1px)}50%{transform:translate(1px,-1px)}75%{transform:translate(-1px,2px)} }
+
+    /* ── CINEMATIC SECTION BACKGROUNDS (shared engine) ──
+       Each section gets a .cine container as its first child, themed via
+       inline custom properties (--cc grid line, --cg glow, --cs scan band).
+       Content wrapped lower in this stylesheet is lifted to z-index:1 per
+       section so it always paints above these ambient layers. */
+    .cine { position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden; }
+    .cine-grid {
+      position:absolute;inset:-10%;
+      background-image:linear-gradient(var(--cc,rgba(255,69,0,.035)) 1px,transparent 1px),
+                        linear-gradient(90deg,var(--cc,rgba(255,69,0,.035)) 1px,transparent 1px);
+      background-size:54px 54px;
+      -webkit-mask-image:radial-gradient(ellipse 58% 60% at var(--cx,50%) 50%,black 0%,transparent 78%);
+      mask-image:radial-gradient(ellipse 58% 60% at var(--cx,50%) 50%,black 0%,transparent 78%);
+    }
+    .cine-glow {
+      position:absolute;top:50%;left:var(--cx,50%);width:var(--cw,620px);height:var(--ch,400px);
+      transform:translate(-50%,-50%);
+      background:radial-gradient(ellipse at center,var(--cg,rgba(255,69,0,.07)) 0%,transparent 70%);
+      animation:cine-breathe var(--cd,6s) ease-in-out infinite;
+    }
+    @keyframes cine-breathe {
+      0%,100% { opacity:.5;transform:translate(-50%,-50%) scale(1); }
+      50%      { opacity:1; transform:translate(-50%,-50%) scale(1.16); }
+    }
+    .cine-scan {
+      position:absolute;left:0;right:0;height:45%;top:0;
+      background:linear-gradient(180deg,transparent,var(--cs,rgba(255,69,0,.045)),transparent);
+      transform:translateY(-120%);
+      animation:cine-scan-move var(--csd,11s) ease-in-out infinite;
+    }
+    @keyframes cine-scan-move { 0%{transform:translateY(-120%);} 100%{transform:translateY(220%);} }
+    .cine-drift {
+      position:absolute;bottom:-8%;
+      font-family:'JetBrains Mono',monospace;white-space:nowrap;letter-spacing:.05em;
+      opacity:0;animation:cine-drift-rise linear infinite;
+    }
+    @keyframes cine-drift-rise {
+      0%   { opacity:0;transform:translateY(0); }
+      12%  { opacity:var(--ro,.4); }
+      85%  { opacity:var(--ro,.4); }
+      100% { opacity:0;transform:translateY(-260px); }
+    }
+
+    /* ── NAV ── */
+    nav {
+      position:fixed;top:0;left:0;right:0;z-index:500;
+      display:flex;align-items:center;justify-content:space-between;
+      padding:22px 48px;
+      transition:background .3s, border-color .3s, backdrop-filter .3s;
+      border-bottom:1px solid transparent;
+    }
+    nav.scrolled { background:rgba(0,0,0,.88);backdrop-filter:blur(22px);border-color:var(--border); }
+    .nav-logo { display:flex;align-items:center;gap:10px;text-decoration:none; }
+    .nav-logo-mark {
+      width:28px;height:28px;border:1px solid var(--ember);display:flex;align-items:center;justify-content:center;
+      font-family:'Bebas Neue',sans-serif;font-size:13px;color:var(--ember);letter-spacing:.05em;flex-shrink:0;
+    }
+    .nav-logo-text { font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:.14em;color:var(--text); }
+    .nav-links { display:flex;gap:36px;list-style:none; }
+    .nav-links a { font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.14em;color:var(--muted);text-decoration:none;text-transform:uppercase;transition:color .2s; }
+    .nav-links a:hover { color:var(--text); }
+    .nav-gh {
+      display:flex;align-items:center;gap:8px;
+      font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+      background:transparent;border:1px solid var(--border2);color:var(--muted);padding:9px 20px;
+      text-decoration:none;transition:border-color .2s,color .2s;cursor:none;
+    }
+    .nav-gh:hover { border-color:var(--ember);color:var(--ember); }
+    .gh-icon { font-size:13px; }
+
+    /* ── HERO ── */
+    #hero {
+      position:relative;min-height:100vh;display:flex;flex-direction:column;
+      justify-content:flex-end;padding:0 48px 88px;overflow:hidden;
+    }
+    .hero-grid {
+      position:absolute;inset:0;pointer-events:none;
+      background-image:linear-gradient(rgba(255,69,0,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,69,0,.035) 1px,transparent 1px);
+      background-size:72px 72px;
+    }
+    .hero-grid::after { content:'';position:absolute;inset:0;background:radial-gradient(ellipse 70% 70% at 50% 35%,transparent 20%,var(--black) 100%); }
+    .scanlines { position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.12) 3px,rgba(0,0,0,.12) 4px); }
+
+    /* Ring 0 ring animation */
+    .ring0-anim {
+      position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      width:min(520px,55vw);height:min(520px,55vw);
+      border:1px solid rgba(255,69,0,.06);border-radius:50%;
+      animation:rot 24s linear infinite;pointer-events:none;
+    }
+    .ring0-anim::before {
+      content:'';position:absolute;inset:24px;border:1px dashed rgba(255,69,0,.08);border-radius:50%;
+      animation:rot 14s linear infinite reverse;
+    }
+    .ring0-anim::after {
+      content:'RING 0 · eBPF · RING 0 · eBPF · RING 0 · eBPF · RING 0 · eBPF · ';
+      position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      width:100%;height:100%;display:flex;align-items:center;justify-content:center;
+      font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.18em;
+      color:rgba(255,69,0,.12);text-align:center;white-space:nowrap;
+    }
+    @keyframes rot { to { transform:translate(-50%,-50%) rotate(360deg); } }
+
+    .hero-status {
+      font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;
+      color:var(--ember);text-transform:uppercase;margin-bottom:22px;
+      display:flex;align-items:center;gap:14px;position:relative;z-index:1;
+    }
+    .hero-status::before { content:'';width:32px;height:1px;background:var(--ember); }
+    .status-live { display:inline-flex;align-items:center;gap:7px; }
+    .live-dot { width:6px;height:6px;background:var(--volt);border-radius:50%;animation:pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
+
+    .hero-title {
+      font-family:'Bebas Neue',sans-serif;
+      font-size:clamp(72px,13vw,192px);
+      line-height:.87;letter-spacing:-.01em;
+      position:relative;z-index:1;
+    }
+    .hero-title .outline {
+      color:transparent;-webkit-text-stroke:1px rgba(237,234,227,.18);display:block;
+    }
+    .hero-title .ember { color:var(--ember); }
+
+    .hero-sub {
+      margin-top:44px;display:flex;align-items:flex-end;
+      justify-content:space-between;gap:40px;position:relative;z-index:1;
+    }
+    .hero-desc { max-width:460px;font-size:14.5px;line-height:1.72;color:var(--muted);font-weight:300; }
+    .hero-desc strong { color:var(--text);font-weight:500; }
+    .hero-badges { display:flex;flex-wrap:wrap;gap:7px;margin-top:20px; }
+    .badge {
+      font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+      border:1px solid var(--border2);color:var(--muted);padding:5px 12px;
+    }
+    .badge.active { border-color:var(--volt);color:var(--volt); }
+    .hero-ctas { display:flex;align-items:center;gap:18px;flex-shrink:0; }
+
+    .btn-primary {
+      font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;
+      background:var(--ember);color:var(--black);border:none;padding:15px 34px;
+      cursor:none;font-weight:500;text-decoration:none;display:inline-block;
+      position:relative;overflow:hidden;transition:transform .15s;
+    }
+    .btn-primary::after { content:'';position:absolute;inset:0;background:var(--volt);transform:translateX(-100%);transition:transform .28s ease; }
+    .btn-primary span { position:relative;z-index:1; }
+    .btn-primary:hover::after { transform:translateX(0); }
+    .btn-primary:hover { transform:translateY(-1px); }
+
+    .btn-ghost {
+      font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;
+      background:transparent;color:var(--muted);border:none;padding:15px 0;
+      cursor:none;text-decoration:none;display:inline-flex;align-items:center;gap:10px;
+      transition:color .2s;
+    }
+    .btn-ghost:hover { color:var(--text); }
+
+    /* ── TICKER ── */
+    .ticker-wrap { overflow:hidden;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--s1);padding:14px 0; }
+    .ticker { display:flex;width:max-content;animation:tick 38s linear infinite; }
+    .ti { font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.15em;color:var(--muted);text-transform:uppercase;padding:0 52px;display:flex;align-items:center;gap:14px;white-space:nowrap; }
+    .ti .sep { width:4px;height:4px;background:var(--ember);border-radius:50%;flex-shrink:0; }
+    @keyframes tick { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+
+    /* ── WHAT IS KB ── */
+    #about { padding:110px 48px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:start;position:relative;overflow:hidden; }
+    #about > *:not(.cine) { position:relative;z-index:1; }
+    .about-left {}
+    .eyebrow { font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.2em;color:var(--ember);text-transform:uppercase;margin-bottom:18px; }
+    .section-title { font-family:'Bebas Neue',sans-serif;font-size:clamp(44px,5.5vw,80px);line-height:.92;letter-spacing:-.01em;margin-bottom:32px; }
+    .body-text { font-size:14.5px;line-height:1.78;color:var(--muted);font-weight:300;max-width:520px; }
+    .body-text + .body-text { margin-top:18px; }
+    .body-text strong { color:var(--text);font-weight:500; }
+
+    .problem-list { margin-top:40px;display:flex;flex-direction:column;gap:0;border-top:1px solid var(--border); }
+    .problem-item { padding:20px 0;border-bottom:1px solid var(--border);display:flex;gap:18px;align-items:flex-start; }
+    .p-icon { color:var(--ember);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em;flex-shrink:0;padding-top:3px;opacity:.8; }
+    .p-text { font-size:13.5px;line-height:1.65;color:var(--muted);font-weight:300; }
+    .p-text strong { color:var(--text);font-weight:500; }
+
+    /* ── STATS ── */
+    #stats { display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--border);position:relative;overflow:hidden; }
+    .stat { padding:48px 36px;border-right:1px solid var(--border);position:relative; }
+    .stat:last-child { border-right:none; }
+    .stat-idx { font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.15em;color:var(--ember);margin-bottom:28px;opacity:.6; }
+    .stat-val { font-family:'Bebas Neue',sans-serif;font-size:64px;line-height:1;letter-spacing:-.02em; }
+    .stat-unit { font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--ember); }
+    .stat-label { font-size:11.5px;color:var(--muted);font-weight:300;margin-top:10px;line-height:1.5; }
+
+    /* ── ARCHITECTURE ── */
+    #arch { padding:110px 48px;border-bottom:1px solid var(--border);position:relative;overflow:hidden; }
+    #arch > *:not(.cine) { position:relative;z-index:1; }
+    .arch-header { display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:72px;gap:40px; }
+    .arch-note { max-width:340px;font-size:13.5px;color:var(--muted);line-height:1.7;font-weight:300; }
+
+    .layers { display:flex;flex-direction:column;gap:1px;background:var(--border); }
+    .layer {
+      background:var(--black);display:grid;grid-template-columns:160px 1fr auto;
+      align-items:stretch;gap:0;transition:background .2s;cursor:none;
+    }
+    .layer:hover { background:var(--s2); }
+    .layer-num {
+      padding:28px 24px;border-right:1px solid var(--border);
+      font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;
+      color:var(--ember);display:flex;flex-direction:column;justify-content:space-between;
+      transition:border-color .2s;
+    }
+    .layer:hover .layer-num { border-color:var(--ember); }
+    .layer-num .ln { font-size:10px;opacity:.5; }
+    .layer-num .lang { font-size:9.5px;color:var(--muted);margin-top:auto;padding-top:24px; }
+    .layer-body { padding:28px 36px;display:flex;flex-direction:column;gap:8px; }
+    .layer-name { font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:.05em; }
+    .layer-desc { font-size:13px;color:var(--muted);font-weight:300;line-height:1.65;max-width:640px; }
+    .layer-tags { display:flex;flex-wrap:wrap;gap:6px;margin-top:10px; }
+    .ltag {
+      font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.12em;
+      border:1px solid var(--border2);color:var(--dim);padding:4px 10px;text-transform:uppercase;
+      transition:border-color .2s,color .2s;
+    }
+    .layer:hover .ltag { border-color:var(--border2);color:var(--muted); }
+    .layer-right {
+      padding:28px 32px;border-left:1px solid var(--border);display:flex;align-items:center;
+      font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.12em;gap:8px;
+      min-width:140px;justify-content:flex-end;transition:border-color .2s;
+    }
+    .layer:hover .layer-right { border-color:var(--border2); }
+    .layer-status-dot { width:6px;height:6px;border-radius:50%;flex-shrink:0; }
+    .ls-live { background:var(--volt);animation:pulse 2.2s ease-in-out infinite; }
+    .ls-build { background:var(--ember);animation:pulse 1.8s ease-in-out infinite; }
+    .ls-text { color:var(--muted); }
+
+    /* ── CO-RE DIAGRAM ── */
+    #core { padding:110px 48px;border-bottom:1px solid var(--border);position:relative;overflow:hidden; }
+    /* faint watermark, same device used behind AADS */
+    #core::before {
+      content:'CO·RE';font-family:'Bebas Neue',sans-serif;font-size:20vw;
+      color:transparent;-webkit-text-stroke:1px rgba(255,69,0,.035);
+      position:absolute;right:-3vw;top:50%;transform:translateY(-50%);
+      pointer-events:none;user-select:none;line-height:1;z-index:0;white-space:nowrap;
+    }
+    .core-diagram { display:flex;align-items:center;gap:0;position:relative;z-index:1; }
+
+    /* ── cinematic background: BTF relocations resolving behind the diagram ── */
+    .core-bg { position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden; }
+    .core-bg-grid {
+      position:absolute;inset:-10%;
+      background-image:linear-gradient(rgba(255,69,0,.035) 1px,transparent 1px),
+                        linear-gradient(90deg,rgba(255,69,0,.035) 1px,transparent 1px);
+      background-size:54px 54px;
+      -webkit-mask-image:radial-gradient(ellipse 58% 60% at 46% 50%,black 0%,transparent 78%);
+      mask-image:radial-gradient(ellipse 58% 60% at 46% 50%,black 0%,transparent 78%);
+    }
+    .core-bg-glow {
+      position:absolute;top:50%;left:40%;width:640px;height:420px;
+      transform:translate(-50%,-50%);
+      background:radial-gradient(ellipse at center,rgba(255,69,0,.08) 0%,transparent 70%);
+      animation:core-bg-breathe 6s ease-in-out infinite;
+    }
+    @keyframes core-bg-breathe {
+      0%,100% { opacity:.5;transform:translate(-50%,-50%) scale(1); }
+      50%      { opacity:1; transform:translate(-50%,-50%) scale(1.18); }
+    }
+    /* slow soft scan band, sweeping like a continuous relocation pass */
+    .core-bg-scan {
+      position:absolute;left:0;right:0;height:45%;top:0;
+      background:linear-gradient(180deg,transparent,rgba(255,69,0,.05),transparent);
+      transform:translateY(-120%);
+      animation:core-bg-scan-move 10s ease-in-out infinite;
+    }
+    @keyframes core-bg-scan-move {
+      0%   { transform:translateY(-120%); }
+      100% { transform:translateY(220%); }
+    }
+    /* drifting relocation log fragments — depth via size / opacity / speed */
+    .core-reloc {
+      position:absolute;bottom:-10%;
+      font-family:'JetBrains Mono',monospace;white-space:nowrap;letter-spacing:.05em;
+      opacity:0;animation:core-reloc-rise linear infinite;
+    }
+    @keyframes core-reloc-rise {
+      0%   { opacity:0;transform:translateY(0); }
+      12%  { opacity:var(--ro,.4); }
+      85%  { opacity:var(--ro,.4); }
+      100% { opacity:0;transform:translateY(-260px); }
+    }
+
+    /* ── compile node: breathing glow + continuous scan sheen ── */
+    .core-node {
+      border:1px solid var(--ember);padding:30px 34px;text-align:center;flex-shrink:0;
+      background:rgba(255,69,0,.03);position:relative;overflow:hidden;
+      animation:core-breathe 4.5s ease-in-out infinite;
+    }
+    .core-node::before {
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(100deg,transparent 42%,rgba(255,69,0,.22) 50%,transparent 58%);
+      transform:translateX(-130%);
+      animation:core-sheen 3.8s ease-in-out infinite;
+      pointer-events:none;
+    }
+    @keyframes core-sheen { 0%,52%{transform:translateX(-130%);} 100%{transform:translateX(130%);} }
+    @keyframes core-breathe {
+      0%,100% { box-shadow:0 0 0 rgba(255,69,0,0); border-color:var(--ember); }
+      50%      { box-shadow:0 0 38px rgba(255,69,0,.2); border-color:#ff7038; }
+    }
+    .core-node-status {
+      display:flex;align-items:center;justify-content:center;gap:7px;position:relative;z-index:1;
+      font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;
+      color:var(--volt);margin-bottom:14px;
+    }
+    .core-node-dot { width:5px;height:5px;border-radius:50%;background:var(--volt);flex-shrink:0;animation:pulse 2s ease-in-out infinite; }
+    .core-node-label { font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--ember);letter-spacing:.05em;position:relative;z-index:1; }
+    .core-node-sub { font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted);margin-top:8px;letter-spacing:.08em;text-transform:uppercase;position:relative;z-index:1; }
+
+    /* ── flow: dashed stream + independent traveling pulse blips ── */
+    .core-flow { flex:1;display:flex;flex-direction:column;gap:18px;padding:0 36px;min-width:60px; }
+    .core-flow-line { height:2px;background-image:repeating-linear-gradient(90deg,var(--ember) 0 8px,transparent 8px 16px);background-size:32px 2px;animation:flow-move 1s linear infinite;opacity:.55;position:relative; }
+    .core-flow-line:nth-child(2) { animation-duration:1.3s;opacity:.35; }
+    .core-flow-line:nth-child(3) { animation-duration:.75s;opacity:.45; }
+    @keyframes flow-move { from{background-position:0 0} to{background-position:32px 0} }
+
+    .core-pulse {
+      position:absolute;top:50%;left:0;width:6px;height:6px;border-radius:50%;
+      background:var(--volt);transform:translate(-50%,-50%);
+      box-shadow:0 0 10px rgba(191,255,0,.85),0 0 24px rgba(191,255,0,.4);
+      opacity:0;animation:core-travel 2.2s cubic-bezier(.45,0,.55,1) infinite;
+    }
+    .core-flow-line:nth-child(1) .core-pulse { animation-delay:0s; }
+    .core-flow-line:nth-child(2) .core-pulse { animation-delay:.55s;animation-duration:2.7s; }
+    .core-flow-line:nth-child(3) .core-pulse { animation-delay:1.1s;animation-duration:1.9s; }
+    @keyframes core-travel {
+      0%   { left:0%;opacity:0; }
+      10%  { opacity:1; }
+      90%  { opacity:1; }
+      100% { left:100%;opacity:0; }
+    }
+
+    /* ── target rows: hover sweep, radar lock-on, recommended emphasis, verify check ── */
+    .core-targets { display:flex;flex-direction:column;gap:1px;background:var(--border);flex-shrink:0;min-width:230px;position:relative;z-index:1; }
+    .core-target {
+      background:var(--black);padding:16px 20px;display:flex;align-items:center;gap:12px;
+      position:relative;overflow:hidden;transition:background .35s;
+    }
+    .core-target::before {
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(90deg,rgba(255,69,0,.06),transparent 65%);
+      transform:translateX(-100%);
+      transition:transform .5s cubic-bezier(.4,0,.2,1);
+      pointer-events:none;
+    }
+    .core-target:hover { background:var(--s2); }
+    .core-target:hover::before { transform:translateX(0); }
+
+    .core-dot {
+      width:7px;height:7px;border-radius:50%;background:var(--volt);flex-shrink:0;
+      position:relative;animation:pulse 2.2s ease-in-out infinite;
+    }
+    .core-dot::after {
+      content:'';position:absolute;top:50%;left:50%;width:7px;height:7px;border:1px solid var(--volt);
+      border-radius:50%;transform:translate(-50%,-50%) scale(1);opacity:0;
+      animation:core-lock 3.6s ease-out infinite;
+    }
+    .core-target:nth-child(1) .core-dot::after { animation-delay:.2s; }
+    .core-target:nth-child(2) .core-dot::after { animation-delay:.9s; }
+    .core-target:nth-child(3) .core-dot::after { animation-delay:1.6s; }
+    @keyframes core-lock {
+      0%   { transform:translate(-50%,-50%) scale(1);opacity:.85; }
+      35%  { transform:translate(-50%,-50%) scale(4.4);opacity:0; }
+      100% { opacity:0; }
+    }
+
+    .core-target-name { font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);flex:1;position:relative;z-index:1;transition:transform .35s; }
+    .core-target:hover .core-target-name { transform:translateX(3px); }
+    .core-target-tag { font-family:'JetBrains Mono',monospace;font-size:8.5px;color:var(--volt);letter-spacing:.1em;text-transform:uppercase;opacity:.7;position:relative;z-index:1;transition:opacity .3s; }
+    .core-target:hover .core-target-tag { opacity:1; }
+
+    .core-target.rec { border-left:2px solid rgba(191,255,0,.25);animation:core-rec-pulse 2.8s ease-in-out infinite; }
+    @keyframes core-rec-pulse {
+      0%,100% { border-left-color:rgba(191,255,0,.25); }
+      50%      { border-left-color:rgba(191,255,0,.85); }
+    }
+
+    .core-check {
+      margin-left:auto;width:16px;height:16px;border-radius:50%;flex-shrink:0;position:relative;z-index:1;
+      display:flex;align-items:center;justify-content:center;
+      font-size:9px;color:var(--volt);border:1px solid rgba(191,255,0,.3);
+      opacity:0;transform:scale(.4);
+      transition:opacity .5s, transform .5s cubic-bezier(.34,1.56,.64,1);
+    }
+    .core-diagram.v .core-check { opacity:1;transform:scale(1); }
+    .core-target:nth-child(1) .core-check { transition-delay:.5s; }
+    .core-target:nth-child(2) .core-check { transition-delay:.75s; }
+    .core-target:nth-child(3) .core-check { transition-delay:1s; }
+
+    /* ── ZONE MODEL ── */
+    #zones { padding:110px 48px;border-bottom:1px solid var(--border);position:relative;overflow:hidden; }
+    #zones > *:not(.cine) { position:relative;z-index:1; }
+    .zone-grid { display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--border);margin-top:64px; }
+    .zone-card {
+      background:var(--black);padding:52px 44px;position:relative;overflow:hidden;
+      transition:background .5s ease;
+    }
+    .zone-card:hover { background:rgba(8,8,8,1); }
+    /* keep real content above the scan-sweep overlay */
+    .zone-card > * { position:relative;z-index:1; }
+
+    /* ambient scan line that sweeps the card on hover */
+    .zone-card::before {
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(180deg,transparent 0%,rgba(255,69,0,.03) 50%,transparent 100%);
+      transform:translateY(-100%);
+      transition:transform 0s;
+      pointer-events:none;z-index:0;
+    }
+    .zone-card:hover::before { transform:translateY(100%);transition:transform 1.3s cubic-bezier(.4,0,.2,1); }
+
+    /* accent line draws in along the bottom, color-keyed per zone */
+    .zone-card::after {
+      content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+      transform:scaleX(0);transform-origin:left;
+      transition:transform .6s cubic-bezier(.4,0,.2,1);
+      z-index:2;
+    }
+    .zone-card:hover::after { transform:scaleX(1); }
+    .zone-card:nth-child(1)::after { background:linear-gradient(90deg,var(--volt),rgba(191,255,0,0)); }
+    .zone-card:nth-child(2)::after { background:linear-gradient(90deg,#FF8C00,rgba(255,140,0,0)); }
+    .zone-card:nth-child(3)::after { background:linear-gradient(90deg,var(--ember),rgba(255,69,0,0)); }
+
+    /* ghost numbers — outlined, hollow, glow stronger on hover */
+    .zone-score {
+      font-family:'Bebas Neue',sans-serif;font-size:88px;line-height:1;
+      letter-spacing:-.02em;margin-bottom:4px;
+      color:transparent;
+      transition:-webkit-text-stroke .5s, text-shadow .5s;
+    }
+    .zone-score.safe        { -webkit-text-stroke:1px rgba(191,255,0,.22); }
+    .zone-score.suspicious  { -webkit-text-stroke:1px rgba(255,140,0,.22); }
+    .zone-score.borderlands { -webkit-text-stroke:1px rgba(255,69,0,.26); }
+    .zone-card:hover .zone-score.safe        { -webkit-text-stroke:1px rgba(191,255,0,.6);text-shadow:0 0 40px rgba(191,255,0,.16); }
+    .zone-card:hover .zone-score.suspicious  { -webkit-text-stroke:1px rgba(255,140,0,.6);text-shadow:0 0 40px rgba(255,140,0,.16); }
+    .zone-card:hover .zone-score.borderlands { -webkit-text-stroke:1px rgba(255,69,0,.65);text-shadow:0 0 40px rgba(255,69,0,.18); }
+
+    .zone-label {
+      font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:.04em;margin-bottom:16px;
+      display:flex;align-items:center;gap:10px;
+      transition:transform .45s cubic-bezier(.4,0,.2,1);
+    }
+    .zone-card:hover .zone-label { transform:translateY(-3px); }
+    .zone-label .zdot { width:8px;height:8px;border-radius:50%;flex-shrink:0; }
+    .zdot-safe { background:var(--volt); }
+    .zdot-sus { background:#FF8C00; }
+    .zdot-bl { background:var(--ember);animation:pulse 1.6s ease-in-out infinite; }
+    .zone-range {
+      font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;
+      margin-bottom:22px;display:inline-block;padding:4px 12px;border:1px solid var(--border2);color:var(--muted);
+      transition:border-color .4s,color .4s;
+    }
+    .zone-card:hover .zone-range { border-color:rgba(255,69,0,.25);color:var(--text); }
+    .zone-desc { font-size:13.5px;color:var(--muted);line-height:1.7;font-weight:300; }
+    .zone-actions { margin-top:20px;display:flex;flex-direction:column;gap:8px; }
+    .zone-action {
+      font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;color:var(--dim);
+      display:flex;align-items:center;gap:10px;
+      transform:translateX(-6px);
+      transition:color .3s ease, transform .4s cubic-bezier(.4,0,.2,1);
+    }
+    .zone-action::before { content:'→';color:var(--ember);opacity:.5; }
+    .zone-card:hover .zone-action { color:var(--muted);transform:translateX(0); }
+    .zone-card:hover .zone-action:nth-child(1) { transition-delay:.05s; }
+    .zone-card:hover .zone-action:nth-child(2) { transition-delay:.12s; }
+    .zone-card:hover .zone-action:nth-child(3) { transition-delay:.19s; }
+    .zone-card:hover .zone-action:nth-child(4) { transition-delay:.26s; }
+
+    /* ── BSE FORMULA ── */
+    #bse { padding:110px 48px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:start; }
+    .bse-formula {
+      background:var(--s1);border:1px solid var(--border2);
+      font-family:'JetBrains Mono',monospace;padding:40px;
+      display:flex;flex-direction:column;gap:0;
+    }
+    .formula-line { font-size:12.5px;line-height:2.2;color:var(--muted); }
+    .formula-line .kw { color:var(--volt); }
+    .formula-line .val { color:var(--ember); }
+    .formula-line .sym { color:var(--text);opacity:.6; }
+    .formula-line .comment { color:var(--border2); }
+    .formula-sep { height:1px;background:var(--border);margin:16px 0; }
+
+    .dims { display:flex;flex-direction:column;gap:1px;background:var(--border); }
+    .dim {
+      background:var(--black);display:flex;align-items:center;gap:0;
+      transition:background .2s;
+    }
+    .dim:hover { background:var(--s2); }
+    .dim-weight {
+      font-family:'Bebas Neue',sans-serif;font-size:26px;color:var(--ember);
+      padding:16px 20px;min-width:80px;text-align:center;border-right:1px solid var(--border);
+    }
+    .dim-name { font-size:13px;color:var(--text);font-weight:500;padding:16px 24px;flex:1; }
+    .dim-method { font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.1em;padding:16px 24px;text-align:right; }
+
+    /* ── AADS ── */
+    #aads { padding:110px 48px;border-bottom:1px solid var(--border);position:relative;overflow:hidden; }
+    #aads::before {
+      content:'AADS';font-family:'Bebas Neue',sans-serif;font-size:28vw;
+      color:transparent;-webkit-text-stroke:1px rgba(255,69,0,.04);
+      position:absolute;right:-4vw;top:50%;transform:translateY(-50%);
+      pointer-events:none;user-select:none;line-height:1;
+    }
+    .aads-inner { position:relative; }
+    .agents { display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--border);margin-top:64px; }
+    .agent-card { background:var(--black);padding:48px 40px;transition:background .25s;cursor:none;overflow:hidden;position:relative; }
+    .agent-card:hover { background:var(--s2); }
+    .agent-card.judge { border-top:2px solid var(--volt); }
+    .agent-card.jury  { border-top:2px solid rgba(255,140,0,.7); }
+    .agent-card.exec  { border-top:2px solid var(--ember); }
+    .agent-icon { font-size:26px;margin-bottom:16px; }
+    .agent-name { font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:.04em;margin-bottom:12px; }
+    .agent-role { font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.15em;text-transform:uppercase;margin-bottom:20px; }
+    .agent-role.judge { color:var(--volt); }
+    .agent-role.jury  { color:#FF8C00; }
+    .agent-role.exec  { color:var(--ember); }
+    .agent-desc { font-size:13.5px;color:var(--muted);line-height:1.7;font-weight:300; }
+    .agent-scope { margin-top:22px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em;color:var(--dim);display:flex;align-items:center;gap:8px; }
+    .agent-scope::before { content:'SCOPE:';color:var(--muted);opacity:.5; }
+    .agent-card:hover .agent-scope { color:var(--muted); }
+
+    /* ── JJE CARD SVG ANIMATIONS ── */
+    .agent-svg-wrap {
+      width:100%;height:140px;margin:20px 0 22px;
+      position:relative;display:flex;align-items:center;justify-content:center;
+    }
+    .agent-svg-wrap svg { overflow:visible; }
+
+    .ac-ghost { opacity:.09;transition:opacity .4s ease; }
+    .ac-anim  { opacity:0;transition:opacity .28s ease; }
+    .agent-card:hover .ac-ghost { opacity:.04; }
+    .agent-card:hover .ac-anim  { opacity:1; }
+
+    /* stroke per role */
+    .ac-v  { fill:none;stroke:#BFFF00;stroke-width:.9;vector-effect:non-scaling-stroke; }
+    .ac-a  { fill:none;stroke:#FF8C00;stroke-width:.9;vector-effect:non-scaling-stroke; }
+    .ac-e  { fill:none;stroke:#FF4500;stroke-width:.9;vector-effect:non-scaling-stroke; }
+
+    /* ─── JUDGE keyframes ─── */
+    /* gavel raises (resting position = raised/tilted back), then slams down */
+    @keyframes jg-arm {
+      0%,10%  { transform:rotate(-58deg); }
+      28%,52% { transform:rotate(0deg);   }
+      68%,100%{ transform:rotate(-58deg); }
+    }
+    /* shockwave rings burst from impact point */
+    @keyframes jg-wave {
+      0%,26%  { r:0;  opacity:0; }
+      30%     { r:3;  opacity:1; }
+      58%     { r:22; opacity:0; }
+      100%    { r:22; opacity:0; }
+    }
+    @keyframes jg-wave2 {
+      0%,29%  { r:0;  opacity:0; }
+      33%     { r:3;  opacity:.55; }
+      64%     { r:32; opacity:0; }
+      100%    { r:32; opacity:0; }
+    }
+    /* nameplate illuminates on strike */
+    @keyframes jg-plate {
+      0%,24%  { opacity:0; }
+      32%,55% { opacity:1; }
+      68%     { opacity:0; }
+      100%    { opacity:0; }
+    }
+    /* gallery heads bob slowly */
+    @keyframes jg-murmur {
+      0%,100%{ transform:translateY(0); }
+      50%    { transform:translateY(-2.5px); }
+    }
+    /* robes hang — subtle sway */
+    @keyframes jg-robe {
+      0%,100%{ transform:rotate(0deg); }
+      50%    { transform:rotate(1.2deg); }
+    }
+    .jg-arm   { animation:jg-arm   3.4s cubic-bezier(.25,0,.2,1) infinite; transform-origin:98px 68px; }
+    .jg-w1    { animation:jg-wave  3.4s ease-out infinite; }
+    .jg-w2    { animation:jg-wave2 3.4s ease-out infinite; }
+    .jg-plate { animation:jg-plate 3.4s ease-in-out infinite; }
+    .jg-m1    { animation:jg-murmur 2s ease-in-out infinite; }
+    .jg-m2    { animation:jg-murmur 2s ease-in-out infinite .28s; }
+    .jg-m3    { animation:jg-murmur 2s ease-in-out infinite .56s; }
+    .jg-m4    { animation:jg-murmur 2s ease-in-out infinite .84s; }
+    .jg-m5    { animation:jg-murmur 2s ease-in-out infinite 1.1s; }
+    .jg-robe  { animation:jg-robe  4s ease-in-out infinite; transform-origin:100px 58px; }
+
+    /* ─── JURY keyframes ─── */
+    /* cabinet drawer slides out */
+    @keyframes jy-drawer {
+      0%,15%  { transform:translateY(0); }
+      30%,70% { transform:translateY(-11px); }
+      85%,100%{ transform:translateY(0); }
+    }
+    /* folder fans open */
+    @keyframes jy-fan1 {
+      0%,15%  { transform:rotate(0deg); }
+      35%,65% { transform:rotate(-18deg); }
+      85%,100%{ transform:rotate(0deg); }
+    }
+    @keyframes jy-fan2 {
+      0%,15%  { transform:rotate(0deg); }
+      35%,65% { transform:rotate(-9deg); }
+      85%,100%{ transform:rotate(0deg); }
+    }
+    /* evidence tag swings */
+    @keyframes jy-tag {
+      0%,100%{ transform:rotate(-4deg); }
+      50%    { transform:rotate(4deg); }
+    }
+    /* text line scan across open folder */
+    @keyframes jy-scan {
+      0%   { transform:translateY(0);   opacity:.8; }
+      100% { transform:translateY(38px);opacity:0; }
+    }
+    /* red evidence stamp slams down */
+    @keyframes jy-stamp {
+      0%,45%  { transform:translateY(-14px) rotate(-8deg);opacity:0; }
+      58%,80% { transform:translateY(0)     rotate(-8deg);opacity:1; }
+      92%,100%{ transform:translateY(0)     rotate(-8deg);opacity:0; }
+    }
+    .jy-drawer { animation:jy-drawer 3s ease-in-out infinite; }
+    .jy-fan1   { animation:jy-fan1   3s ease-in-out infinite; transform-origin:46px 90px; }
+    .jy-fan2   { animation:jy-fan2   3s ease-in-out infinite; transform-origin:46px 90px; }
+    .jy-tag    { animation:jy-tag    1.6s ease-in-out infinite; transform-origin:94px 30px; }
+    .jy-scan   { animation:jy-scan   1.3s linear infinite; }
+    .jy-stamp  { animation:jy-stamp  3s ease-in-out infinite; transform-origin:95px 72px; }
+
+    /* ─── EXECUTOR keyframes ─── */
+    /* command baton raises then drops */
+    @keyframes ex-baton {
+      0%,10%  { transform:rotate(-70deg); }
+      28%,44% { transform:rotate(0deg); }
+      52%     { transform:rotate(12deg); }
+      65%,100%{ transform:rotate(-70deg); }
+    }
+    /* squad rifles lower on command */
+    @keyframes ex-rifle {
+      0%,28%  { transform:rotate(0deg); }
+      48%,62% { transform:rotate(22deg); }
+      78%,100%{ transform:rotate(0deg); }
+    }
+    @keyframes ex-rifle2 {
+      0%,32%  { transform:rotate(0deg); }
+      52%,66% { transform:rotate(22deg); }
+      82%,100%{ transform:rotate(0deg); }
+    }
+    @keyframes ex-rifle3 {
+      0%,36%  { transform:rotate(0deg); }
+      56%,70% { transform:rotate(22deg); }
+      86%,100%{ transform:rotate(0deg); }
+    }
+    /* muzzle flash */
+    @keyframes ex-flash {
+      0%,46%  { opacity:0; }
+      50%,56% { opacity:1; }
+      62%     { opacity:0; }
+      100%    { opacity:0; }
+    }
+    /* shockwave ring from muzzle */
+    @keyframes ex-blast {
+      0%,44%  { r:0;opacity:0; }
+      50%     { r:3;opacity:.9; }
+      70%     { r:16;opacity:0; }
+      100%    { r:16;opacity:0; }
+    }
+    /* figure silhouette stays still */
+    .ex-baton  { animation:ex-baton  3.4s cubic-bezier(.4,0,.2,1) infinite; transform-origin:76px 52px; }
+    .ex-rfl1   { animation:ex-rifle  3.4s ease-in-out infinite;             transform-origin:22px 62px; }
+    .ex-rfl2   { animation:ex-rifle2 3.4s ease-in-out infinite;             transform-origin:38px 62px; }
+    .ex-rfl3   { animation:ex-rifle3 3.4s ease-in-out infinite;             transform-origin:54px 62px; }
+    .ex-flash  { animation:ex-flash  3.4s ease-out infinite; }
+    .ex-blast1 { animation:ex-blast  3.4s ease-out infinite; }
+    .ex-blast2 { animation:ex-blast  3.4s ease-out infinite .08s; }
+
+    .kafka-note {
+      margin-top:40px;background:var(--s1);border:1px solid var(--border2);
+      padding:24px 28px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted);
+      display:flex;gap:48px;flex-wrap:wrap;align-items:center;
+    }
+    .kafka-label { font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ember);margin-bottom:6px; }
+    .kafka-topics { display:flex;flex-wrap:wrap;gap:8px; }
+    .ktopic { border:1px solid var(--border2);color:var(--dim);padding:4px 12px;font-size:10px;letter-spacing:.1em; }
+    .aads-advisory {
+      margin-top:28px;padding:20px 28px;border-left:2px solid var(--ember);
+      background:rgba(255,69,0,.04);
+      font-size:13px;color:var(--muted);font-weight:300;line-height:1.7;
+    }
+    .aads-advisory strong { color:var(--text);font-weight:500; }
+
+    /* ── SWARM SUB-AGENTS ── */
+    .swarm-divider { display:flex;align-items:center;gap:18px;margin-top:64px; }
+    .swarm-line { flex:1;height:1px;background:var(--border2);position:relative;overflow:visible; }
+    .swarm-line::after {
+      content:'';position:absolute;top:-2px;left:0;width:7px;height:5px;border-radius:50%;
+      background:var(--volt);box-shadow:0 0 10px var(--volt);animation:swarm-travel 2.6s linear infinite;
+    }
+    .swarm-line.rev::after { animation-direction:reverse;animation-delay:1.3s; }
+    @keyframes swarm-travel { from{left:0%} to{left:100%} }
+    .swarm-divider-label { font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.2em;color:var(--ember);text-transform:uppercase;flex-shrink:0; }
+    .swarm-grid { display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border); }
+    .swarm-card {
+      background:var(--black);padding:34px 22px;transition:background .25s,transform .25s;
+      cursor:none;text-align:center;position:relative;
+    }
+    .swarm-card:hover { background:var(--s2);transform:translateY(-4px); }
+    .swarm-icon { font-size:22px;color:var(--volt);margin-bottom:16px; }
+    .swarm-name { font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:.03em;margin-bottom:10px;line-height:1.15; }
+    .swarm-desc { font-size:11.5px;color:var(--muted);line-height:1.55;font-weight:300; }
+
+    /* ── SWARM CARD SVG ANIMATIONS ── */
+    .swarm-card { overflow:hidden; }
+
+    /* SVG canvas sits between icon area and text */
+    .swarm-svg-wrap {
+      width:100%;height:72px;margin:12px 0 14px;
+      position:relative;display:flex;align-items:center;justify-content:center;
+    }
+    .swarm-svg-wrap svg { overflow:visible; }
+
+    /* Ghost state (always visible, low opacity) */
+    .sc-ghost { opacity:.13;transition:opacity .35s ease; }
+    /* Animated layer (invisible at rest, fades in on hover) */
+    .sc-anim  { opacity:0;transition:opacity .3s ease; }
+
+    .swarm-card:hover .sc-ghost { opacity:.06; }
+    .swarm-card:hover .sc-anim  { opacity:1; }
+
+    /* shared SVG stroke style */
+    .sc-stroke { fill:none;stroke:var(--volt);stroke-width:1;vector-effect:non-scaling-stroke; }
+    .sc-stroke-e { fill:none;stroke:var(--ember);stroke-width:1;vector-effect:non-scaling-stroke; }
+
+    /* ── Patroller: CC cam sweep ── */
+    @keyframes cam-sweep {
+      0%,100% { transform-origin:50% 72%;transform:rotate(-28deg); }
+      50%      { transform-origin:50% 72%;transform:rotate(28deg); }
+    }
+    @keyframes cam-ping {
+      0%   { r:0;opacity:.7; }
+      100% { r:22;opacity:0; }
+    }
+    .sc-cam-cone { animation:cam-sweep 2.8s ease-in-out infinite; }
+    .sc-cam-ping { animation:cam-ping 2s ease-out infinite; }
+    .sc-cam-ping2 { animation:cam-ping 2s ease-out infinite .9s; }
+
+    /* ── Hunter: crosshair lock-on ── */
+    @keyframes ring-lock {
+      0%   { stroke-dashoffset:126; opacity:.3; }
+      60%  { stroke-dashoffset:0;   opacity:1; }
+      100% { stroke-dashoffset:0;   opacity:1; }
+    }
+    @keyframes target-blink {
+      0%,100%{ opacity:1 } 50%{ opacity:.2 }
+    }
+    @keyframes hunter-scan {
+      0%   { transform:translateX(-100%); }
+      100% { transform:translateX(100%); }
+    }
+    .sc-ring-lock { stroke-dasharray:126;animation:ring-lock 1.6s ease-out infinite; }
+    .sc-target-dot { animation:target-blink 1.4s ease-in-out infinite; }
+    .sc-h-scan { animation:hunter-scan 1.8s linear infinite; }
+
+    /* ── Healer: pulse rings ── */
+    @keyframes heal-expand {
+      0%   { r:4;  opacity:.8; stroke-width:1.5; }
+      100% { r:30; opacity:0;  stroke-width:.3; }
+    }
+    @keyframes heal-cross {
+      0%,100%{ opacity:.4 } 50%{ opacity:1 }
+    }
+    .sc-heal-ring1 { animation:heal-expand 1.8s ease-out infinite; }
+    .sc-heal-ring2 { animation:heal-expand 1.8s ease-out infinite .6s; }
+    .sc-heal-ring3 { animation:heal-expand 1.8s ease-out infinite 1.2s; }
+    .sc-heal-cross { animation:heal-cross 1.8s ease-in-out infinite; }
+
+    /* ── Containment Militia: perimeter tighten ── */
+    @keyframes cm-march {
+      0%   { stroke-dashoffset:200; }
+      100% { stroke-dashoffset:0; }
+    }
+    @keyframes cm-node-appear {
+      0%,30%{ opacity:0;transform:scale(.4); }
+      60%   { opacity:1;transform:scale(1); }
+      100%  { opacity:1;transform:scale(1); }
+    }
+    .sc-cm-perimeter { stroke-dasharray:200;animation:cm-march 1.4s linear infinite; }
+    .sc-cm-n1 { animation:cm-node-appear 1.4s ease-out infinite; }
+    .sc-cm-n2 { animation:cm-node-appear 1.4s ease-out infinite .2s; }
+    .sc-cm-n3 { animation:cm-node-appear 1.4s ease-out infinite .4s; }
+    .sc-cm-n4 { animation:cm-node-appear 1.4s ease-out infinite .6s; }
+    .sc-cm-n5 { animation:cm-node-appear 1.4s ease-out infinite .8s; }
+    .sc-cm-n6 { animation:cm-node-appear 1.4s ease-out infinite 1.0s; }
+
+    /* ── Signal Relay: packet hops ── */
+    @keyframes pkt-hop1 {
+      0%  { transform:translateX(-40px); opacity:0; }
+      8%  { opacity:1; }
+      33% { transform:translateX(0px);   opacity:1; }
+      40% { transform:translateX(0px);   opacity:0; }
+      100%{ transform:translateX(0px);   opacity:0; }
+    }
+    @keyframes pkt-hop2 {
+      0%  { transform:translateX(0px);  opacity:0; }
+      33% { transform:translateX(0px);  opacity:0; }
+      40% { transform:translateX(0px);  opacity:1; }
+      66% { transform:translateX(40px); opacity:1; }
+      73% { transform:translateX(40px); opacity:0; }
+      100%{ transform:translateX(40px); opacity:0; }
+    }
+    @keyframes pkt-hop3 {
+      0%  { transform:translateX(40px); opacity:0; }
+      66% { transform:translateX(40px); opacity:0; }
+      73% { transform:translateX(40px); opacity:1; }
+      100%{ transform:translateX(80px); opacity:1; }
+    }
+    @keyframes sr-wave {
+      0%   { transform:scaleX(0);opacity:.7; }
+      100% { transform:scaleX(1);opacity:0; }
+    }
+    .sc-pkt1 { animation:pkt-hop1 2.2s linear infinite; }
+    .sc-pkt2 { animation:pkt-hop2 2.2s linear infinite; }
+    .sc-pkt3 { animation:pkt-hop3 2.2s linear infinite; }
+    .sc-sr-wave { animation:sr-wave 1.1s ease-out infinite; transform-origin:left center; }
+    .sc-sr-wave2 { animation:sr-wave 1.1s ease-out infinite .55s; transform-origin:left center; }
+
+    /* ── STACK / SUBSYSTEMS — CINEMATIC ── */
+    #stack { padding:110px 48px;border-bottom:1px solid var(--border);overflow:hidden;position:relative; }
+    #stack > *:not(.cine) { position:relative;z-index:1; }
+    .stack-header-row { display:flex;align-items:flex-end;justify-content:space-between;gap:40px;margin-bottom:72px; }
+    .stack-intro-note { font-size:13px;color:var(--muted);line-height:1.7;font-weight:300;max-width:320px;text-align:right; }
+
+    /* Cinematic layout: full-bleed rows */
+    .stack-cinema { display:flex;flex-direction:column;gap:1px;background:var(--border); }
+
+    .subsys {
+      background:var(--black);
+      display:grid;
+      grid-template-columns:220px 1fr auto;
+      align-items:stretch;
+      cursor:none;
+      position:relative;
+      overflow:hidden;
+      transition:background .3s;
+    }
+    .subsys::before {
+      content:'';
+      position:absolute;inset:0;
+      background:linear-gradient(90deg,rgba(255,69,0,.0) 0%,rgba(255,69,0,.04) 100%);
+      opacity:0;
+      transition:opacity .4s ease;
+      pointer-events:none;
+    }
+    .subsys:hover { background:var(--s1); }
+    .subsys:hover::before { opacity:1; }
+
+    /* Left panel: index + path */
+    .ss-left {
+      padding:36px 28px;
+      border-right:1px solid var(--border);
+      display:flex;flex-direction:column;justify-content:space-between;
+      position:relative;
+      transition:border-color .3s;
+    }
+    .subsys:hover .ss-left { border-color:rgba(255,69,0,.3); }
+    .ss-index {
+      font-family:'Bebas Neue',sans-serif;
+      font-size:56px;line-height:1;
+      color:transparent;
+      -webkit-text-stroke:1px rgba(255,69,0,.15);
+      transition:-webkit-text-stroke .3s;
+    }
+    .subsys:hover .ss-index { -webkit-text-stroke:1px rgba(255,69,0,.5); }
+    .ss-dir {
+      font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;
+      color:var(--ember);
+      margin-top:auto;padding-top:16px;
+      position:relative;
+    }
+    .ss-dir::before {
+      content:'';display:block;width:0;height:1px;background:var(--ember);
+      margin-bottom:10px;opacity:.5;
+      transition:width .4s ease;
+    }
+    .subsys:hover .ss-dir::before { width:100%; }
+
+    /* Middle: content */
+    .ss-body {
+      padding:36px 40px;
+      display:flex;flex-direction:column;gap:10px;
+    }
+    .ss-name {
+      font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:.04em;
+      transition:letter-spacing .3s;
+    }
+    .subsys:hover .ss-name { letter-spacing:.07em; }
+
+    .ss-desc { font-size:13.5px;color:var(--muted);line-height:1.7;font-weight:300; }
+
+    .ss-tags { display:flex;flex-wrap:wrap;gap:6px;margin-top:6px; }
+    .ss-tag {
+      font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;
+      border:1px solid var(--border);color:var(--dim);padding:3px 9px;
+      transition:border-color .2s,color .2s;
+    }
+    .subsys:hover .ss-tag { border-color:var(--border2);color:var(--muted); }
+
+    /* Right: live status panel */
+    .ss-right {
+      padding:36px 32px;
+      border-left:1px solid var(--border);
+      display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;
+      min-width:180px;
+      transition:border-color .3s;
+    }
+    .subsys:hover .ss-right { border-color:rgba(255,69,0,.2); }
+    .ss-lang-badge {
+      font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;
+      border:1px solid var(--border2);color:var(--muted);padding:5px 12px;
+      transition:border-color .25s,color .25s;
+    }
+    .subsys:hover .ss-lang-badge { border-color:var(--volt);color:var(--volt); }
+
+    /* Animated data line — the "system is live" signal */
+    .ss-signal {
+      width:100%;height:32px;position:relative;overflow:hidden;
+      opacity:.4;transition:opacity .3s;
+    }
+    .subsys:hover .ss-signal { opacity:1; }
+    .ss-signal-line {
+      position:absolute;bottom:0;left:0;right:0;
+      height:1px;background:var(--ember);transform-origin:left;
+      animation:signal-scan 2.2s ease-in-out infinite;
+    }
+    .ss-signal-pulse {
+      position:absolute;width:3px;height:100%;background:var(--volt);
+      box-shadow:0 0 8px var(--volt);
+      animation:signal-dot 2.2s ease-in-out infinite;
+    }
+    @keyframes signal-scan {
+      0%   { transform:scaleY(0.3); opacity:.5 }
+      25%  { transform:scaleY(1); opacity:.8 }
+      50%  { transform:scaleY(0.4); opacity:.3 }
+      75%  { transform:scaleY(.9); opacity:.7 }
+      100% { transform:scaleY(0.3); opacity:.5 }
+    }
+    @keyframes signal-dot {
+      0%   { left:0; opacity:0 }
+      10%  { opacity:1 }
+      90%  { opacity:1 }
+      100% { left:100%; opacity:0 }
+    }
+
+    .ss-status {
+      font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;
+      color:var(--ember);display:flex;align-items:center;gap:6px;
+    }
+    .ss-status-dot {
+      width:5px;height:5px;border-radius:50%;background:var(--ember);
+      animation:pulse 2s ease-in-out infinite;
+    }
+
+    /* ── PIPELINES ── */
+    #pipelines { padding:110px 48px;border-bottom:1px solid var(--border);position:relative;overflow:hidden; }
+    #pipelines > *:not(.cine) { position:relative;z-index:1; }
+    .pipe-row { display:flex;align-items:center;margin-top:56px; }
+    .pipe-node { border:1px solid var(--border2);padding:24px 26px;text-align:center;flex-shrink:0;transition:border-color .2s; }
+    .pipe-node:hover { border-color:var(--ember); }
+    .pipe-node-name { font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:.04em; }
+    .pipe-node-sub { font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:.1em;margin-top:6px;text-transform:uppercase; }
+    .pipe-link { flex:1;position:relative;height:1px;background:var(--border2);margin:0 6px;min-width:30px; }
+    .pipe-link::after {
+      content:'';position:absolute;top:-2px;left:0;width:6px;height:5px;border-radius:50%;
+      background:var(--volt);box-shadow:0 0 8px var(--volt);animation:swarm-travel 2s linear infinite;
+    }
+    .pipe-tag {
+      position:absolute;top:-24px;left:50%;transform:translateX(-50%);
+      font-family:'JetBrains Mono',monospace;font-size:8.5px;color:var(--muted);
+      letter-spacing:.07em;text-transform:uppercase;white-space:nowrap;
+    }
+    .pipe-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);margin-top:48px; }
+    .pipe-detail { background:var(--black);padding:22px 24px;transition:background .2s; }
+    .pipe-detail:hover { background:var(--s2); }
+    .pipe-detail-label { font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--ember);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px; }
+    .pipe-detail-val { font-size:12.5px;color:var(--text);font-weight:300; }
+
+    /* ── OPERATOR INTERFACE — CINEMATIC ── */
+    #operator {
+      padding:110px 48px;border-bottom:1px solid var(--border);
+      position:relative;overflow:hidden;
+    }
+    /* vast background ember glow that breathes */
+    #operator::before {
+      content:'';position:absolute;
+      top:50%;left:50%;
+      width:900px;height:600px;
+      transform:translate(-50%,-50%);
+      background:radial-gradient(ellipse at center,rgba(255,69,0,.045) 0%,transparent 68%);
+      animation:ops-glow-breathe 5s ease-in-out infinite;
+      pointer-events:none;
+    }
+    @keyframes ops-glow-breathe {
+      0%,100% { opacity:.6;transform:translate(-50%,-50%) scale(1); }
+      50%      { opacity:1;transform:translate(-50%,-50%) scale(1.12); }
+    }
+
+    /* three surfaces stacked full-bleed */
+    .ops-surfaces {
+      margin-top:80px;
+      display:flex;flex-direction:column;
+      gap:1px;background:var(--border);
+      position:relative;z-index:1;
+    }
+
+    .ops-surface {
+      position:relative;overflow:hidden;
+      background:var(--black);
+      display:grid;
+      grid-template-columns:100px 1fr 1fr;
+      align-items:stretch;
+      min-height:200px;
+      cursor:none;
+      transition:background .5s ease;
+    }
+    .ops-surface:hover { background:rgba(8,8,8,1); }
+
+    /* ── Ambient scan line that sweeps top→bottom on hover ── */
+    .ops-surface::before {
+      content:'';
+      position:absolute;inset:0;
+      background:linear-gradient(180deg,
+        transparent 0%,
+        rgba(255,69,0,.025) 50%,
+        transparent 100%
+      );
+      transform:translateY(-100%);
+      transition:transform 0s;
+      pointer-events:none;
+      z-index:0;
+    }
+    .ops-surface:hover::before {
+      transform:translateY(100%);
+      transition:transform 1.4s cubic-bezier(.4,0,.2,1);
+    }
+
+    /* ── Left index column ── */
+    .ops-surf-idx {
+      border-right:1px solid var(--border);
+      display:flex;flex-direction:column;
+      justify-content:space-between;
+      padding:36px 20px;
+      position:relative;z-index:1;
+      transition:border-color .4s;
+    }
+    .ops-surface:hover .ops-surf-idx { border-color:rgba(255,69,0,.25); }
+
+    .ops-surf-num {
+      font-family:'Bebas Neue',sans-serif;
+      font-size:72px;line-height:1;
+      color:transparent;
+      -webkit-text-stroke:1px rgba(255,69,0,.12);
+      transition:-webkit-text-stroke .5s, text-shadow .5s;
+      display:block;
+    }
+    .ops-surface:hover .ops-surf-num {
+      -webkit-text-stroke:1px rgba(255,69,0,.55);
+      text-shadow:0 0 40px rgba(255,69,0,.18);
+    }
+
+    /* vertical live line that fills in on hover */
+    .ops-surf-vline {
+      width:1px;height:0;background:var(--ember);
+      align-self:flex-end;
+      transition:height .6s cubic-bezier(.4,0,.2,1);
+      opacity:.4;
+    }
+    .ops-surface:hover .ops-surf-vline { height:60px;opacity:.7; }
+
+    /* ── Center content ── */
+    .ops-surf-body {
+      padding:48px 52px 48px 52px;
+      display:flex;flex-direction:column;
+      justify-content:center;
+      position:relative;z-index:1;
+      border-right:1px solid var(--border);
+      transition:border-color .4s;
+    }
+    .ops-surface:hover .ops-surf-body { border-color:rgba(255,69,0,.12); }
+
+    .ops-surf-eyebrow {
+      font-family:'JetBrains Mono',monospace;
+      font-size:9px;letter-spacing:.22em;text-transform:uppercase;
+      color:var(--ember);margin-bottom:16px;
+      opacity:.7;
+      /* chars reveal one by one */
+      display:flex;gap:0;
+    }
+
+    .ops-surf-name {
+      font-family:'Bebas Neue',sans-serif;
+      font-size:clamp(40px,4vw,60px);
+      line-height:.95;letter-spacing:.03em;
+      margin-bottom:20px;
+      /* on hover: slight upward lift */
+      transform:translateY(0);
+      transition:transform .45s cubic-bezier(.4,0,.2,1);
+    }
+    .ops-surface:hover .ops-surf-name { transform:translateY(-3px); }
+
+    .ops-surf-desc {
+      font-size:13.5px;color:var(--muted);line-height:1.75;font-weight:300;
+      max-width:420px;
+      opacity:0;transform:translateY(8px);
+      transition:opacity .4s ease .1s, transform .4s ease .1s;
+    }
+    .ops-surface:hover .ops-surf-desc { opacity:1;transform:translateY(0); }
+
+    /* ── Right: animated capability panel ── */
+    .ops-surf-right {
+      padding:48px 44px;
+      display:flex;flex-direction:column;
+      justify-content:space-between;
+      position:relative;z-index:1;
+    }
+
+    /* language badge */
+    .ops-surf-lang {
+      font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+      color:var(--muted);border:1px solid var(--border2);padding:6px 14px;
+      align-self:flex-end;
+      transition:color .35s,border-color .35s,box-shadow .35s;
+    }
+    .ops-surface:hover .ops-surf-lang {
+      color:var(--volt);border-color:rgba(191,255,0,.35);
+      box-shadow:0 0 14px rgba(191,255,0,.08);
+    }
+
+    /* Capability list — items slide in staggered */
+    .ops-caps { display:flex;flex-direction:column;gap:10px;margin-top:auto; }
+    .ops-cap {
+      font-family:'JetBrains Mono',monospace;
+      font-size:10.5px;letter-spacing:.08em;
+      color:transparent;
+      display:flex;align-items:center;gap:12px;
+      transform:translateX(12px);
+      transition:color .3s ease, transform .4s ease;
+    }
+    .ops-cap::before {
+      content:'';
+      width:0;height:1px;
+      background:var(--ember);
+      flex-shrink:0;
+      transition:width .4s cubic-bezier(.4,0,.2,1);
+    }
+    .ops-surface:hover .ops-cap { color:var(--muted);transform:translateX(0); }
+    .ops-surface:hover .ops-cap::before { width:20px; }
+    .ops-surface:hover .ops-cap:nth-child(1) { transition-delay:.05s; }
+    .ops-surface:hover .ops-cap:nth-child(2) { transition-delay:.12s; }
+    .ops-surface:hover .ops-cap:nth-child(3) { transition-delay:.19s; }
+    .ops-surface:hover .ops-cap:nth-child(4) { transition-delay:.26s; }
+
+    /* bottom ember border that draws in */
+    .ops-surface::after {
+      content:'';
+      position:absolute;bottom:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,var(--ember),rgba(255,69,0,0));
+      transform:scaleX(0);transform-origin:left;
+      transition:transform .6s cubic-bezier(.4,0,.2,1);
+      z-index:2;
+    }
+    .ops-surface:hover::after { transform:scaleX(1); }
+
+    /* canvas waveform strip between surfaces — pure CSS animation */
+    .ops-wave-divider {
+      height:48px;background:var(--s1);
+      display:flex;align-items:center;
+      padding:0 100px;gap:2px;
+      overflow:hidden;
+      position:relative;
+    }
+    .ops-wave-divider::before {
+      content:'';position:absolute;left:0;top:0;bottom:0;width:100px;
+      background:linear-gradient(90deg,var(--s1),transparent);z-index:1;
+    }
+    .ops-wave-divider::after {
+      content:'';position:absolute;right:0;top:0;bottom:0;width:100px;
+      background:linear-gradient(270deg,var(--s1),transparent);z-index:1;
+    }
+    .wave-bar {
+      flex-shrink:0;
+      width:2px;border-radius:1px;
+      background:var(--ember);
+      opacity:.25;
+      animation:wave-bounce var(--dur,1.2s) ease-in-out infinite;
+      animation-delay:var(--dl,0s);
+    }
+    @keyframes wave-bounce {
+      0%,100% { height:4px; }
+      50%      { height:var(--h,20px); }
+    }
+
+    /* ── TEAM ── */
+    #team { padding:110px 48px;border-bottom:1px solid var(--border);position:relative;overflow:hidden; }
+    #team > *:not(.cine) { position:relative;z-index:1; }
+    .team-intro { max-width:600px;font-size:14.5px;color:var(--muted);line-height:1.78;font-weight:300;margin-top:28px; }
+    .team-intro strong { color:var(--text);font-weight:500; }
+    .team-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);margin-top:64px; }
+    .member {
+      background:var(--black);padding:44px 36px;transition:background .2s;cursor:none;
+      position:relative;overflow:hidden;
+    }
+    .member::before {
+      content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
+      background:var(--ember);transform:scaleX(0);transform-origin:left;transition:transform .3s ease;
+    }
+    .member:hover { background:var(--s2); }
+    .member:hover::before { transform:scaleX(1); }
+    .member-initial {
+      width:52px;height:52px;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;
+      font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--ember);margin-bottom:24px;
+      transition:border-color .2s;
+    }
+    .member:hover .member-initial { border-color:var(--ember); }
+    .member-name { font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:.03em;margin-bottom:6px; }
+    .member-id { font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.12em;color:var(--muted);margin-bottom:18px; }
+    .member-domain { font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.6;margin-bottom:18px; }
+    .member-owns { display:flex;flex-direction:column;gap:6px; }
+    .member-own-tag {
+      font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+      border:1px solid var(--border2);color:var(--dim);padding:4px 10px;display:inline-block;
+      width:fit-content;transition:color .2s,border-color .2s;
+    }
+    .member:hover .member-own-tag { color:var(--muted);border-color:var(--border2); }
+
+    /* ── COMPAT ── */
+    #compat { padding:110px 48px;border-bottom:1px solid var(--border); }
+    .compat-grid { display:grid;grid-template-columns:1fr 1fr;gap:64px;margin-top:64px; }
+    .compat-table { width:100%;border-collapse:collapse; }
+    .compat-table th {
+      font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+      color:var(--muted);text-align:left;padding:10px 16px;border-bottom:1px solid var(--border2);
+    }
+    .compat-table td { font-size:13px;padding:12px 16px;border-bottom:1px solid var(--border);color:var(--muted);vertical-align:middle; }
+    .compat-table td:first-child { color:var(--text);font-weight:400; }
+    .compat-table tr:hover td { color:var(--text); }
+    .kb-status { font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em; }
+    .st-primary { color:var(--volt); }
+    .st-full    { color:var(--volt);opacity:.7; }
+    .st-support { color:var(--text);opacity:.5; }
+    .st-exp     { color:var(--ember);opacity:.7; }
+    .st-unsup   { color:var(--muted);opacity:.5; }
+
+    .kernel-matrix { margin-top:0; }
+    .km-row { display:flex;gap:0;background:var(--border);margin-bottom:1px; }
+    .km-cell {
+      flex:1;padding:18px 16px;background:var(--black);
+      font-family:'JetBrains Mono',monospace;font-size:10.5px;text-align:center;
+    }
+    .km-cell.header { color:var(--muted);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase; }
+    .km-cell:first-child { flex:1.6;text-align:left;color:var(--text);font-size:11px; }
+    .k-tick { color:var(--volt); }
+    .k-cross { color:var(--muted);opacity:.4; }
+    .k-partial { color:var(--ember);opacity:.7; }
+    .km-note { font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);margin-top:16px;line-height:1.7;padding:16px;border:1px solid var(--border2); }
+
+    /* ── QUICK START ── */
+    #quickstart { padding:110px 48px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:72px;align-items:start;position:relative;overflow:hidden; }
+    #quickstart > *:not(.cine) { position:relative;z-index:1; }
+    .terminal {
+      background:var(--s1);border:1px solid var(--border2);overflow:hidden;
+    }
+    .term-bar {
+      background:var(--s2);padding:11px 18px;border-bottom:1px solid var(--border);
+      display:flex;align-items:center;gap:8px;
+    }
+    .td { width:10px;height:10px;border-radius:50%; }
+    .td-r { background:#ff5f57; }
+    .td-y { background:#ffbd2e; }
+    .td-g { background:#28c840; }
+    .term-lbl { font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);letter-spacing:.1em;margin-left:6px; }
+    .term-body { padding:26px 22px;font-family:'JetBrains Mono',monospace;font-size:12.5px; }
+    .tl { line-height:2;display:flex;flex-wrap:wrap;gap:0 4px; }
+    .tl .p { color:var(--ember);user-select:none; }
+    .tl .c { color:var(--text); }
+    .tl .v { color:var(--volt); }
+    .tl .m { color:var(--muted); }
+    .tl .co { color:var(--border2); }
+    .tl-gap { height:10px; }
+    .t-caret { display:inline-block;width:8px;height:1em;background:var(--ember);vertical-align:text-bottom;animation:blink 1.1s step-end infinite; }
+    @keyframes blink { 0%,100%{opacity:1}50%{opacity:0} }
+
+    .qs-docs { display:flex;flex-direction:column;gap:1px;background:var(--border); }
+    .doc-item {
+      background:var(--black);padding:18px 24px;display:flex;align-items:center;gap:16px;
+      transition:background .2s;cursor:none;text-decoration:none;
+    }
+    .doc-item:hover { background:var(--s2); }
+    .doc-num { font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ember);opacity:.6;width:24px;flex-shrink:0; }
+    .doc-name { font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--text);flex:1;letter-spacing:.06em; }
+    .doc-arrow { color:var(--muted);font-size:14px;transition:color .2s; }
+    .doc-item:hover .doc-arrow { color:var(--ember); }
+
+    /* ── CTA ── */
+    #cta { padding:160px 48px;text-align:center;position:relative;overflow:hidden; }
+    #cta::before { content:'';position:absolute;inset:0;background:radial-gradient(ellipse 55% 55% at 50% 50%,rgba(255,69,0,.05) 0%,transparent 70%);pointer-events:none;animation:cine-breathe 7s ease-in-out infinite; }
+    #cta > *:not(.cine) { position:relative;z-index:1; }
+    .cta-tag { font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.2em;color:var(--ember);text-transform:uppercase;margin-bottom:28px; }
+    .cta-title { font-family:'Bebas Neue',sans-serif;font-size:clamp(56px,9vw,128px);line-height:.9;letter-spacing:-.02em;margin-bottom:44px; }
+    .cta-title .ghost { color:transparent;-webkit-text-stroke:1px rgba(237,234,227,.14); }
+    .cta-actions { display:flex;justify-content:center;align-items:center;gap:20px;flex-wrap:wrap; }
+    .cta-note { margin-top:24px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em;color:var(--muted); }
+    .cta-inst { margin-top:48px;display:inline-block;background:var(--s1);border:1px solid var(--border2);padding:18px 28px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted); }
+    .cta-inst .inst-cmd { color:var(--text); }
+
+    /* ── FOOTER ── */
+    footer { border-top:1px solid var(--border);padding:56px 48px;display:grid;grid-template-columns:1fr auto;gap:40px;align-items:start; }
+    .ft-logo { font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:.1em;margin-bottom:10px; }
+    .ft-sub { font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.1em; }
+    .ft-links { display:grid;grid-template-columns:repeat(3,140px);gap:10px 36px;list-style:none; }
+    .ft-links a { font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);text-decoration:none;letter-spacing:.08em;text-transform:uppercase;transition:color .2s; }
+    .ft-links a:hover { color:var(--ember); }
+    .ft-bottom { border-top:1px solid var(--border);padding:22px 48px;display:flex;justify-content:space-between;align-items:center;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;flex-wrap:wrap;gap:12px; }
+
+    /* ── REVEAL ── */
+    .r { opacity:0;transform:translateY(24px);transition:opacity .65s ease,transform .65s ease; }
+    .r.v { opacity:1;transform:translateY(0); }
+    .r.d1 { transition-delay:.08s; }
+    .r.d2 { transition-delay:.16s; }
+    .r.d3 { transition-delay:.24s; }
+    .r.d4 { transition-delay:.32s; }
+
+    @media (prefers-reduced-motion:reduce) {
+      .r,.noise,.status-dot,#ring,.ring0-anim,.ring0-anim::before,.t-caret,.live-dot,
+      .core-flow-line,.core-dot,.core-node,.core-node::before,.core-pulse,.core-dot::after,
+      .core-target.rec,.core-check,.core-bg-glow,.cine-glow,.swarm-line::after,.pipe-link::after,.ops-bar-fill
+        { animation:none!important;transition:none!important;opacity:1!important;transform:none!important; }
+      .core-bg-scan,.core-reloc,.cine-scan,.cine-drift { display:none!important; }
+    }
+
+    @media (max-width:960px) {
+      body { cursor:auto; }
+      #cur,#ring { display:none; }
+      nav { padding:18px 24px; }
+      .nav-links { display:none; }
+      #hero { padding:0 24px 64px; }
+      .hero-sub { flex-direction:column;align-items:flex-start; }
+      #about,#quickstart { grid-template-columns:1fr;padding:72px 24px; }
+      #stats { grid-template-columns:1fr 1fr; }
+      .stat:nth-child(2) { border-right:none; }
+      #arch,#zones,#aads,#stack,#team,#cta,footer,#quickstart,#core,#pipelines,#operator { padding:72px 24px; }
+      .arch-header { flex-direction:column;align-items:flex-start; }
+      .zone-grid,.agents,.stack-grid { grid-template-columns:1fr; }
+      .swarm-grid { grid-template-columns:1fr 1fr; }
+      .swarm-divider { gap:10px; }
+      .core-diagram { flex-direction:column;align-items:stretch;gap:24px; }
+      .core-flow { flex-direction:row;padding:0;min-height:30px; }
+      .core-flow-line { flex:1; }
+      .core-targets { min-width:0; }
+      .pipe-row { flex-direction:column;align-items:stretch;gap:36px; }
+      .pipe-link { width:1px;height:36px;margin:0 auto; }
+      .pipe-link::after { animation:none;display:none; }
+      .pipe-tag { top:auto;left:50%;top:50%;transform:translate(-50%,-50%); }
+      .pipe-grid { grid-template-columns:1fr 1fr; }
+      .operator-layout { grid-template-columns:1fr; }
+      .ops-cards { margin-top:0; }
+      .ops-surface { grid-template-columns:60px 1fr;grid-template-rows:auto auto; }
+      .ops-surf-right { display:none; }
+      .ops-wave-divider { display:none; }
+      .team-grid { grid-template-columns:1fr 1fr; }
+      .compat-grid { grid-template-columns:1fr; }
+      .layer { grid-template-columns:100px 1fr;grid-template-rows:auto auto; }
+      .layer-right { display:none; }
+      footer { grid-template-columns:1fr; }
+      .ft-links { grid-template-columns:1fr 1fr; }
+      .ft-bottom { padding:18px 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="cur"></div>
+<div id="ring"></div>
+<div class="noise"></div>
+
+<!-- NAV -->
+<nav id="nav">
+  <a href="#" class="nav-logo">
+    <div class="nav-logo-mark">KB</div>
+    <span class="nav-logo-text">Kernel Borderlands</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="#arch">Architecture</a></li>
+    <li><a href="#aads">AADS</a></li>
+    <li><a href="#pipelines">Pipelines</a></li>
+    <li><a href="#operator">Operator</a></li>
+    <li><a href="#quickstart">Docs</a></li>
+  </ul>
+  <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands" target="_blank" class="nav-gh">
+    <span class="gh-icon">⬡</span> GitHub
+  </a>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+  <div class="hero-grid"></div>
+  <div class="scanlines"></div>
+  <div class="ring0-anim"></div>
+
+  <div class="hero-status">
+    Behavioral Defense at Ring Zero
+    <span class="status-live"><span class="live-dot"></span>Under Active Development</span>
+  </div>
+
+  <h1 class="hero-title">
+    KERNEL<br>
+    <span class="outline">BORDER<span class="ember">LANDS</span></span>
+  </h1>
+
+  <div class="hero-sub">
+    <div>
+      <p class="hero-desc">
+        A kernel-level runtime defense framework for Linux. KB detects, classifies, and contains
+        <strong>anomalous process behavior</strong> at Ring 0 — using eBPF instrumentation,
+        a Behavioral Scoring Engine, and an optional <strong>multi-agent AI coordination layer (AADS)</strong>.
+      </p>
+      <div class="hero-badges">
+        <span class="badge">Linux 5.8+</span>
+        <span class="badge">eBPF · CO-RE / BTF</span>
+        <span class="badge">libbpf</span>
+        <span class="badge">Go · Python · Rust</span>
+        <span class="badge active">Status: Under Active Development</span>
+      </div>
+    </div>
+    <div class="hero-ctas">
+      <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands" target="_blank" class="btn-primary"><span>View on GitHub →</span></a>
+      <a href="#arch" class="btn-ghost">Architecture</a>
+    </div>
+  </div>
+</section>
+
+<!-- TICKER -->
+<div class="ticker-wrap">
+  <div class="ticker">
+    <div class="ti"><span class="sep"></span>eBPF CO-RE · Compile Once Run Everywhere</div>
+    <div class="ti"><span class="sep"></span>Behavioral Risk Score · 6 weighted dimensions</div>
+    <div class="ti"><span class="sep"></span>Judge · Jury · Executor agent architecture</div>
+    <div class="ti"><span class="sep"></span>Seccomp · Namespaces · cgroup v2 enforcement</div>
+    <div class="ti"><span class="sep"></span>SHA-256 chained tamper-evident audit log</div>
+    <div class="ti"><span class="sep"></span>Kafka · ZeroMQ inter-agent messaging</div>
+    <div class="ti"><span class="sep"></span>QLoRA fine-tuning · Phi-3 Mini · Qwen2.5-3B</div>
+    <div class="ti"><span class="sep"></span>Under Active Development · Open Source</div>
+    <div class="ti"><span class="sep"></span>eBPF CO-RE · Compile Once Run Everywhere</div>
+    <div class="ti"><span class="sep"></span>Behavioral Risk Score · 6 weighted dimensions</div>
+    <div class="ti"><span class="sep"></span>Judge · Jury · Executor agent architecture</div>
+    <div class="ti"><span class="sep"></span>Seccomp · Namespaces · cgroup v2 enforcement</div>
+    <div class="ti"><span class="sep"></span>SHA-256 chained tamper-evident audit log</div>
+    <div class="ti"><span class="sep"></span>Kafka · ZeroMQ inter-agent messaging</div>
+    <div class="ti"><span class="sep"></span>QLoRA fine-tuning · Phi-3 Mini · Qwen2.5-3B</div>
+    <div class="ti"><span class="sep"></span>Under Active Development · Open Source</div>
+  </div>
+</div>
+
+<!-- WHAT IS KB -->
+<section id="about">
+  <div class="cine" aria-hidden="true" style="--cc:rgba(255,69,0,.03);--cg:rgba(255,69,0,.06);--cx:62%;--cd:7s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <span class="cine-drift" style="left:8%;font-size:9px;color:rgba(255,69,0,.32);--ro:.32;animation-duration:18s;animation-delay:-4s">execve() — isolated, no context</span>
+    <span class="cine-drift" style="left:24%;font-size:8.5px;color:rgba(255,140,0,.28);--ro:.28;animation-duration:22s;animation-delay:-12s">mmap() burst — flagged alone, ignored</span>
+    <span class="cine-drift" style="left:46%;font-size:9px;color:rgba(255,69,0,.3);--ro:.3;animation-duration:16s;animation-delay:-7s">signature: no match</span>
+    <span class="cine-drift" style="left:65%;font-size:8.5px;color:rgba(255,140,0,.26);--ro:.26;animation-duration:20s;animation-delay:-2s">commit_creds() — single event, no lineage</span>
+    <span class="cine-drift" style="left:84%;font-size:9px;color:rgba(255,69,0,.3);--ro:.3;animation-duration:19s;animation-delay:-15s">blind spot — userland silenced</span>
+  </div>
+  <div class="about-left r">
+    <div class="eyebrow">The Problem</div>
+    <h2 class="section-title">GAPS IN<br>LINUX DEFENSE</h2>
+    <p class="body-text">
+      Modern Linux systems underpin critical infrastructure ranging from cloud servers to containerized microservices. Existing defense mechanisms share a fundamental blind spot: they cannot see <strong>behavioral transitions</strong> — only individual events in isolation.
+    </p>
+    <p class="body-text" style="margin-top:16px">
+      KB was designed to close that gap by observing and enforcing behavior <strong>at its source — inside the kernel</strong> — without requiring intrusive kernel modifications or custom modules.
+    </p>
+
+    <div class="problem-list">
+      <div class="problem-item">
+        <span class="p-icon">GAP 01</span>
+        <p class="p-text"><strong>Signature-based tools</strong> (antivirus, IDS/IPS) are reactive by design and fail against novel or obfuscated zero-day attacks that have no known signature.</p>
+      </div>
+      <div class="problem-item">
+        <span class="p-icon">GAP 02</span>
+        <p class="p-text"><strong>Policy-based LSMs</strong> (SELinux, AppArmor) enforce static administrator-defined rules that cannot adapt when a legitimate binary is hijacked or an attacker operates entirely within permitted syscalls.</p>
+      </div>
+      <div class="problem-item">
+        <span class="p-icon">GAP 03</span>
+        <p class="p-text"><strong>Userland monitoring</strong> (audit daemons, SIEM agents) lacks the vantage point for true behavioral analysis — a sufficiently privileged attacker can silence userland observers without touching the kernel log.</p>
+      </div>
+      <div class="problem-item">
+        <span class="p-icon">GAP 04</span>
+        <p class="p-text"><strong>Kernel rootkits</strong> operate beneath every userland control plane, manipulating the very data structures defenders rely upon.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="r d2">
+    <div class="eyebrow">The Design Insight</div>
+    <h2 class="section-title" style="font-size:clamp(36px,4vw,60px)">BEHAVIORAL<br>TRANSITIONS,<br>NOT EVENTS</h2>
+    <p class="body-text">
+      An <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">execve</code> following a privilege escalation inside an unexpected process lineage after a burst of <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">mmap</code> calls is an attack. The same <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">execve</code> in isolation is not.
+    </p>
+    <p class="body-text" style="margin-top:16px">
+      KB evaluates <strong>behavioral transitions over time</strong> across six weighted dimensions — enabling detection of sophisticated multi-stage attacks that appear innocuous at each individual step.
+    </p>
+    <p class="body-text" style="margin-top:16px">
+      The system simultaneously functions as a <strong>production-grade runtime defense platform</strong> and a <strong>research instrument</strong> for studying post-exploitation process behavior under live attack conditions.
+    </p>
+  </div>
+</section>
+
+<!-- STATS -->
+<section id="stats">
+  <div class="cine" aria-hidden="true" style="--cc:rgba(191,255,0,.025);--cg:rgba(191,255,0,.05);--cd:5.5s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <span class="cine-drift" style="left:5%;font-size:9px;color:rgba(191,255,0,.3);--ro:.3;animation-duration:15s;animation-delay:-2s">p99 &lt; 5ms</span>
+    <span class="cine-drift" style="left:22%;font-size:8px;color:rgba(255,69,0,.26);--ro:.26;animation-duration:18s;animation-delay:-9s">overhead 2.8%</span>
+    <span class="cine-drift" style="left:40%;font-size:9px;color:rgba(191,255,0,.28);--ro:.28;animation-duration:16s;animation-delay:-13s">6 dimensions weighted</span>
+    <span class="cine-drift" style="left:58%;font-size:8px;color:rgba(255,69,0,.24);--ro:.24;animation-duration:20s;animation-delay:-5s">kernel 5.8+ · BTF</span>
+    <span class="cine-drift" style="left:76%;font-size:9px;color:rgba(191,255,0,.3);--ro:.3;animation-duration:14s;animation-delay:-11s">S_t sampling · live</span>
+    <span class="cine-drift" style="left:90%;font-size:8px;color:rgba(255,69,0,.24);--ro:.24;animation-duration:19s;animation-delay:-7s">target met ✓</span>
+  </div>
+  <div class="stat r" data-index="01">
+    <div class="stat-idx">01</div>
+    <div class="stat-val">&lt;3<span class="stat-unit">%</span></div>
+    <div class="stat-label">Runtime overhead on standard server workloads (target)</div>
+  </div>
+  <div class="stat r d1" data-index="02">
+    <div class="stat-idx">02</div>
+    <div class="stat-val">&lt;5<span class="stat-unit">ms</span></div>
+    <div class="stat-label">Namespace isolation latency (P99 enforcement target)</div>
+  </div>
+  <div class="stat r d2" data-index="03">
+    <div class="stat-idx">03</div>
+    <div class="stat-val">6</div>
+    <div class="stat-label">Weighted behavioral dimensions in the scoring engine</div>
+  </div>
+  <div class="stat r d3" data-index="04">
+    <div class="stat-idx">04</div>
+    <div class="stat-val">5.8<span class="stat-unit">+</span></div>
+    <div class="stat-label">Minimum Linux kernel with BTF + CO-RE support</div>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="arch">
+  <div class="cine" aria-hidden="true" style="--cc:rgba(255,69,0,.03);--cg:rgba(255,69,0,.05);--cx:30%;--cd:6.5s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <span class="cine-drift" style="left:10%;font-size:9px;color:rgba(255,69,0,.3);--ro:.3;animation-duration:17s;animation-delay:-3s">tracepoint:syscalls</span>
+    <span class="cine-drift" style="left:28%;font-size:8.5px;color:rgba(191,255,0,.26);--ro:.26;animation-duration:21s;animation-delay:-10s">kprobe:commit_creds</span>
+    <span class="cine-drift" style="left:48%;font-size:9px;color:rgba(255,69,0,.28);--ro:.28;animation-duration:15s;animation-delay:-6s">bpf_lsm hook attached</span>
+    <span class="cine-drift" style="left:67%;font-size:8.5px;color:rgba(191,255,0,.24);--ro:.24;animation-duration:19s;animation-delay:-14s">perf ring buffer · drain</span>
+    <span class="cine-drift" style="left:86%;font-size:9px;color:rgba(255,69,0,.3);--ro:.3;animation-duration:18s;animation-delay:-1s">layer boundary · sealed</span>
+  </div>
+  <div class="arch-header r">
+    <div>
+      <div class="eyebrow">Four-Layer Architecture</div>
+      <h2 class="section-title">BUILT IN<br>STRICT LAYERS</h2>
+    </div>
+    <p class="arch-note">Each layer communicates only with its immediate neighbors, limiting blast radius in the event of component failure. The AADS layer is optional and advisory — enforcement continues without it.</p>
+  </div>
+
+  <div class="layers r">
+    <div class="layer">
+      <div class="layer-num">
+        <span class="ln">LAYER 01</span>
+        <span class="lang">C · eBPF</span>
+      </div>
+      <div class="layer-body">
+        <div class="layer-name">eBPF Observability (Ring 0)</div>
+        <div class="layer-desc">eBPF programs loaded into the kernel and verified by the built-in verifier — guaranteed safe, no crashes, no infinite loops. Six hook points capture the full behavioral surface of every process.</div>
+        <div class="layer-tags">
+          <span class="ltag">tracepoint:syscalls</span>
+          <span class="ltag">tracepoint:sched</span>
+          <span class="ltag">kprobe:commit_creds</span>
+          <span class="ltag">bpf_lsm</span>
+          <span class="ltag">tracepoint:net</span>
+          <span class="ltag">kprobe:mmap_region</span>
+          <span class="ltag">perf ring buffer</span>
+          <span class="ltag">CO-RE / BTF</span>
+        </div>
+      </div>
+      <div class="layer-right">
+        <span class="layer-status-dot ls-build"></span>
+        <span class="ls-text">in dev</span>
+      </div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-num">
+        <span class="ln">LAYER 02</span>
+        <span class="lang">Go</span>
+      </div>
+      <div class="layer-body">
+        <div class="layer-name">Control Plane — kbd daemon</div>
+        <div class="layer-desc">Consumes ring buffer events, maintains per-process state (SQLite), evaluates YAML-defined operator policies, and exposes a gRPC API. All enforcement actions are authorized and executed exclusively through this layer. Audit logs written as append-only SHA-256 chained JSON to PostgreSQL.</div>
+        <div class="layer-tags">
+          <span class="ltag">gRPC · protobuf</span>
+          <span class="ltag">SQLite</span>
+          <span class="ltag">PostgreSQL</span>
+          <span class="ltag">SHA-256 chain</span>
+          <span class="ltag">Cobra CLI</span>
+          <span class="ltag">seccomp · namespaces · cgroup v2</span>
+        </div>
+      </div>
+      <div class="layer-right">
+        <span class="layer-status-dot ls-build"></span>
+        <span class="ls-text">in dev</span>
+      </div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-num">
+        <span class="ln">LAYER 03</span>
+        <span class="lang">Python</span>
+      </div>
+      <div class="layer-body">
+        <div class="layer-name">AADS — Autonomous Agentic Defense System</div>
+        <div class="layer-desc">Optional, advisory only. No enforcement action may be taken solely on the basis of an agent recommendation without corresponding policy authorization. Three agents — Judge, Jury, Executor — coordinate via Apache Kafka with Protocol Buffers serialization. Agents operate with scoped capability tokens.</div>
+        <div class="layer-tags">
+          <span class="ltag">Judge · Jury · Executor</span>
+          <span class="ltag">Apache Kafka 3.x</span>
+          <span class="ltag">ZeroMQ</span>
+          <span class="ltag">Ray RLlib</span>
+          <span class="ltag">QLoRA fine-tuning</span>
+        </div>
+      </div>
+      <div class="layer-right">
+        <span class="layer-status-dot ls-build"></span>
+        <span class="ls-text">in dev</span>
+      </div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-num">
+        <span class="ln">LAYER 04</span>
+        <span class="lang">React · Go</span>
+      </div>
+      <div class="layer-body">
+        <div class="layer-name">Operator Interface</div>
+        <div class="layer-desc">React + TypeScript dashboard for real-time zone distribution, per-process behavioral scores, and swarm topology visualization via D3.js force graph over WebSockets. The <code style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--volt)">kbctl</code> CLI exposes the full gRPC API for scripted management. kb-tui provides SSH-accessible terminal interface via Bubble Tea + Wish.</div>
+        <div class="layer-tags">
+          <span class="ltag">React 18 · TypeScript 5</span>
+          <span class="ltag">D3.js · Recharts</span>
+          <span class="ltag">WebSockets</span>
+          <span class="ltag">kbctl CLI</span>
+          <span class="ltag">Bubble Tea · Wish</span>
+        </div>
+      </div>
+      <div class="layer-right">
+        <span class="layer-status-dot ls-build"></span>
+        <span class="ls-text">in dev</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CO-RE -->
+<section id="core">
+  <div class="core-bg" aria-hidden="true">
+    <div class="core-bg-grid"></div>
+    <div class="core-bg-glow"></div>
+    <div class="core-bg-scan"></div>
+    <span class="core-reloc" style="left:6%;font-size:9px;color:rgba(255,69,0,.35);--ro:.35;animation-duration:17s;animation-delay:-3s">reloc: task_struct→pid&nbsp;&nbsp;off 0x4b8</span>
+    <span class="core-reloc" style="left:18%;font-size:11px;color:rgba(255,69,0,.5);--ro:.5;animation-duration:13s;animation-delay:-8s">BTF_KIND_STRUCT id=1042 resolved</span>
+    <span class="core-reloc" style="left:33%;font-size:8.5px;color:rgba(191,255,0,.3);--ro:.3;animation-duration:19s;animation-delay:-1s">field reloc: cred→uid&nbsp;&nbsp;size 4</span>
+    <span class="core-reloc" style="left:54%;font-size:10px;color:rgba(255,69,0,.42);--ro:.42;animation-duration:15s;animation-delay:-11s">kern_version match 5.15.0</span>
+    <span class="core-reloc" style="left:68%;font-size:9px;color:rgba(191,255,0,.32);--ro:.32;animation-duration:21s;animation-delay:-6s">R_BPF_64_64 patched ✓</span>
+    <span class="core-reloc" style="left:80%;font-size:11px;color:rgba(255,69,0,.46);--ro:.46;animation-duration:14s;animation-delay:-14s">btf_id 1183 → 1042</span>
+    <span class="core-reloc" style="left:90%;font-size:8.5px;color:rgba(255,69,0,.3);--ro:.3;animation-duration:18s;animation-delay:-4s">CO-RE: struct layout verified</span>
+  </div>
+  <div class="r">
+    <div class="eyebrow">Compile Once · Run Everywhere</div>
+    <h2 class="section-title">ONE BINARY.<br>EVERY KERNEL.</h2>
+    <p class="body-text" style="margin-top:16px;max-width:560px">BTF relocations let a single compiled <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">kb-core.o</code> load correctly across kernel versions at boot — no per-kernel rebuilds, no DKMS, no header matching at deploy time.</p>
+  </div>
+
+  <div class="core-diagram r" style="margin-top:64px">
+    <div class="core-node">
+      <div class="core-node-status"><span class="core-node-dot"></span>Stable Build</div>
+      <div class="core-node-label">kb-core.o</div>
+      <div class="core-node-sub">compiled once · clang / LLVM</div>
+    </div>
+    <div class="core-flow">
+      <div class="core-flow-line"><span class="core-pulse"></span></div>
+      <div class="core-flow-line"><span class="core-pulse"></span></div>
+      <div class="core-flow-line"><span class="core-pulse"></span></div>
+    </div>
+    <div class="core-targets">
+      <div class="core-target">
+        <span class="core-dot"></span>
+        <div class="core-target-name">5.8 – 5.14</div>
+        <div class="core-target-tag">Supported</div>
+        <span class="core-check">✓</span>
+      </div>
+      <div class="core-target rec">
+        <span class="core-dot"></span>
+        <div class="core-target-name">5.15 – 6.x</div>
+        <div class="core-target-tag">Recommended</div>
+        <span class="core-check">✓</span>
+      </div>
+      <div class="core-target">
+        <span class="core-dot"></span>
+        <div class="core-target-name">Latest Mainline</div>
+        <div class="core-target-tag">Full Support</div>
+        <span class="core-check">✓</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ZONE MODEL -->
+<section id="zones">
+  <div class="cine" aria-hidden="true" style="--cc:rgba(255,140,0,.025);--cg:rgba(255,140,0,.05);--cd:6s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <span class="cine-drift" style="left:7%;font-size:9px;color:rgba(191,255,0,.32);--ro:.32;animation-duration:18s;animation-delay:-5s">PID 18234 — Safe</span>
+    <span class="cine-drift" style="left:26%;font-size:8.5px;color:rgba(255,140,0,.3);--ro:.3;animation-duration:20s;animation-delay:-12s">PID 9921 — Safe → Suspicious</span>
+    <span class="cine-drift" style="left:47%;font-size:9px;color:rgba(255,69,0,.32);--ro:.32;animation-duration:16s;animation-delay:-2s">PID 4410 — Suspicious → Borderlands</span>
+    <span class="cine-drift" style="left:66%;font-size:8.5px;color:rgba(191,255,0,.28);--ro:.28;animation-duration:21s;animation-delay:-9s">S_t = 24 · stable</span>
+    <span class="cine-drift" style="left:85%;font-size:9px;color:rgba(255,69,0,.3);--ro:.3;animation-duration:17s;animation-delay:-15s">S_t = 88 · isolate()</span>
+  </div>
+  <div class="r">
+    <div class="eyebrow">Execution Zone Model</div>
+    <h2 class="section-title">THREE ZONES.<br>CONTINUOUS SCORING.</h2>
+    <p class="body-text" style="margin-top:16px;max-width:640px">Every process is continuously assigned to one of three execution zones based on its smoothed Behavioral Risk Score S<sub>t</sub>. Zone transition is the unit of analysis — not individual syscalls.</p>
+  </div>
+
+  <div class="zone-grid">
+    <div class="zone-card r">
+      <div class="zone-score safe">0–39</div>
+      <div class="zone-label"><span class="zdot zdot-safe"></span>Safe</div>
+      <div class="zone-range">Score: 0 – 39</div>
+      <p class="zone-desc">Passive observation. The process exhibits normal behavioral patterns within expected bounds. No enforcement action is taken.</p>
+      <div class="zone-actions">
+        <div class="zone-action">Continuous monitoring active</div>
+        <div class="zone-action">Score updated on every event</div>
+      </div>
+    </div>
+    <div class="zone-card r d1">
+      <div class="zone-score suspicious">40–74</div>
+      <div class="zone-label"><span class="zdot zdot-sus"></span>Suspicious</div>
+      <div class="zone-range">Score: 40 – 74</div>
+      <p class="zone-desc">Elevated risk detected. Network syscalls blocked via seccomp filter. Increased monitoring frequency. Alerting raised to AADS layer.</p>
+      <div class="zone-actions">
+        <div class="zone-action">seccomp filter applied (&lt;1ms)</div>
+        <div class="zone-action">connect / bind / sendto blocked</div>
+        <div class="zone-action">AADS Judge notified</div>
+      </div>
+    </div>
+    <div class="zone-card r d2">
+      <div class="zone-score borderlands">75–100</div>
+      <div class="zone-label"><span class="zdot zdot-bl"></span>Borderlands</div>
+      <div class="zone-range">Score: 75 – 100</div>
+      <p class="zone-desc">Critical behavioral anomaly. Process is isolated using Linux namespaces and cgroup v2 throttling. Termination is available as a final enforcement step.</p>
+      <div class="zone-actions">
+        <div class="zone-action">namespace isolation (&lt;5ms P99)</div>
+        <div class="zone-action">mnt · net · user namespaces</div>
+        <div class="zone-action">cgroup v2 CPU/mem throttle</div>
+        <div class="zone-action">SIGKILL if policy authorizes</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<section id="aads">
+  <div class="cine" aria-hidden="true" style="--cc:rgba(255,69,0,.03);--cg:rgba(255,140,0,.05);--cx:35%;--cd:7s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <span class="cine-drift" style="left:6%;font-size:9px;color:rgba(191,255,0,.28);--ro:.28;animation-duration:19s;animation-delay:-4s">Judge: pattern correlated</span>
+    <span class="cine-drift" style="left:30%;font-size:8.5px;color:rgba(255,140,0,.3);--ro:.3;animation-duration:22s;animation-delay:-13s">Jury: verdict reached</span>
+    <span class="cine-drift" style="left:52%;font-size:9px;color:rgba(255,69,0,.3);--ro:.3;animation-duration:16s;animation-delay:-7s">Executor: awaiting authority</span>
+    <span class="cine-drift" style="left:73%;font-size:8.5px;color:rgba(191,255,0,.26);--ro:.26;animation-duration:20s;animation-delay:-1s">advisory only · no auto-kill</span>
+    <span class="cine-drift" style="left:90%;font-size:9px;color:rgba(255,140,0,.28);--ro:.28;animation-duration:18s;animation-delay:-10s">Control Plane: final authority</span>
+  </div>
+  <div class="aads-inner">
+    <div class="r">
+      <div class="eyebrow">AADS — Autonomous Agentic Defense System</div>
+      <h2 class="section-title">JUDGE. JURY.<br>EXECUTOR.</h2>
+      <p class="body-text" style="margin-top:16px;max-width:680px">
+        Optional. Strictly advisory. No enforcement action ever occurs on an agent's word alone — the Control Plane always has final authority. Disable AADS entirely and deterministic enforcement keeps running.
+      </p>
+    </div>
+
+    <div class="agents r" style="margin-top:64px">
+
+      <!-- ══════════════════════════════════════════════════════
+           JUDGE — full courtroom bench scene, gavel strike
+           ══════════════════════════════════════════════════════ -->
+      <div class="agent-card judge">
+        <div class="agent-name">Judge Agent</div>
+        <div class="agent-role judge">Pattern Correlation</div>
+
+        <div class="agent-svg-wrap">
+          <svg width="200" height="136" viewBox="0 0 200 136">
+
+            <!-- GHOST: minimal static courtroom hint -->
+            <g class="ac-ghost ac-v">
+              <!-- bench top edge -->
+              <rect x="16" y="64" width="168" height="8" rx="0"/>
+              <!-- bench front face with wood panels -->
+              <rect x="16" y="72" width="168" height="30" rx="0"/>
+              <!-- panel dividers -->
+              <line x1="60"  y1="72" x2="60"  y2="102"/>
+              <line x1="100" y1="72" x2="100" y2="102"/>
+              <line x1="140" y1="72" x2="140" y2="102"/>
+              <!-- gavel resting -->
+              <rect x="108" y="42" width="26" height="11" rx="1"/>
+              <line x1="121" y1="53" x2="108" y2="64"/>
+              <rect x="94"  y="57" width="16" height="7" rx="0"/>
+              <!-- judge silhouette above bench -->
+              <circle cx="100" cy="26" r="9"/>
+              <rect x="88" y="36" width="24" height="28" rx="0"/>
+            </g>
+
+            <!-- ANIMATED -->
+            <g class="ac-anim">
+
+              <!-- ── JUDGE FIGURE sitting behind elevated bench ── -->
+              <!-- judicial robe body — wide at shoulders -->
+              <g class="jg-robe">
+                <!-- robe / shoulders -->
+                <path d="M82,36 Q100,32 118,36 L122,64 L78,64 Z"
+                  class="ac-v" opacity=".55" style="fill:rgba(191,255,0,.03)"/>
+                <!-- robe collar / white band -->
+                <rect x="93" y="36" width="14" height="5" rx="0" class="ac-v" opacity=".6"/>
+                <!-- robe lapels -->
+                <line x1="93" y1="36" x2="88" y2="50" class="ac-v" opacity=".35"/>
+                <line x1="107" y1="36" x2="112" y2="50" class="ac-v" opacity=".35"/>
+                <!-- button row down center -->
+                <line x1="100" y1="42" x2="100" y2="62" class="ac-v" opacity=".2" stroke-dasharray="1.5 3"/>
+              </g>
+              <!-- judge head -->
+              <circle cx="100" cy="24" r="9" class="ac-v" opacity=".8" style="fill:rgba(191,255,0,.04)"/>
+              <!-- judicial wig — flat top with curls -->
+              <path d="M90,18 Q100,10 110,18" class="ac-v" opacity=".75" style="fill:rgba(191,255,0,.05)"/>
+              <rect x="88" y="15" width="24" height="6" rx="0" class="ac-v" opacity=".5"/>
+              <!-- wig curl lines -->
+              <path d="M89,21 Q92,18 89,15" class="ac-v" opacity=".35" style="fill:none"/>
+              <path d="M111,21 Q108,18 111,15" class="ac-v" opacity=".35" style="fill:none"/>
+              <path d="M94,21 Q97,18 94,16" class="ac-v" opacity=".25" style="fill:none"/>
+              <path d="M106,21 Q103,18 106,16" class="ac-v" opacity=".25" style="fill:none"/>
+              <!-- glasses -->
+              <circle cx="95" cy="25" r="4" class="ac-v" opacity=".55"/>
+              <circle cx="105" cy="25" r="4" class="ac-v" opacity=".55"/>
+              <line x1="99" y1="25" x2="101" y2="25" class="ac-v" opacity=".5"/>
+              <line x1="91" y1="25" x2="88" y2="24" class="ac-v" opacity=".4"/>
+              <line x1="109" y1="25" x2="112" y2="24" class="ac-v" opacity=".4"/>
+
+              <!-- ── ELEVATED BENCH — 3-tier platform ── -->
+              <!-- top surface — where judge sits / gavel lives -->
+              <rect x="16" y="64" width="168" height="5" class="ac-v" opacity=".9"/>
+              <!-- bench front face — tall, panelled -->
+              <rect x="16" y="69" width="168" height="34" class="ac-v" opacity=".7" style="fill:rgba(191,255,0,.02)"/>
+              <!-- raised step below bench -->
+              <rect x="8"  y="103" width="184" height="5" class="ac-v" opacity=".6"/>
+              <rect x="2"  y="108" width="196" height="4" class="ac-v" opacity=".45"/>
+              <!-- panel vertical grooves on bench face -->
+              <line x1="50"  y1="69" x2="50"  y2="103" class="ac-v" opacity=".3"/>
+              <line x1="84"  y1="69" x2="84"  y2="103" class="ac-v" opacity=".3"/>
+              <line x1="116" y1="69" x2="116" y2="103" class="ac-v" opacity=".3"/>
+              <line x1="150" y1="69" x2="150" y2="103" class="ac-v" opacity=".3"/>
+              <!-- panel horizontal rail mid-bench -->
+              <line x1="16" y1="86" x2="184" y2="86" class="ac-v" opacity=".25"/>
+              <!-- decorative rail top of bench face -->
+              <line x1="16" y1="70" x2="184" y2="70" class="ac-v" opacity=".35"/>
+              <!-- clerk's side wings — lower desks flanking judge -->
+              <rect x="2"  y="74" width="16" height="29" class="ac-v" opacity=".5" style="fill:rgba(191,255,0,.02)"/>
+              <rect x="182" y="74" width="16" height="29" class="ac-v" opacity=".5" style="fill:rgba(191,255,0,.02)"/>
+              <!-- microphone on bench -->
+              <circle cx="68" cy="62" r="3" class="ac-v" opacity=".5"/>
+              <line x1="68" y1="65" x2="68" y2="64" class="ac-v" opacity=".4"/>
+              <line x1="65" y1="64" x2="71" y2="64" class="ac-v" opacity=".4"/>
+              <!-- water pitcher outline -->
+              <path d="M130,64 L130,58 Q130,56 132,56 L138,56 Q140,56 140,58 L140,64 M136,56 Q138,54 140,56"
+                class="ac-v" opacity=".45" style="fill:none"/>
+
+              <!-- ── SOUND BLOCK on bench surface ── -->
+              <rect x="88" y="58" width="18" height="7" rx="0" class="ac-v" opacity=".8"/>
+              <!-- block top face detail -->
+              <line x1="88" y1="60" x2="106" y2="60" class="ac-v" opacity=".4"/>
+              <line x1="88" y1="62" x2="106" y2="62" class="ac-v" opacity=".25"/>
+
+              <!-- ── GAVEL — pivots from wrist point at (98, 68) ── -->
+              <g class="jg-arm">
+                <!-- arm / wrist from robe sleeve -->
+                <line x1="98" y1="68" x2="104" y2="60" class="ac-v" opacity=".5"/>
+                <!-- handle — tapers toward head -->
+                <line x1="104" y1="60" x2="120" y2="38" class="ac-v" stroke-width="1.6"/>
+                <!-- handle wrap rings -->
+                <line x1="110" y1="52" x2="108" y2="55" class="ac-v" opacity=".4"/>
+                <line x1="114" y1="47" x2="112" y2="50" class="ac-v" opacity=".4"/>
+                <line x1="117" y1="43" x2="115" y2="46" class="ac-v" opacity=".4"/>
+                <!-- gavel head — thick rectangular block, perpendicular to handle -->
+                <rect x="110" y="28" width="24" height="13" rx="0"
+                  class="ac-v" opacity=".95" style="fill:rgba(191,255,0,.06)"/>
+                <!-- head wood grain / bevel lines -->
+                <line x1="110" y1="32" x2="134" y2="32" class="ac-v" opacity=".3"/>
+                <line x1="110" y1="36" x2="134" y2="36" class="ac-v" opacity=".3"/>
+                <line x1="115" y1="28" x2="115" y2="41" class="ac-v" opacity=".2"/>
+                <line x1="129" y1="28" x2="129" y2="41" class="ac-v" opacity=".2"/>
+                <!-- striking face — bottom edge of head -->
+                <line x1="110" y1="41" x2="134" y2="41" class="ac-v" opacity=".7" stroke-width="1.5"/>
+              </g>
+
+              <!-- shockwave rings burst from sound block on strike -->
+              <circle cx="97" cy="62" r="0" class="ac-v jg-w1" fill="none"/>
+              <circle cx="97" cy="62" r="0" class="ac-v jg-w2" fill="none"/>
+
+              <!-- ── NAMEPLATE — flashes on bench front ── -->
+              <g class="jg-plate">
+                <rect x="58" y="75" width="84" height="9" rx="0"
+                  class="ac-v" opacity=".7" style="fill:rgba(191,255,0,.08)"/>
+                <line x1="58" y1="75" x2="142" y2="75" class="ac-v" opacity=".5"/>
+                <line x1="58" y1="84" x2="142" y2="84" class="ac-v" opacity=".5"/>
+                <text x="100" y="81.5" text-anchor="middle"
+                  font-family="'JetBrains Mono',monospace" font-size="5.5" letter-spacing="3"
+                  fill="none" stroke="#BFFF00" stroke-width=".45" opacity=".95">THE HONOURABLE COURT</text>
+              </g>
+
+              <!-- ── GALLERY — foreground, below bench ── -->
+              <!-- gallery dividing rail -->
+              <rect x="2" y="116" width="196" height="1.5" class="ac-v" opacity=".5"/>
+              <!-- five gallery heads bobbing, staggered rows -->
+              <!-- row 1 (closer, larger) -->
+              <circle cx="22"  cy="122" r="5.5" class="ac-v jg-m1" style="fill:rgba(191,255,0,.05)"/>
+              <circle cx="58"  cy="120" r="5"   class="ac-v jg-m2" style="fill:rgba(191,255,0,.04)"/>
+              <circle cx="100" cy="122" r="5.5" class="ac-v jg-m3" style="fill:rgba(191,255,0,.05)"/>
+              <circle cx="142" cy="120" r="5"   class="ac-v jg-m4" style="fill:rgba(191,255,0,.04)"/>
+              <circle cx="178" cy="122" r="5.5" class="ac-v jg-m5" style="fill:rgba(191,255,0,.05)"/>
+              <!-- row 1 shoulder lines -->
+              <line x1="16"  y1="128" x2="28"  y2="128" class="ac-v jg-m1" opacity=".3"/>
+              <line x1="52"  y1="126" x2="64"  y2="126" class="ac-v jg-m2" opacity=".3"/>
+              <line x1="94"  y1="128" x2="106" y2="128" class="ac-v jg-m3" opacity=".3"/>
+              <line x1="136" y1="126" x2="148" y2="126" class="ac-v jg-m4" opacity=".3"/>
+              <line x1="172" y1="128" x2="184" y2="128" class="ac-v jg-m5" opacity=".3"/>
+              <!-- row 2 hint (further, smaller, less opaque) -->
+              <circle cx="40"  cy="113" r="3.5" class="ac-v" opacity=".3"/>
+              <circle cx="80"  cy="112" r="3"   class="ac-v" opacity=".25"/>
+              <circle cx="120" cy="113" r="3.5" class="ac-v" opacity=".3"/>
+              <circle cx="160" cy="112" r="3"   class="ac-v" opacity=".25"/>
+
+            </g>
+          </svg>
+        </div>
+
+        <p class="agent-desc">Consumes the KB event stream and correlates behavioral patterns across time windows, producing structured alerts with confidence scores.</p>
+        <div class="agent-scope">READ-ONLY</div>
+      </div>
+
+
+      <!-- ══════════════════════════════════════════════════════
+           JURY — evidence room: filing cabinet, folders, dossier
+           ══════════════════════════════════════════════════════ -->
+      <div class="agent-card jury">
+        <div class="agent-name">Jury Agent</div>
+        <div class="agent-role jury">Cross-Validation</div>
+
+        <div class="agent-svg-wrap">
+          <svg width="200" height="136" viewBox="0 0 200 136">
+
+            <!-- GHOST -->
+            <g class="ac-ghost ac-a">
+              <!-- filing cabinet body -->
+              <rect x="8" y="18" width="44" height="110" rx="1"/>
+              <!-- three drawers -->
+              <rect x="11" y="22" width="38" height="30" rx="0"/>
+              <rect x="11" y="55" width="38" height="30" rx="0"/>
+              <rect x="11" y="88" width="38" height="30" rx="0"/>
+              <!-- open dossier on desk -->
+              <rect x="68" y="62" width="54" height="68" rx="1"/>
+              <line x1="95" y1="62" x2="95" y2="130"/>
+              <!-- evidence shelf -->
+              <rect x="124" y="8"  width="72" height="4" rx="0"/>
+              <rect x="124" y="60" width="72" height="4" rx="0"/>
+              <rect x="124" y="112"width="72" height="4" rx="0"/>
+            </g>
+
+            <!-- ANIMATED -->
+            <g class="ac-anim">
+
+              <!-- ── FILING CABINET ── -->
+              <rect x="8" y="18" width="44" height="110" class="ac-a" opacity=".7" style="fill:rgba(255,140,0,.02)"/>
+              <!-- cabinet label strip -->
+              <rect x="10" y="18" width="40" height="5" class="ac-a" opacity=".5"/>
+              <text x="30" y="23" text-anchor="middle" font-family="'JetBrains Mono',monospace"
+                font-size="4" letter-spacing="1" fill="none" stroke="#FF8C00" stroke-width=".35" opacity=".7">EVIDENCE</text>
+              <!-- drawer 1 (bottom closed) -->
+              <rect x="11" y="88" width="38" height="30" class="ac-a" opacity=".55" style="fill:rgba(255,140,0,.02)"/>
+              <rect x="22" y="101"width="16" height="3" rx="0" class="ac-a" opacity=".5"/><!-- handle -->
+              <!-- drawer 2 (middle closed) -->
+              <rect x="11" y="55" width="38" height="30" class="ac-a" opacity=".55" style="fill:rgba(255,140,0,.02)"/>
+              <rect x="22" y="68" width="16" height="3" rx="0" class="ac-a" opacity=".5"/>
+              <!-- drawer 3 (top — slides open, folders peek out) -->
+              <g class="jy-drawer">
+                <rect x="11" y="22" width="38" height="30" class="ac-a" opacity=".75" style="fill:rgba(255,140,0,.03)"/>
+                <rect x="22" y="35" width="16" height="3" rx="0" class="ac-a" opacity=".6"/><!-- handle -->
+                <!-- folder tabs protruding from open drawer -->
+                <rect x="14" y="14" width="8"  height="10" rx="0" class="ac-a" opacity=".6" style="fill:rgba(255,140,0,.06)"/>
+                <rect x="24" y="16" width="8"  height="8"  rx="0" class="ac-a" opacity=".5"/>
+                <rect x="34" y="15" width="8"  height="9"  rx="0" class="ac-a" opacity=".45"/>
+                <!-- label stickers on tabs -->
+                <line x1="15" y1="18" x2="21" y2="18" class="ac-a" opacity=".4"/>
+                <line x1="25" y1="20" x2="31" y2="20" class="ac-a" opacity=".4"/>
+              </g>
+
+              <!-- ── OPEN DOSSIER ON DESK ── -->
+              <!-- desk surface -->
+              <rect x="60" y="128" width="80" height="4" class="ac-a" opacity=".5"/>
+              <!-- dossier left page -->
+              <rect x="62" y="56" width="52" height="72" rx="0" class="ac-a" opacity=".7" style="fill:rgba(255,140,0,.03)"/>
+              <!-- dossier right page -->
+              <rect x="115" y="56" width="52" height="72" rx="0" class="ac-a" opacity=".65" style="fill:rgba(255,140,0,.02)"/>
+              <!-- spine -->
+              <rect x="112" y="54" width="5"  height="74" class="ac-a" opacity=".5"/>
+              <!-- ruled lines left page -->
+              <clipPath id="jydl"><rect x="63" y="57" width="50" height="70"/></clipPath>
+              <g clip-path="url(#jydl)" class="jy-scan">
+                <line x1="66" y1="66" x2="110" y2="66" class="ac-a" opacity=".5"/>
+                <line x1="66" y1="72" x2="110" y2="72" class="ac-a" opacity=".5"/>
+                <line x1="66" y1="78" x2="104" y2="78" class="ac-a" opacity=".5"/>
+                <line x1="66" y1="84" x2="108" y2="84" class="ac-a" opacity=".5"/>
+                <line x1="66" y1="90" x2="100" y2="90" class="ac-a" opacity=".4"/>
+                <line x1="66" y1="96" x2="106" y2="96" class="ac-a" opacity=".4"/>
+                <line x1="66" y1="102"x2="98"  y2="102"class="ac-a" opacity=".4"/>
+                <line x1="66" y1="108"x2="105" y2="108"class="ac-a" opacity=".35"/>
+                <!-- highlight scan bar -->
+                <rect x="63" y="64" width="50" height="3" style="fill:rgba(255,140,0,.13)"/>
+              </g>
+              <!-- ruled lines right page -->
+              <line x1="119" y1="66" x2="162" y2="66" class="ac-a" opacity=".4"/>
+              <line x1="119" y1="72" x2="162" y2="72" class="ac-a" opacity=".4"/>
+              <line x1="119" y1="78" x2="155" y2="78" class="ac-a" opacity=".4"/>
+              <line x1="119" y1="84" x2="158" y2="84" class="ac-a" opacity=".35"/>
+              <line x1="119" y1="90" x2="152" y2="90" class="ac-a" opacity=".35"/>
+              <!-- photo box right page -->
+              <rect x="120" y="96" width="24" height="18" class="ac-a" opacity=".45"/>
+              <line x1="120" y1="96" x2="144" y2="114" class="ac-a" opacity=".2"/>
+              <line x1="144" y1="96" x2="120" y2="114" class="ac-a" opacity=".2"/>
+              <!-- dossier header -->
+              <rect x="65" y="58" width="46" height="6" class="ac-a" opacity=".5" style="fill:rgba(255,140,0,.06)"/>
+              <text x="88" y="63" text-anchor="middle" font-family="'JetBrains Mono',monospace"
+                font-size="4" letter-spacing="1" fill="none" stroke="#FF8C00" stroke-width=".35" opacity=".8">CASE #KB-0x4F</text>
+
+              <!-- ── EVIDENCE SHELF (right side) ── -->
+              <rect x="130" y="8"   width="64" height="3" class="ac-a" opacity=".5"/>
+              <rect x="130" y="52"  width="64" height="3" class="ac-a" opacity=".5"/>
+              <rect x="130" y="96"  width="64" height="3" class="ac-a" opacity=".5"/>
+              <rect x="130" y="128" width="64" height="3" class="ac-a" opacity=".4"/>
+              <!-- shelf brackets -->
+              <line x1="130" y1="8"  x2="130" y2="130" class="ac-a" opacity=".3"/>
+              <line x1="194" y1="8"  x2="194" y2="130" class="ac-a" opacity=".3"/>
+              <!-- binders on shelf 1 -->
+              <rect x="132" y="11" width="6"  height="41" class="ac-a" opacity=".55" style="fill:rgba(255,140,0,.05)"/>
+              <rect x="140" y="14" width="6"  height="38" class="ac-a" opacity=".5"/>
+              <rect x="148" y="11" width="6"  height="41" class="ac-a" opacity=".5" style="fill:rgba(255,140,0,.04)"/>
+              <rect x="156" y="16" width="6"  height="36" class="ac-a" opacity=".45"/>
+              <rect x="164" y="12" width="6"  height="40" class="ac-a" opacity=".5"/>
+              <rect x="172" y="15" width="6"  height="37" class="ac-a" opacity=".4"/>
+              <rect x="180" y="11" width="6"  height="41" class="ac-a" opacity=".45"/>
+              <rect x="188" y="13" width="4"  height="39" class="ac-a" opacity=".4"/>
+              <!-- binders shelf 2 -->
+              <rect x="132" y="55" width="6"  height="41" class="ac-a" opacity=".45"/>
+              <rect x="140" y="58" width="6"  height="38" class="ac-a" opacity=".5" style="fill:rgba(255,140,0,.04)"/>
+              <rect x="148" y="55" width="6"  height="41" class="ac-a" opacity=".4"/>
+              <rect x="156" y="59" width="6"  height="37" class="ac-a" opacity=".45"/>
+              <rect x="164" y="56" width="6"  height="40" class="ac-a" opacity=".4"/>
+              <!-- evidence tag hanging -->
+              <g class="jy-tag">
+                <line x1="186" y1="55" x2="186" y2="44" class="ac-a" opacity=".5"/>
+                <rect x="181" y="38" width="10" height="7" rx="0" class="ac-a" opacity=".6" style="fill:rgba(255,140,0,.06)"/>
+                <text x="186" y="43" text-anchor="middle" font-family="'JetBrains Mono',monospace"
+                  font-size="3.5" letter-spacing=".5" fill="none" stroke="#FF8C00" stroke-width=".3" opacity=".8">EXH.A</text>
+              </g>
+
+              <!-- ── VALIDATED STAMP slams down on dossier ── -->
+              <g class="jy-stamp">
+                <rect x="68" y="68" width="40" height="14" rx="1" class="ac-a" opacity=".85" style="fill:rgba(255,140,0,.08)"/>
+                <line x1="68" y1="68" x2="108" y2="68" class="ac-a" opacity=".6"/>
+                <line x1="68" y1="82" x2="108" y2="82" class="ac-a" opacity=".6"/>
+                <text x="88" y="77" text-anchor="middle" font-family="'JetBrains Mono',monospace"
+                  font-size="5.5" letter-spacing="2" fill="none" stroke="#FF8C00" stroke-width=".5" opacity="1">VALIDATED</text>
+              </g>
+
+            </g>
+          </svg>
+        </div>
+
+        <p class="agent-desc">Cross-validates Judge alerts against historical process profiles, suppresses known false positives, and produces validated decision records.</p>
+        <div class="agent-scope">READ-ONLY</div>
+      </div>
+
+
+      <!-- ══════════════════════════════════════════════════════
+           EXECUTOR — military execution: officer + rifle squad
+           ══════════════════════════════════════════════════════ -->
+      <div class="agent-card exec">
+        <div class="agent-name">Executor Agent</div>
+        <div class="agent-role exec">Policy Execution</div>
+
+        <div class="agent-svg-wrap">
+          <svg width="200" height="136" viewBox="0 0 200 136">
+
+            <!-- GHOST -->
+            <g class="ac-ghost ac-e">
+              <!-- officer silhouette -->
+              <circle cx="152" cy="24" r="8"/>
+              <rect x="146" y="34" width="12" height="28" rx="0"/>
+              <!-- baton -->
+              <line x1="158" y1="38" x2="176" y2="22"/>
+              <!-- three squad soldiers -->
+              <circle cx="30" cy="28" r="6"/>
+              <rect x="25" y="36" width="10" height="22" rx="0"/>
+              <circle cx="60" cy="28" r="6"/>
+              <rect x="55" y="36" width="10" height="22" rx="0"/>
+              <circle cx="90" cy="28" r="6"/>
+              <rect x="85" y="36" width="10" height="22" rx="0"/>
+              <!-- rifles -->
+              <line x1="28" y1="36" x2="22" y2="18"/>
+              <line x1="58" y1="36" x2="52" y2="18"/>
+              <line x1="88" y1="36" x2="82" y2="18"/>
+              <!-- ground line -->
+              <line x1="4" y1="96" x2="196" y2="96"/>
+            </g>
+
+            <!-- ANIMATED -->
+            <g class="ac-anim">
+
+              <!-- ── GROUND AND SETTING ── -->
+              <!-- ground -->
+              <line x1="4"   y1="96" x2="196" y2="96" class="ac-e" opacity=".6"/>
+              <!-- shadow lines under figures -->
+              <ellipse cx="30"  cy="97" rx="10" ry="2" class="ac-e" opacity=".25" style="fill:none"/>
+              <ellipse cx="60"  cy="97" rx="10" ry="2" class="ac-e" opacity=".25" style="fill:none"/>
+              <ellipse cx="90"  cy="97" rx="10" ry="2" class="ac-e" opacity=".25" style="fill:none"/>
+              <ellipse cx="152" cy="97" rx="12" ry="2" class="ac-e" opacity=".2"  style="fill:none"/>
+              <!-- wall / backdrop -->
+              <rect x="4" y="4" width="192" height="92" class="ac-e" opacity=".12" style="fill:none"/>
+              <line x1="4" y1="4" x2="4"   y2="96" class="ac-e" opacity=".3"/>
+              <line x1="196" y1="4" x2="196" y2="96" class="ac-e" opacity=".3"/>
+
+              <!-- ── COMMANDING OFFICER (right) ── -->
+              <!-- head -->
+              <circle cx="152" cy="22" r="7" class="ac-e" opacity=".85" style="fill:rgba(255,69,0,.05)"/>
+              <!-- peaked cap -->
+              <rect x="144" y="14" width="16" height="4" rx="0" class="ac-e" opacity=".7"/>
+              <line x1="142" y1="18" x2="162" y2="18" class="ac-e" opacity=".5"/>
+              <!-- medal/rank bar on chest -->
+              <rect x="147" y="42" width="10" height="3" class="ac-e" opacity=".55"/>
+              <line x1="148" y1="43" x2="156" y2="43" class="ac-e" opacity=".4"/>
+              <!-- body / uniform -->
+              <rect x="145" y="30" width="14" height="34" rx="0" class="ac-e" opacity=".75" style="fill:rgba(255,69,0,.04)"/>
+              <!-- epaulettes -->
+              <rect x="143" y="30" width="5" height="5" class="ac-e" opacity=".6"/>
+              <rect x="156" y="30" width="5" height="5" class="ac-e" opacity=".6"/>
+              <!-- legs -->
+              <line x1="149" y1="64" x2="146" y2="96" class="ac-e" opacity=".7"/>
+              <line x1="155" y1="64" x2="158" y2="96" class="ac-e" opacity=".7"/>
+              <!-- boots -->
+              <rect x="142" y="92" width="8"  height="4" class="ac-e" opacity=".6"/>
+              <rect x="155" y="92" width="8"  height="4" class="ac-e" opacity=".6"/>
+              <!-- arm holding baton -->
+              <line x1="159" y1="36" x2="172" y2="32" class="ac-e" opacity=".7"/><!-- forearm -->
+
+              <!-- ── BATON — pivots arm-down on command ── -->
+              <g class="ex-baton">
+                <!-- baton rod -->
+                <line x1="172" y1="32" x2="188" y2="18" class="ac-e" stroke-width="1.6"/>
+                <!-- baton grip end -->
+                <circle cx="172" cy="32" r="2.5" class="ac-e" opacity=".7" style="fill:rgba(255,69,0,.2)"/>
+                <!-- baton tip -->
+                <circle cx="188" cy="18" r="1.5" class="ac-e" opacity=".8"/>
+                <!-- hand grip marks -->
+                <line x1="175" y1="29" x2="177" y2="27" class="ac-e" opacity=".4"/>
+                <line x1="178" y1="26" x2="180" y2="24" class="ac-e" opacity=".4"/>
+              </g>
+
+              <!-- ── SOLDIER 1 (left) ── -->
+              <circle cx="30" cy="26" r="6" class="ac-e" opacity=".8" style="fill:rgba(255,69,0,.04)"/>
+              <!-- helmet -->
+              <path d="M23,24 Q30,16 37,24" class="ac-e" opacity=".7" style="fill:none"/>
+              <rect x="22" y="24" width="16" height="2" class="ac-e" opacity=".5"/>
+              <!-- body -->
+              <rect x="24" y="34" width="12" height="28" class="ac-e" opacity=".7" style="fill:rgba(255,69,0,.03)"/>
+              <!-- belt -->
+              <line x1="24" y1="44" x2="36" y2="44" class="ac-e" opacity=".35"/>
+              <!-- legs -->
+              <line x1="28" y1="62" x2="26" y2="96" class="ac-e" opacity=".65"/>
+              <line x1="32" y1="62" x2="34" y2="96" class="ac-e" opacity=".65"/>
+              <!-- boots -->
+              <rect x="22" y="92" width="7" height="4" class="ac-e" opacity=".55"/>
+              <rect x="30" y="92" width="7" height="4" class="ac-e" opacity=".55"/>
+              <!-- rifle arm raises to lower -->
+              <line x1="25" y1="38" x2="18" y2="32" class="ac-e" opacity=".6"/><!-- upper arm -->
+              <g class="ex-rfl1">
+                <!-- rifle barrel -->
+                <line x1="18" y1="32" x2="10" y2="8"  class="ac-e" stroke-width="1.3"/>
+                <!-- rifle stock -->
+                <rect x="15" y="28" width="6" height="10" rx="0" class="ac-e" opacity=".6" style="fill:none"/>
+                <!-- trigger guard -->
+                <path d="M16,34 Q18,38 20,34" class="ac-e" opacity=".5" style="fill:none"/>
+                <!-- sight -->
+                <line x1="12" y1="14" x2="12" y2="10" class="ac-e" opacity=".5"/>
+              </g>
+
+              <!-- ── SOLDIER 2 ── -->
+              <circle cx="60" cy="26" r="6" class="ac-e" opacity=".8" style="fill:rgba(255,69,0,.04)"/>
+              <path d="M53,24 Q60,16 67,24" class="ac-e" opacity=".7" style="fill:none"/>
+              <rect x="52" y="24" width="16" height="2" class="ac-e" opacity=".5"/>
+              <rect x="54" y="34" width="12" height="28" class="ac-e" opacity=".7" style="fill:rgba(255,69,0,.03)"/>
+              <line x1="54" y1="44" x2="66" y2="44" class="ac-e" opacity=".35"/>
+              <line x1="58" y1="62" x2="56" y2="96" class="ac-e" opacity=".65"/>
+              <line x1="62" y1="62" x2="64" y2="96" class="ac-e" opacity=".65"/>
+              <rect x="52" y="92" width="7" height="4" class="ac-e" opacity=".55"/>
+              <rect x="60" y="92" width="7" height="4" class="ac-e" opacity=".55"/>
+              <line x1="55" y1="38" x2="48" y2="32" class="ac-e" opacity=".6"/>
+              <g class="ex-rfl2">
+                <line x1="48" y1="32" x2="40" y2="8"  class="ac-e" stroke-width="1.3"/>
+                <rect x="45" y="28" width="6" height="10" rx="0" class="ac-e" opacity=".6" style="fill:none"/>
+                <path d="M46,34 Q48,38 50,34" class="ac-e" opacity=".5" style="fill:none"/>
+                <line x1="42" y1="14" x2="42" y2="10" class="ac-e" opacity=".5"/>
+              </g>
+
+              <!-- ── SOLDIER 3 ── -->
+              <circle cx="90" cy="26" r="6" class="ac-e" opacity=".8" style="fill:rgba(255,69,0,.04)"/>
+              <path d="M83,24 Q90,16 97,24" class="ac-e" opacity=".7" style="fill:none"/>
+              <rect x="82" y="24" width="16" height="2" class="ac-e" opacity=".5"/>
+              <rect x="84" y="34" width="12" height="28" class="ac-e" opacity=".7" style="fill:rgba(255,69,0,.03)"/>
+              <line x1="84" y1="44" x2="96" y2="44" class="ac-e" opacity=".35"/>
+              <line x1="88" y1="62" x2="86" y2="96" class="ac-e" opacity=".65"/>
+              <line x1="92" y1="62" x2="94" y2="96" class="ac-e" opacity=".65"/>
+              <rect x="82" y="92" width="7" height="4" class="ac-e" opacity=".55"/>
+              <rect x="90" y="92" width="7" height="4" class="ac-e" opacity=".55"/>
+              <line x1="85" y1="38" x2="78" y2="32" class="ac-e" opacity=".6"/>
+              <g class="ex-rfl3">
+                <line x1="78" y1="32" x2="70" y2="8"  class="ac-e" stroke-width="1.3"/>
+                <rect x="75" y="28" width="6" height="10" rx="0" class="ac-e" opacity=".6" style="fill:none"/>
+                <path d="M76,34 Q78,38 80,34" class="ac-e" opacity=".5" style="fill:none"/>
+                <line x1="72" y1="14" x2="72" y2="10" class="ac-e" opacity=".5"/>
+              </g>
+
+              <!-- ── MUZZLE FLASH (from barrel tips, staggered) ── -->
+              <!-- rifle 1 flash -->
+              <g class="ex-flash">
+                <line x1="10" y1="8" x2="6"  y2="4"  class="ac-e" stroke-width="1.5"/>
+                <line x1="10" y1="8" x2="14" y2="4"  class="ac-e" stroke-width="1.5"/>
+                <line x1="10" y1="8" x2="10" y2="2"  class="ac-e" stroke-width="1.5"/>
+                <!-- muzzle blast -->
+                <circle cx="10" cy="8" r="0" class="ac-e ex-blast1" fill="none"/>
+                <circle cx="10" cy="8" r="0" class="ac-e ex-blast2" fill="none" opacity=".5"/>
+              </g>
+              <!-- rifle 2 flash (offset timing via animation) -->
+              <g style="animation:ex-flash 3.4s ease-out infinite .08s;opacity:0">
+                <line x1="40" y1="8" x2="36" y2="4"  class="ac-e" stroke-width="1.5"/>
+                <line x1="40" y1="8" x2="44" y2="4"  class="ac-e" stroke-width="1.5"/>
+                <line x1="40" y1="8" x2="40" y2="2"  class="ac-e" stroke-width="1.5"/>
+              </g>
+              <!-- rifle 3 flash -->
+              <g style="animation:ex-flash 3.4s ease-out infinite .16s;opacity:0">
+                <line x1="70" y1="8" x2="66" y2="4"  class="ac-e" stroke-width="1.5"/>
+                <line x1="70" y1="8" x2="74" y2="4"  class="ac-e" stroke-width="1.5"/>
+                <line x1="70" y1="8" x2="70" y2="2"  class="ac-e" stroke-width="1.5"/>
+              </g>
+
+              <!-- ── CAPTION / ORDER ── -->
+              <text x="100" y="110" text-anchor="middle" font-family="'JetBrains Mono',monospace"
+                font-size="5" letter-spacing="2.5" fill="none" stroke="#FF4500" stroke-width=".4"
+                style="animation:ex-flash 3.4s ease-out infinite .4s;opacity:0">EXECUTE ORDER</text>
+
+            </g>
+          </svg>
+        </div>
+
+        <p class="agent-desc">Translates validated decisions into Control Plane API calls within its scoped capability token — and nothing outside it.</p>
+        <div class="agent-scope">SCOPED WRITE</div>
+      </div>
+
+    </div>
+
+    <div class="swarm-divider r">
+      <div class="swarm-line"></div>
+      <span class="swarm-divider-label">directs the swarm</span>
+      <div class="swarm-line rev"></div>
+    </div>
+
+    <div class="r">
+      <div class="eyebrow">Swarm Layer</div>
+      <h2 class="section-title" style="font-size:clamp(32px,3.6vw,52px)">FIVE AGENT<br>CLASSES</h2>
+      <p class="body-text" style="margin-top:16px;max-width:680px">JJE doesn't act alone. Each decision is carried out by a swarm of scoped sub-agents, coordinating over Kafka and ZeroMQ.</p>
+    </div>
+
+    <div class="swarm-grid r" style="margin-top:44px">
+
+      <!-- PATROLLER: panning CC cam + ping rings -->
+      <div class="swarm-card">
+        <div class="swarm-name">Patroller</div>
+        <div class="swarm-svg-wrap">
+          <svg width="110" height="68" viewBox="0 0 110 68">
+            <!-- ghost: static cam outline -->
+            <g class="sc-ghost sc-stroke">
+              <rect x="45" y="10" width="20" height="13" rx="2"/>
+              <line x1="55" y1="23" x2="55" y2="29"/>
+              <polygon points="55,29 38,55 72,55" opacity=".5"/>
+              <line x1="20" y1="35" x2="90" y2="35" stroke-dasharray="3 4" opacity=".4"/>
+            </g>
+            <!-- animated: sweeping cam cone + ping -->
+            <g class="sc-anim">
+              <!-- cam body -->
+              <rect x="45" y="10" width="20" height="13" rx="2" class="sc-stroke" opacity=".9"/>
+              <line x1="55" y1="23" x2="55" y2="29" class="sc-stroke"/>
+              <!-- sweeping cone -->
+              <g class="sc-cam-cone">
+                <polygon points="55,29 30,62 80,62" class="sc-stroke" opacity=".55" style="fill:rgba(191,255,0,.04)"/>
+              </g>
+              <!-- lens dot -->
+              <circle cx="55" cy="16" r="2.5" class="sc-stroke" style="fill:rgba(191,255,0,.3)"/>
+              <!-- ping rings emanating from cam -->
+              <circle cx="55" cy="16" r="0" class="sc-stroke sc-cam-ping"/>
+              <circle cx="55" cy="16" r="0" class="sc-stroke sc-cam-ping2"/>
+              <!-- scan line -->
+              <line x1="10" y1="48" x2="100" y2="48" class="sc-stroke" stroke-dasharray="2 5" opacity=".3"/>
+            </g>
+          </svg>
+        </div>
+        <p class="swarm-desc">Continuous behavioral surveillance across the live process tree.</p>
+      </div>
+
+      <!-- HUNTER: crosshair lock-on with scan sweep -->
+      <div class="swarm-card">
+        <div class="swarm-name">Hunter</div>
+        <div class="swarm-svg-wrap">
+          <svg width="110" height="68" viewBox="0 0 110 68">
+            <!-- ghost: static crosshair -->
+            <g class="sc-ghost sc-stroke">
+              <circle cx="55" cy="34" r="20"/>
+              <line x1="55" y1="4" x2="55" y2="24"/>
+              <line x1="55" y1="44" x2="55" y2="64"/>
+              <line x1="15" y1="34" x2="35" y2="34"/>
+              <line x1="75" y1="34" x2="95" y2="34"/>
+            </g>
+            <!-- animated -->
+            <g class="sc-anim">
+              <!-- outer ring drawing in -->
+              <circle cx="55" cy="34" r="20" class="sc-stroke sc-ring-lock" opacity=".8"/>
+              <!-- inner ring -->
+              <circle cx="55" cy="34" r="11" class="sc-stroke" opacity=".5"/>
+              <!-- crosshairs -->
+              <line x1="55" y1="4"  x2="55" y2="24" class="sc-stroke" opacity=".7"/>
+              <line x1="55" y1="44" x2="55" y2="64" class="sc-stroke" opacity=".7"/>
+              <line x1="15" y1="34" x2="35" y2="34" class="sc-stroke" opacity=".7"/>
+              <line x1="75" y1="34" x2="95" y2="34" class="sc-stroke" opacity=".7"/>
+              <!-- target dot blinking -->
+              <circle cx="55" cy="34" r="2.5" class="sc-target-dot" style="fill:var(--volt)"/>
+              <!-- scan bar clipped inside outer ring -->
+              <clipPath id="hclip"><circle cx="55" cy="34" r="19"/></clipPath>
+              <rect x="35" y="26" width="40" height="3" style="fill:rgba(191,255,0,.12)" clip-path="url(#hclip)" class="sc-h-scan"/>
+              <!-- corner brackets -->
+              <path d="M36,18 L36,13 L41,13" class="sc-stroke" opacity=".6"/>
+              <path d="M74,18 L74,13 L69,13" class="sc-stroke" opacity=".6"/>
+              <path d="M36,50 L36,55 L41,55" class="sc-stroke" opacity=".6"/>
+              <path d="M74,50 L74,55 L69,55" class="sc-stroke" opacity=".6"/>
+            </g>
+          </svg>
+        </div>
+        <p class="swarm-desc">Actively tracks flagged processes — lineage, lateral movement, escalation.</p>
+      </div>
+
+      <!-- HEALER: expanding pulse rings from cross -->
+      <div class="swarm-card">
+        <div class="swarm-name">Healer</div>
+        <div class="swarm-svg-wrap">
+          <svg width="110" height="68" viewBox="0 0 110 68">
+            <!-- ghost: static cross -->
+            <g class="sc-ghost sc-stroke">
+              <rect x="48" y="18" width="14" height="36" rx="2"/>
+              <rect x="34" y="27" width="42" height="14" rx="2"/>
+              <circle cx="55" cy="35" r="22" stroke-dasharray="2 4"/>
+            </g>
+            <!-- animated -->
+            <g class="sc-anim">
+              <!-- pulse rings -->
+              <circle cx="55" cy="35" r="4" class="sc-stroke sc-heal-ring1"/>
+              <circle cx="55" cy="35" r="4" class="sc-stroke sc-heal-ring2"/>
+              <circle cx="55" cy="35" r="4" class="sc-stroke sc-heal-ring3"/>
+              <!-- cross symbol, pulsing -->
+              <g class="sc-heal-cross sc-stroke">
+                <rect x="49" y="19" width="12" height="32" rx="1.5"/>
+                <rect x="36" y="28" width="38" height="12" rx="1.5"/>
+              </g>
+              <!-- small bot circles at cardinal points -->
+              <circle cx="55" cy="8"  r="3" class="sc-stroke" opacity=".5"/>
+              <circle cx="55" cy="62" r="3" class="sc-stroke" opacity=".5"/>
+              <circle cx="8"  cy="35" r="3" class="sc-stroke" opacity=".5"/>
+              <circle cx="102" cy="35" r="3" class="sc-stroke" opacity=".5"/>
+            </g>
+          </svg>
+        </div>
+        <p class="swarm-desc">Remediation and recovery — restores Safe-zone state once a threat clears.</p>
+      </div>
+
+      <!-- CONTAINMENT MILITIA: perimeter nodes march in -->
+      <div class="swarm-card">
+        <div class="swarm-name">Containment Militia</div>
+        <div class="swarm-svg-wrap">
+          <svg width="110" height="68" viewBox="0 0 110 68">
+            <!-- ghost: static hexagon perimeter -->
+            <g class="sc-ghost sc-stroke">
+              <polygon points="55,8 88,26 88,51 55,62 22,51 22,26"/>
+              <circle cx="55" cy="35" r="8"/>
+            </g>
+            <!-- animated -->
+            <g class="sc-anim">
+              <!-- marching dashed perimeter -->
+              <polygon points="55,8 88,26 88,51 55,62 22,51 22,26" class="sc-stroke sc-cm-perimeter" opacity=".75"/>
+              <!-- militia nodes appearing at vertices -->
+              <circle cx="55" cy="8"  r="3.5" class="sc-stroke sc-cm-n1" style="transform-origin:55px 8px"/>
+              <circle cx="88" cy="26" r="3.5" class="sc-stroke sc-cm-n2" style="transform-origin:88px 26px"/>
+              <circle cx="88" cy="51" r="3.5" class="sc-stroke sc-cm-n3" style="transform-origin:88px 51px"/>
+              <circle cx="55" cy="62" r="3.5" class="sc-stroke sc-cm-n4" style="transform-origin:55px 62px"/>
+              <circle cx="22" cy="51" r="3.5" class="sc-stroke sc-cm-n5" style="transform-origin:22px 51px"/>
+              <circle cx="22" cy="26" r="3.5" class="sc-stroke sc-cm-n6" style="transform-origin:22px 26px"/>
+              <!-- inner containment box -->
+              <rect x="43" y="27" width="24" height="16" rx="2" class="sc-stroke" opacity=".5"/>
+              <!-- target center -->
+              <circle cx="55" cy="35" r="3" class="sc-stroke-e" style="fill:rgba(255,69,0,.15)"/>
+            </g>
+          </svg>
+        </div>
+        <p class="swarm-desc">Executes isolation — namespaces, cgroup throttling, the physical perimeter.</p>
+      </div>
+
+      <!-- SIGNAL RELAY: packet hopping across mesh nodes -->
+      <div class="swarm-card">
+        <div class="swarm-name">Signal Relays</div>
+        <div class="swarm-svg-wrap">
+          <svg width="110" height="68" viewBox="0 0 110 68">
+            <!-- ghost: static mesh -->
+            <g class="sc-ghost sc-stroke">
+              <circle cx="15"  cy="35" r="5"/>
+              <circle cx="55"  cy="35" r="5"/>
+              <circle cx="95"  cy="35" r="5"/>
+              <line x1="20" y1="35" x2="50" y2="35"/>
+              <line x1="60" y1="35" x2="90" y2="35"/>
+              <!-- wave arcs -->
+              <path d="M38,22 Q55,8  72,22" fill="none"/>
+              <path d="M30,18 Q55,0  80,18" fill="none" opacity=".5"/>
+            </g>
+            <!-- animated -->
+            <g class="sc-anim">
+              <!-- mesh nodes -->
+              <circle cx="15"  cy="35" r="5" class="sc-stroke" opacity=".8"/>
+              <circle cx="55"  cy="35" r="5" class="sc-stroke" opacity=".8"/>
+              <circle cx="95"  cy="35" r="5" class="sc-stroke" opacity=".8"/>
+              <!-- links -->
+              <line x1="20" y1="35" x2="50" y2="35" class="sc-stroke" opacity=".4"/>
+              <line x1="60" y1="35" x2="90" y2="35" class="sc-stroke" opacity=".4"/>
+              <!-- traveling packets (base at node 1, translated rightward) -->
+              <circle cx="15" cy="35" r="3" class="sc-pkt1" style="fill:var(--volt);filter:drop-shadow(0 0 4px var(--volt))"/>
+              <circle cx="15" cy="35" r="3" class="sc-pkt2" style="fill:var(--volt);filter:drop-shadow(0 0 4px var(--volt))"/>
+              <circle cx="15" cy="35" r="3" class="sc-pkt3" style="fill:var(--volt);filter:drop-shadow(0 0 4px var(--volt))"/>
+              <!-- broadcast waves from middle node -->
+              <path d="M38,24 Q55,10 72,24" class="sc-stroke sc-sr-wave"  style="transform-origin:55px 17px"/>
+              <path d="M30,18 Q55,2  80,18" class="sc-stroke sc-sr-wave2" style="transform-origin:55px 10px" opacity=".5"/>
+              <!-- node inner dots -->
+              <circle cx="15" cy="35" r="2" style="fill:var(--volt)" opacity=".6"/>
+              <circle cx="95" cy="35" r="2" style="fill:var(--volt)" opacity=".6"/>
+            </g>
+          </svg>
+        </div>
+        <p class="swarm-desc">Carries telemetry and consensus messages across the swarm mesh.</p>
+      </div>
+
+    </div>
+
+  </div>
+</section>
+
+<!-- PIPELINES -->
+<section id="pipelines">
+  <div class="cine" aria-hidden="true" style="--cc:rgba(255,69,0,.03);--cg:rgba(255,69,0,.05);--cx:70%;--cd:6.5s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <span class="cine-drift" style="left:8%;font-size:9px;color:rgba(191,255,0,.3);--ro:.3;animation-duration:17s;animation-delay:-6s">gRPC frame · 0x4a</span>
+    <span class="cine-drift" style="left:27%;font-size:8.5px;color:rgba(255,69,0,.28);--ro:.28;animation-duration:20s;animation-delay:-11s">WS ping · 24ms</span>
+    <span class="cine-drift" style="left:48%;font-size:9px;color:rgba(191,255,0,.3);--ro:.3;animation-duration:15s;animation-delay:-2s">Kafka offset commit</span>
+    <span class="cine-drift" style="left:68%;font-size:8.5px;color:rgba(255,69,0,.26);--ro:.26;animation-duration:21s;animation-delay:-14s">TLS 1.3 handshake ✓</span>
+    <span class="cine-drift" style="left:88%;font-size:9px;color:rgba(191,255,0,.28);--ro:.28;animation-duration:18s;animation-delay:-8s">audit log · chained</span>
+  </div>
+  <div class="r">
+    <div class="eyebrow">Control & Communication</div>
+    <h2 class="section-title">HOW THE<br>LAYERS TALK</h2>
+    <p class="body-text" style="margin-top:16px;max-width:600px">Every hop between layers is a named, typed pipeline — never a shared file, never a polling loop.</p>
+  </div>
+
+  <div class="pipe-row r">
+    <div class="pipe-node">
+      <div class="pipe-node-name">eBPF</div>
+      <div class="pipe-node-sub">Ring 0</div>
+    </div>
+    <div class="pipe-link"><span class="pipe-tag">ring buffer</span></div>
+    <div class="pipe-node">
+      <div class="pipe-node-name">kbd</div>
+      <div class="pipe-node-sub">Control Plane</div>
+    </div>
+    <div class="pipe-link"><span class="pipe-tag">gRPC · protobuf</span></div>
+    <div class="pipe-node">
+      <div class="pipe-node-name">AADS</div>
+      <div class="pipe-node-sub">JJE + Swarm</div>
+    </div>
+    <div class="pipe-link"><span class="pipe-tag">WebSocket</span></div>
+    <div class="pipe-node">
+      <div class="pipe-node-name">Dashboard</div>
+      <div class="pipe-node-sub">Operator</div>
+    </div>
+  </div>
+
+  <div class="pipe-grid r">
+    <div class="pipe-detail">
+      <div class="pipe-detail-label">Inter-Agent</div>
+      <div class="pipe-detail-val">Apache Kafka · ZeroMQ</div>
+    </div>
+    <div class="pipe-detail">
+      <div class="pipe-detail-label">State Store</div>
+      <div class="pipe-detail-val">SQLite — process state</div>
+    </div>
+    <div class="pipe-detail">
+      <div class="pipe-detail-label">Audit Trail</div>
+      <div class="pipe-detail-val">SHA-256 chained · PostgreSQL</div>
+    </div>
+    <div class="pipe-detail">
+      <div class="pipe-detail-label">Transport Security</div>
+      <div class="pipe-detail-val">TLS 1.3 · JWT · RBAC</div>
+    </div>
+  </div>
+</section>
+
+<!-- SUBSYSTEMS -->
+<section id="stack">
+  <div class="cine" aria-hidden="true" style="--cc:rgba(255,69,0,.03);--cg:rgba(255,69,0,.05);--cx:25%;--cd:7s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <span class="cine-drift" style="left:9%;font-size:9px;color:rgba(255,69,0,.3);--ro:.3;animation-duration:19s;animation-delay:-5s">$ go build ./...</span>
+    <span class="cine-drift" style="left:29%;font-size:8.5px;color:rgba(191,255,0,.26);--ro:.26;animation-duration:22s;animation-delay:-13s">kb-core/ · compiled</span>
+    <span class="cine-drift" style="left:50%;font-size:9px;color:rgba(255,69,0,.28);--ro:.28;animation-duration:16s;animation-delay:-1s">$ cargo build --release</span>
+    <span class="cine-drift" style="left:70%;font-size:8.5px;color:rgba(191,255,0,.24);--ro:.24;animation-duration:20s;animation-delay:-9s">kb-aads/ · pytest passing</span>
+    <span class="cine-drift" style="left:89%;font-size:9px;color:rgba(255,69,0,.3);--ro:.3;animation-duration:18s;animation-delay:-16s">no shared mutable state</span>
+  </div>
+  <div class="r stack-header-row">
+    <div>
+      <div class="eyebrow">Repository Structure</div>
+      <h2 class="section-title">EIGHT<br>SUBSYSTEMS</h2>
+    </div>
+    <p class="stack-intro-note">Each subsystem owns a complete vertical slice of the stack. No shared mutable state across boundaries. Full contributor workflow in <code style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--volt)">docs/</code>.</p>
+  </div>
+
+  <div class="stack-cinema r">
+
+    <div class="subsys">
+      <div class="ss-left">
+        <div class="ss-index">01</div>
+        <div class="ss-dir">kb-core/</div>
+      </div>
+      <div class="ss-body">
+        <div class="ss-name">Kernel Instrumentation</div>
+        <p class="ss-desc">eBPF programs loaded at Ring 0 — six hook points capturing the full behavioral surface of every running process. Perf ring buffer transport, CO-RE / BTF relocations, compiled once and deployed anywhere Linux 5.8+ runs.</p>
+        <div class="ss-tags">
+          <span class="ss-tag">tracepoint:syscalls</span>
+          <span class="ss-tag">kprobe:commit_creds</span>
+          <span class="ss-tag">bpf_lsm</span>
+          <span class="ss-tag">perf ring buffer</span>
+          <span class="ss-tag">CO-RE · BTF</span>
+        </div>
+      </div>
+      <div class="ss-right">
+        <span class="ss-lang-badge">C · eBPF</span>
+        <div class="ss-signal">
+          <div class="ss-signal-line"></div>
+          <div class="ss-signal-pulse"></div>
+        </div>
+        <span class="ss-status"><span class="ss-status-dot"></span>in dev</span>
+      </div>
+    </div>
+
+    <div class="subsys">
+      <div class="ss-left">
+        <div class="ss-index">02</div>
+        <div class="ss-dir">kb-control-plane/</div>
+      </div>
+      <div class="ss-body">
+        <div class="ss-name">Control Plane Daemon</div>
+        <p class="ss-desc">The <code style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--volt)">kbd</code> daemon — consumes ring buffer events, maintains per-process state in SQLite, evaluates YAML operator policies, and exposes a gRPC API. All enforcement is authorized and executed exclusively here. SHA-256 chained audit log to PostgreSQL.</p>
+        <div class="ss-tags">
+          <span class="ss-tag">gRPC · protobuf</span>
+          <span class="ss-tag">SQLite</span>
+          <span class="ss-tag">PostgreSQL</span>
+          <span class="ss-tag">seccomp</span>
+          <span class="ss-tag">namespaces</span>
+          <span class="ss-tag">cgroup v2</span>
+        </div>
+      </div>
+      <div class="ss-right">
+        <span class="ss-lang-badge">Go</span>
+        <div class="ss-signal" style="--d:0.4s">
+          <div class="ss-signal-line" style="animation-delay:.4s"></div>
+          <div class="ss-signal-pulse" style="animation-delay:.4s"></div>
+        </div>
+        <span class="ss-status"><span class="ss-status-dot" style="animation-delay:.3s"></span>in dev</span>
+      </div>
+    </div>
+
+    <div class="subsys">
+      <div class="ss-left">
+        <div class="ss-index">03</div>
+        <div class="ss-dir">kb-aads/</div>
+      </div>
+      <div class="ss-body">
+        <div class="ss-name">Agent Defense Swarm</div>
+        <p class="ss-desc">Behavioral reasoning and multi-agent coordination — Judge, Jury, Executor over Apache Kafka with protobuf serialization. Optional and advisory: no enforcement occurs on agent recommendation alone. MARL infrastructure, QLoRA fine-tuning, Ray RLlib.</p>
+        <div class="ss-tags">
+          <span class="ss-tag">Judge · Jury · Executor</span>
+          <span class="ss-tag">Kafka 3.x</span>
+          <span class="ss-tag">ZeroMQ</span>
+          <span class="ss-tag">Ray RLlib</span>
+          <span class="ss-tag">QLoRA</span>
+        </div>
+      </div>
+      <div class="ss-right">
+        <span class="ss-lang-badge">Python</span>
+        <div class="ss-signal">
+          <div class="ss-signal-line" style="animation-delay:.8s;animation-duration:1.8s"></div>
+          <div class="ss-signal-pulse" style="animation-delay:.8s;animation-duration:1.8s"></div>
+        </div>
+        <span class="ss-status"><span class="ss-status-dot" style="animation-delay:.6s"></span>in dev</span>
+      </div>
+    </div>
+
+    <div class="subsys">
+      <div class="ss-left">
+        <div class="ss-index">04</div>
+        <div class="ss-dir">kb-dashboard/</div>
+      </div>
+      <div class="ss-body">
+        <div class="ss-name">Web Dashboard</div>
+        <p class="ss-desc">React + TypeScript operator dashboard. Real-time zone distribution, per-process behavioral scores, and swarm topology as a live D3.js force graph over WebSockets. The primary human-in-the-loop interface for live defense operations.</p>
+        <div class="ss-tags">
+          <span class="ss-tag">React 18</span>
+          <span class="ss-tag">TypeScript 5</span>
+          <span class="ss-tag">D3.js</span>
+          <span class="ss-tag">Recharts</span>
+          <span class="ss-tag">WebSockets</span>
+        </div>
+      </div>
+      <div class="ss-right">
+        <span class="ss-lang-badge">React · TS</span>
+        <div class="ss-signal">
+          <div class="ss-signal-line" style="animation-delay:.2s;animation-duration:2.6s"></div>
+          <div class="ss-signal-pulse" style="animation-delay:.2s;animation-duration:2.6s"></div>
+        </div>
+        <span class="ss-status"><span class="ss-status-dot" style="animation-delay:.9s"></span>in dev</span>
+      </div>
+    </div>
+
+    <div class="subsys">
+      <div class="ss-left">
+        <div class="ss-index">05</div>
+        <div class="ss-dir">kb-tui/</div>
+      </div>
+      <div class="ss-body">
+        <div class="ss-name">Terminal Interface</div>
+        <p class="ss-desc">SSH-accessible terminal operator interface built with Bubble Tea and Wish. No browser required — full system visibility and control from any machine that can reach port 2222. Designed for headless server environments and rapid incident response.</p>
+        <div class="ss-tags">
+          <span class="ss-tag">Go</span>
+          <span class="ss-tag">Bubble Tea</span>
+          <span class="ss-tag">Wish</span>
+          <span class="ss-tag">SSH</span>
+        </div>
+      </div>
+      <div class="ss-right">
+        <span class="ss-lang-badge">Go · BubbleTea</span>
+        <div class="ss-signal">
+          <div class="ss-signal-line" style="animation-delay:1.1s;animation-duration:3s"></div>
+          <div class="ss-signal-pulse" style="animation-delay:1.1s;animation-duration:3s"></div>
+        </div>
+        <span class="ss-status"><span class="ss-status-dot" style="animation-delay:1.2s"></span>in dev</span>
+      </div>
+    </div>
+
+    <div class="subsys">
+      <div class="ss-left">
+        <div class="ss-index">06</div>
+        <div class="ss-dir">kb-checker/</div>
+      </div>
+      <div class="ss-body">
+        <div class="ss-name">Safety Engine</div>
+        <p class="ss-desc">Rust-native static analysis and safety verification engine. Pre-execution script analysis, policy constraint checking, and enforcement gate validation — ensuring no action violates the operator-defined safety boundary before it reaches the Control Plane.</p>
+        <div class="ss-tags">
+          <span class="ss-tag">Rust</span>
+          <span class="ss-tag">static analysis</span>
+          <span class="ss-tag">policy validation</span>
+        </div>
+      </div>
+      <div class="ss-right">
+        <span class="ss-lang-badge">Rust</span>
+        <div class="ss-signal">
+          <div class="ss-signal-line" style="animation-duration:1.6s;animation-delay:.5s"></div>
+          <div class="ss-signal-pulse" style="animation-duration:1.6s;animation-delay:.5s"></div>
+        </div>
+        <span class="ss-status"><span class="ss-status-dot" style="animation-delay:.4s"></span>in dev</span>
+      </div>
+    </div>
+
+    <div class="subsys">
+      <div class="ss-left">
+        <div class="ss-index">07</div>
+        <div class="ss-dir">docs/</div>
+      </div>
+      <div class="ss-body">
+        <div class="ss-name">Documentation</div>
+        <p class="ss-desc">Technical architecture notes, installation guides, hook point references, contributor workflows, and project whitepapers. Read in order: README → installation → requirements → hookpoints → kb-team.</p>
+        <div class="ss-tags">
+          <span class="ss-tag">Markdown</span>
+          <span class="ss-tag">PDF whitepaper</span>
+          <span class="ss-tag">synopsis</span>
+        </div>
+      </div>
+      <div class="ss-right">
+        <span class="ss-lang-badge">Markdown</span>
+        <div class="ss-signal">
+          <div class="ss-signal-line" style="animation-duration:3.4s;animation-delay:1.6s"></div>
+          <div class="ss-signal-pulse" style="animation-duration:3.4s;animation-delay:1.6s"></div>
+        </div>
+        <span class="ss-status"><span class="ss-status-dot" style="animation-delay:1.5s"></span>live</span>
+      </div>
+    </div>
+
+    <div class="subsys">
+      <div class="ss-left">
+        <div class="ss-index">08</div>
+        <div class="ss-dir">scripts/</div>
+      </div>
+      <div class="ss-body">
+        <div class="ss-name">Tooling & Automation</div>
+        <p class="ss-desc">Installation utilities, test orchestration, CI helpers, and attack-lab tooling for controlled adversarial simulation. Everything needed to bring up the full KB stack on a fresh Ubuntu 22 or 24.04 LTS machine.</p>
+        <div class="ss-tags">
+          <span class="ss-tag">Bash</span>
+          <span class="ss-tag">Python</span>
+          <span class="ss-tag">attack-lab</span>
+          <span class="ss-tag">CI</span>
+        </div>
+      </div>
+      <div class="ss-right">
+        <span class="ss-lang-badge">Bash · Python</span>
+        <div class="ss-signal">
+          <div class="ss-signal-line" style="animation-duration:2.1s;animation-delay:.7s"></div>
+          <div class="ss-signal-pulse" style="animation-duration:2.1s;animation-delay:.7s"></div>
+        </div>
+        <span class="ss-status"><span class="ss-status-dot" style="animation-delay:.8s"></span>in dev</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- OPERATOR INTERFACE -->
+<section id="operator">
+  <div class="cine" aria-hidden="true" style="--cc:rgba(255,69,0,.025)">
+    <div class="cine-grid"></div>
+    <span class="cine-drift" style="left:6%;font-size:9px;color:rgba(191,255,0,.28);--ro:.28;animation-duration:18s;animation-delay:-3s">ssh -p 2222 localhost</span>
+    <span class="cine-drift" style="left:24%;font-size:8.5px;color:rgba(255,69,0,.26);--ro:.26;animation-duration:21s;animation-delay:-11s">kbctl policy reload</span>
+    <span class="cine-drift" style="left:46%;font-size:9px;color:rgba(191,255,0,.3);--ro:.3;animation-duration:16s;animation-delay:-6s">WS: connected</span>
+    <span class="cine-drift" style="left:67%;font-size:8.5px;color:rgba(255,69,0,.24);--ro:.24;animation-duration:20s;animation-delay:-15s">force-kill authorized</span>
+    <span class="cine-drift" style="left:87%;font-size:9px;color:rgba(191,255,0,.28);--ro:.28;animation-duration:17s;animation-delay:-1s">audit export · ok</span>
+  </div>
+  <div style="position:relative;z-index:1;">
+    <div class="r">
+      <div class="eyebrow">Operator Interface & Management</div>
+      <h2 class="section-title">SEE IT.<br>STEER IT.</h2>
+      <p class="body-text" style="margin-top:16px;max-width:560px">Three surfaces for watching and overriding the system. Each built for a different context — browser, shell, or headless server. The system never stops if one is absent.</p>
+    </div>
+
+    <div class="ops-surfaces r" style="margin-top:72px">
+
+      <!-- Surface 01: Dashboard -->
+      <div class="ops-surface">
+        <div class="ops-surf-idx">
+          <span class="ops-surf-num">01</span>
+          <div class="ops-surf-vline"></div>
+        </div>
+        <div class="ops-surf-body">
+          <div class="ops-surf-eyebrow">React · TypeScript · D3.js · WebSockets</div>
+          <div class="ops-surf-name">Dashboard</div>
+          <p class="ops-surf-desc">Real-time zone distribution, per-process behavioral scores, and the swarm as a living D3 force graph — nodes shifting, edges tightening, threat state made visible. Everything over a persistent WebSocket. No polling. No stale state.</p>
+        </div>
+        <div class="ops-surf-right">
+          <span class="ops-surf-lang">React 18 · TS 5</span>
+          <div class="ops-caps">
+            <div class="ops-cap">Zone distribution heat</div>
+            <div class="ops-cap">Per-process score stream</div>
+            <div class="ops-cap">D3 force swarm topology</div>
+            <div class="ops-cap">Soft kill · Hard kill actions</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Waveform divider 1 -->
+      <div class="ops-wave-divider" id="wave1"></div>
+
+      <!-- Surface 02: kbctl -->
+      <div class="ops-surface">
+        <div class="ops-surf-idx">
+          <span class="ops-surf-num">02</span>
+          <div class="ops-surf-vline"></div>
+        </div>
+        <div class="ops-surf-body">
+          <div class="ops-surf-eyebrow">Go · Cobra CLI · gRPC · protobuf</div>
+          <div class="ops-surf-name">kbctl</div>
+          <p class="ops-surf-desc">The full Control Plane gRPC API from the shell. Policy reload, manual zone override, process isolation, audit export. Designed for scripted playbooks, CI pipelines, and rapid incident automation — every operation is a typed protobuf call.</p>
+        </div>
+        <div class="ops-surf-right">
+          <span class="ops-surf-lang">Go · Cobra</span>
+          <div class="ops-caps">
+            <div class="ops-cap">Policy reload without restart</div>
+            <div class="ops-cap">Manual zone override</div>
+            <div class="ops-cap">Audit log export</div>
+            <div class="ops-cap">Scriptable · CI-native</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Waveform divider 2 -->
+      <div class="ops-wave-divider" id="wave2"></div>
+
+      <!-- Surface 03: kb-tui -->
+      <div class="ops-surface">
+        <div class="ops-surf-idx">
+          <span class="ops-surf-num">03</span>
+          <div class="ops-surf-vline"></div>
+        </div>
+        <div class="ops-surf-body">
+          <div class="ops-surf-eyebrow">Go · Bubble Tea · Wish · SSH</div>
+          <div class="ops-surf-name">kb-tui</div>
+          <p class="ops-surf-desc">SSH into a live operator terminal from any machine, on port 2222. No browser. No agent install. Full visibility and control rendered in a Bubble Tea TUI, served over Wish — the Charm SSH server. Built for headless environments and zero-overhead incident response.</p>
+        </div>
+        <div class="ops-surf-right">
+          <span class="ops-surf-lang">BubbleTea · Wish</span>
+          <div class="ops-caps">
+            <div class="ops-cap">ssh -p 2222 localhost</div>
+            <div class="ops-cap">Zero browser dependency</div>
+            <div class="ops-cap">Headless · containerized</div>
+            <div class="ops-cap">Full control surface</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- TEAM -->
+<section id="team">
+  <div class="cine" aria-hidden="true" style="--cc:rgba(255,69,0,.025);--cg:rgba(255,69,0,.04);--cd:8s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <span class="cine-drift" style="left:12%;font-size:8.5px;color:rgba(255,69,0,.22);--ro:.22;animation-duration:22s;animation-delay:-6s">commit a3f9c1e</span>
+    <span class="cine-drift" style="left:38%;font-size:8px;color:rgba(191,255,0,.2);--ro:.2;animation-duration:25s;animation-delay:-14s">commit 7d2b88f</span>
+    <span class="cine-drift" style="left:62%;font-size:8.5px;color:rgba(255,69,0,.22);--ro:.22;animation-duration:20s;animation-delay:-3s">commit e10a4d2</span>
+    <span class="cine-drift" style="left:85%;font-size:8px;color:rgba(191,255,0,.2);--ro:.2;animation-duration:23s;animation-delay:-18s">commit 5f8c61b</span>
+  </div>
+  <div class="r">
+    <div class="eyebrow">The Team</div>
+    <h2 class="section-title">WHO'S<br>BUILDING THIS</h2>
+    <p class="team-intro">
+      Four engineers working across Linux kernel development, eBPF, AI/MARL, distributed systems, security research, and frontend engineering. Full ownership breakdown lives in <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">docs/kb-team.md</code>.
+    </p>
+  </div>
+
+  <div class="team-grid r" style="margin-top:64px">
+    <div class="member">
+      <div class="member-initial">PV</div>
+      <div class="member-name">Pardhu Varma</div>
+      <p class="member-domain">Systems Architecture · Linux Kernel · eBPF · Rust</p>
+    </div>
+    <div class="member">
+      <div class="member-initial">KK</div>
+      <div class="member-name">Karthik</div>
+      <p class="member-domain">AI & Agentic Systems · MARL · Offensive Security</p>
+    </div>
+    <div class="member">
+      <div class="member-initial">KT</div>
+      <div class="member-name">Tejaswini</div>
+      <p class="member-domain">Control Plane · Defensive Security · TUI · Go</p>
+    </div>
+    <div class="member">
+      <div class="member-initial">KR</div>
+      <div class="member-name">Rupa</div>
+      <p class="member-domain">Dashboard · Frontend Engineering · UI/UX · CLI</p>
+    </div>
+  </div>
+</section>
+
+<!-- QUICK START -->
+<section id="quickstart">
+  <div class="cine" aria-hidden="true" style="--cc:rgba(255,69,0,.03);--cg:rgba(255,69,0,.05);--cx:78%;--cd:7s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <span class="cine-drift" style="left:6%;font-size:9px;color:rgba(191,255,0,.28);--ro:.28;animation-duration:19s;animation-delay:-4s">docs/installation.md</span>
+    <span class="cine-drift" style="left:28%;font-size:8.5px;color:rgba(255,69,0,.26);--ro:.26;animation-duration:22s;animation-delay:-12s">docs/hookpoints.md</span>
+    <span class="cine-drift" style="left:50%;font-size:9px;color:rgba(191,255,0,.26);--ro:.26;animation-duration:16s;animation-delay:-7s">$ npm run dev</span>
+    <span class="cine-drift" style="left:72%;font-size:8.5px;color:rgba(255,69,0,.28);--ro:.28;animation-duration:20s;animation-delay:-1s">docs/requirements.md</span>
+    <span class="cine-drift" style="left:90%;font-size:9px;color:rgba(191,255,0,.24);--ro:.24;animation-duration:18s;animation-delay:-15s">build: stable</span>
+  </div>
+  <div class="r">
+    <div class="eyebrow">Getting Started</div>
+    <h2 class="section-title">BEGIN WITH<br>THE DOCS</h2>
+    <p class="body-text" style="margin-top:16px">Complete installation instructions, architecture docs, and development workflow live in <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">docs/</code>. Start here, read in order.</p>
+
+    <div class="qs-docs" style="margin-top:32px">
+      <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/blob/main/docs/README.md" target="_blank" class="doc-item">
+        <div class="doc-num">01</div><div class="doc-name">docs/README.md</div><div class="doc-arrow">↗</div>
+      </a>
+      <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/blob/main/docs/installation.md" target="_blank" class="doc-item">
+        <div class="doc-num">02</div><div class="doc-name">docs/installation.md</div><div class="doc-arrow">↗</div>
+      </a>
+      <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/blob/main/docs/requirements.md" target="_blank" class="doc-item">
+        <div class="doc-num">03</div><div class="doc-name">docs/requirements.md</div><div class="doc-arrow">↗</div>
+      </a>
+      <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/blob/main/docs/hookpoints.md" target="_blank" class="doc-item">
+        <div class="doc-num">04</div><div class="doc-name">docs/hookpoints.md</div><div class="doc-arrow">↗</div>
+      </a>
+      <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/blob/main/docs/kb-team.md" target="_blank" class="doc-item">
+        <div class="doc-num">05</div><div class="doc-name">docs/kb-team.md</div><div class="doc-arrow">↗</div>
+      </a>
+      <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/blob/main/docs/KB.pdf" target="_blank" class="doc-item">
+        <div class="doc-num">06</div><div class="doc-name">docs/KB.pdf</div><div class="doc-arrow">↗</div>
+      </a>
+      <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/blob/main/docs/KB_Synopsis-1.pdf" target="_blank" class="doc-item">
+        <div class="doc-num">07</div><div class="doc-name">docs/KB_Synopsis-1.pdf</div><div class="doc-arrow">↗</div>
+      </a>
+    </div>
+  </div>
+
+  <div class="r d2">
+    <div class="eyebrow" style="margin-bottom:16px">Primary Services</div>
+    <div class="terminal">
+      <div class="term-bar">
+        <div class="td td-r"></div><div class="td td-y"></div><div class="td td-g"></div>
+        <span class="term-lbl">bash — kernel-borderlands</span>
+      </div>
+      <div class="term-body">
+        <div class="tl"><span class="m"># Control Plane</span></div>
+        <div class="tl"><span class="p">$ </span><span class="c">cd kb-control-plane</span></div>
+        <div class="tl"><span class="p">$ </span><span class="c">go run cmd/kbd/main.go</span></div>
+        <div class="tl-gap"></div>
+        <div class="tl"><span class="m"># Autonomous Agent Defense Swarm</span></div>
+        <div class="tl"><span class="p">$ </span><span class="c">cd kb-aads</span></div>
+        <div class="tl"><span class="p">$ </span><span class="c">python main.py</span></div>
+        <div class="tl-gap"></div>
+        <div class="tl"><span class="m"># Dashboard</span></div>
+        <div class="tl"><span class="p">$ </span><span class="c">cd kb-dashboard</span></div>
+        <div class="tl"><span class="p">$ </span><span class="c">npm run dev</span></div>
+        <div class="tl-gap"></div>
+        <div class="tl"><span class="m"># TUI (SSH)</span></div>
+        <div class="tl"><span class="p">$ </span><span class="c">ssh -p <span class="v">2222</span> localhost</span></div>
+        <div class="tl-gap"></div>
+        <div class="tl"><span class="p">$ </span><span class="t-caret"></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section id="cta">
+  <div class="cta-tag r">Open Source · Under Active Development</div>
+  <h2 class="cta-title r">
+    VIEW THE<br><span class="ghost">SOURCE</span>
+  </h2>
+  <div class="cta-actions r">
+    <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands" target="_blank" class="btn-primary"><span>GitHub Repository ↗</span></a>
+    <a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/tree/main/docs" target="_blank" class="btn-ghost">Documentation</a>
+  </div>
+  <div class="cta-inst r d1">
+    <span class="m" style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted);">git clone </span>
+    <span class="inst-cmd">https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands</span>
+  </div>
+  <p class="cta-note r d2">Requires: Linux 5.8+ · BTF support · Ubuntu 22/24.04 LTS recommended</p>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div>
+    <div class="ft-logo">Kernel Borderlands</div>
+    <div class="ft-sub">// Behavioral Defense at Ring Zero</div>
+    <div style="margin-top:14px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim);line-height:2;">
+      Open Source · Under Active Development<br>
+      Kernel-level runtime defense research platform
+    </div>
+  </div>
+  <ul class="ft-links">
+    <li><a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands" target="_blank">GitHub</a></li>
+    <li><a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/tree/main/docs" target="_blank">Docs</a></li>
+    <li><a href="https://github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/blob/main/docs/KB.pdf" target="_blank">Whitepaper</a></li>
+    <li><a href="#arch">Architecture</a></li>
+    <li><a href="#core">CO-RE</a></li>
+    <li><a href="#zones">Zone Model</a></li>
+    <li><a href="#aads">AADS</a></li>
+    <li><a href="#pipelines">Pipelines</a></li>
+    <li><a href="#stack">Repo Layout</a></li>
+    <li><a href="#operator">Operator</a></li>
+    <li><a href="#team">Team</a></li>
+    <li><a href="#quickstart">Quick Start</a></li>
+  </ul>
+</footer>
+<div class="ft-bottom">
+  <span>Kernel Borderlands · Open Source</span>
+  <span style="color:var(--volt)">Under Active Development — Ring Zero</span>
+</div>
+
+<script>
+  // Cursor
+  const cur = document.getElementById('cur');
+  const ring = document.getElementById('ring');
+  let mx=0,my=0,rx=0,ry=0;
+  document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;});
+  (function loop(){
+    cur.style.left=mx+'px'; cur.style.top=my+'px';
+    rx+=(mx-rx)*.11; ry+=(my-ry)*.11;
+    ring.style.left=rx+'px'; ring.style.top=ry+'px';
+    requestAnimationFrame(loop);
+  })();
+
+  // Nav scroll
+  const nav=document.getElementById('nav');
+  window.addEventListener('scroll',()=>nav.classList.toggle('scrolled',window.scrollY>50),{passive:true});
+
+  // Scroll reveal
+  const obs=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('v');obs.unobserve(e.target);}});},{threshold:.1});
+  document.querySelectorAll('.r').forEach(el=>obs.observe(el));
+
+  // Waveform dividers — procedurally generated bars
+  ['wave1','wave2'].forEach((id,wi) => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    const count = Math.floor(el.offsetWidth / 4) || 220;
+    for(let i=0;i<count;i++){
+      const b = document.createElement('div');
+      b.className = 'wave-bar';
+      const h = 4 + Math.random()*24;
+      const dur = 0.7 + Math.random()*1.4;
+      const dl  = (Math.random()*2 + wi*0.3).toFixed(2);
+      b.style.cssText = `--h:${h}px;--dur:${dur}s;--dl:${dl}s;height:4px`;
+      el.appendChild(b);
+    }
+  });
+
+  // Hero parallax
+  const ht=document.querySelector('.hero-title');
+  window.addEventListener('scroll',()=>{if(ht)ht.style.transform=`translateY(${window.scrollY*.14}px)`;},{passive:true});
+</script>
+</body>
+</html>
