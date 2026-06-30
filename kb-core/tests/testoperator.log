@@ -1,0 +1,88 @@
+@UbuntuVM-eBPF:~/home/emergence/Desktop/kernel-borderlands/kb-core/tests$ ./test_all_hooks.sh 
+
+╔════════════════════════════════════════════╗
+║   KB Core — All Hooks Test Script           ║
+║   Watch kbd_sensor output in Terminal 1     ║
+╚════════════════════════════════════════════╝
+
+Starting in 3 seconds...
+
+════════════════════════════════════════════
+  TEST 1 — process_exec / process_exit
+════════════════════════════════════════════
+Expect: [process_exec] and [process_exit] events
+  ✓ Triggered: process_exec / process_exit (via ls, true)
+
+════════════════════════════════════════════
+  TEST 2 — privilege_change
+════════════════════════════════════════════
+Expect: [privilege_change] event, possibly 🔴 ESCALATION
+(Requires sudo — will prompt for password)
+[sudo] password for zenith: 
+sudo: a password is required
+[sudo] password for zenith: 
+sudo: a password is required
+  ✓ Triggered: privilege_change (via sudo whoami)
+
+════════════════════════════════════════════
+  TEST 3 — file_access (sensitive paths)
+════════════════════════════════════════════
+Expect: [file_access] 🔴 SENSITIVE for each path
+  ✓ Triggered: file_access — /etc/shadow
+  ✓ Triggered: file_access — /etc/passwd
+[sudo] password for zenith: 
+  ✓ Triggered: file_access — /etc/sudoers
+  ✓ Triggered: file_access — /root/
+
+════════════════════════════════════════════
+  TEST 4 — network_connect (outbound)
+════════════════════════════════════════════
+Expect: [network_connect] -> <ip>:<port>
+  ✓ Triggered: network_connect (via curl to example.com:80)
+  ✓ Triggered: network_connect (via curl to 1.1.1.1:443)
+
+════════════════════════════════════════════
+  TEST 5 — network_bind (listening)
+════════════════════════════════════════════
+Expect: [network_bind] listen <ip>:<port>
+  ✓ Triggered: network_bind (python socket on 0.0.0.0:9999)
+
+════════════════════════════════════════════
+  TEST 6 — memory_mmap (RWX / anon+exec)
+════════════════════════════════════════════
+Expect: [memory_mmap] 🔴 RWX! ANON
+  ✓ Triggered: memory_mmap (RWX anonymous mapping)
+
+════════════════════════════════════════════
+  TEST 7 — memory_mprotect (W^X violation pattern)
+════════════════════════════════════════════
+Expect: [memory_mprotect] event with PROT containing X
+mprotect(PROT_READ|PROT_EXEC) succeeded — W^X transition triggered
+  ✓ Triggered: memory_mprotect (write→exec transition via ctypes libc call)
+
+════════════════════════════════════════════
+  TEST 8 — Composite Attack Simulation
+════════════════════════════════════════════
+Simulates a realistic chain: exec -> network -> privilege
+Expect: multiple correlated events from one lineage
+  [chain] spawned bash
+  [chain] outbound connection made
+  [chain] sensitive file touched
+  ✓ Triggered: composite chain (bash -> curl -> cat /etc/passwd)
+
+════════════════════════════════════════════
+  TEST COMPLETE
+════════════════════════════════════════════
+
+All 9 event types have been triggered:
+  1. process_exec
+  2. process_exit
+  3. privilege_change
+  4. file_access
+  5. network_connect
+  6. network_bind
+  7. memory_mmap
+  8. memory_mprotect
+  9. (composite chain — multiple types correlated)
+
+Check Terminal 1 (kbd_sensor) output to confirm all fired.

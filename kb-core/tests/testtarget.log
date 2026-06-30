@@ -1,0 +1,390 @@
+ops@UbuntuVM-eBPF:~/Desktop/kernel-borderlands/kb-core/build$ sudo ./kbd_sensor 
+╔══════════════════════════════════════════════╗
+║   KB Unified Sensor — kbd-sensor             ║
+║   All 6 hooks, single ring buffer            ║
+╚══════════════════════════════════════════════╝
+
+All 6 hooks attached. Streaming unified events...
+Press Ctrl+C to stop.
+
+[process_exec     ] PID=7714   PPID=7663   UID=1001  COMM=test_all_hooks.  
+[process_exec     ] PID=7714   PPID=7663   UID=1001  COMM=bash             
+[process_exec     ] PID=7715   PPID=7714   UID=1001  COMM=sleep            
+[network_connect  ] PID=1048   PPID=1      UID=101   COMM=systemd-resolve  -> 8.8.8.8:53
+[process_exit     ] PID=7715   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7716   PPID=7714   UID=1001  COMM=ls               
+[process_exit     ] PID=7716   PPID=7714   UID=1001  COMM=ls               
+[process_exec     ] PID=7717   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7306   PPID=3635   UID=1000  COMM=sleep            
+[process_exec     ] PID=7718   PPID=3635   UID=1000  COMM=sleep            
+[process_exit     ] PID=7717   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7719   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7719   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7720   PPID=7714   UID=1001  COMM=sudo             
+[file_access      ] PID=7720   PPID=7714   UID=1001  COMM=sudo             file=/etc/sudo.conf 🔴 SENSITIVE
+[file_access      ] PID=7720   PPID=7714   UID=1001  COMM=sudo             file=/etc/sudo.conf 🔴 SENSITIVE
+[file_access      ] PID=7720   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7720   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7720   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[privilege_change ] PID=7720   PPID=7714   UID=1001  COMM=sudo             uid:1001->0 euid:0->0 🔴 ESCALATION
+[privilege_change ] PID=7720   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:0->1 
+[file_access      ] PID=7720   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers 🔴 SENSITIVE
+[privilege_change ] PID=7720   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:1->0 🔴 ESCALATION
+[file_access      ] PID=7720   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers.d 🔴 SENSITIVE
+[file_access      ] PID=7720   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers.d 🔴 SENSITIVE
+[privilege_change ] PID=7720   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:0->1 
+[file_access      ] PID=7720   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers.d/README 🔴 SENSITIVE
+[privilege_change ] PID=7720   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:1->0 🔴 ESCALATION
+[privilege_change ] PID=7720   PPID=7714   UID=0     COMM=sudo             uid:0->1001 euid:0->0 🔴 ESCALATION
+[file_access      ] PID=7720   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7720   PPID=7714   UID=1001  COMM=sudo             file=/etc/shadow 🔴 SENSITIVE
+[file_access      ] PID=7720   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7720   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[process_exit     ] PID=7720   PPID=7714   UID=1001  COMM=sudo             
+[process_exec     ] PID=7721   PPID=7714   UID=1001  COMM=sudo             
+[file_access      ] PID=7721   PPID=7714   UID=1001  COMM=sudo             file=/etc/sudo.conf 🔴 SENSITIVE
+[file_access      ] PID=7721   PPID=7714   UID=1001  COMM=sudo             file=/etc/sudo.conf 🔴 SENSITIVE
+[file_access      ] PID=7721   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7721   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7721   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[privilege_change ] PID=7721   PPID=7714   UID=1001  COMM=sudo             uid:1001->0 euid:0->0 🔴 ESCALATION
+[privilege_change ] PID=7721   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:0->1 
+[file_access      ] PID=7721   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers 🔴 SENSITIVE
+[privilege_change ] PID=7721   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:1->0 🔴 ESCALATION
+[file_access      ] PID=7721   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers.d 🔴 SENSITIVE
+[file_access      ] PID=7721   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers.d 🔴 SENSITIVE
+[privilege_change ] PID=7721   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:0->1 
+[file_access      ] PID=7721   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers.d/README 🔴 SENSITIVE
+[privilege_change ] PID=7721   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:1->0 🔴 ESCALATION
+[privilege_change ] PID=7721   PPID=7714   UID=0     COMM=sudo             uid:0->1001 euid:0->0 🔴 ESCALATION
+[file_access      ] PID=7721   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7721   PPID=7714   UID=1001  COMM=sudo             file=/etc/shadow 🔴 SENSITIVE
+[file_access      ] PID=7721   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7721   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[process_exit     ] PID=7721   PPID=7714   UID=1001  COMM=sudo             
+[process_exec     ] PID=7722   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7722   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7723   PPID=7714   UID=1001  COMM=cat              
+[file_access      ] PID=7723   PPID=7714   UID=1001  COMM=cat              file=/etc/shadow 🔴 SENSITIVE
+[process_exit     ] PID=7723   PPID=7714   UID=1001  COMM=cat              
+[process_exec     ] PID=7724   PPID=7714   UID=1001  COMM=sleep            
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b30000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b30000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b30000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b30000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b30000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b30000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b30000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b31000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b31000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b31000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b31000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b31000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b31000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b31000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b31000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b31000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b31000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b32000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b32000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b32000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b32000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b32000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b33000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b34000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b34000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b34000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b34000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b34000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b34000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b34000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b34000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[network_bind     ] PID=1406   PPID=1      UID=0     COMM=tailscaled       listen 0.0.0.0:0
+[network_bind     ] PID=1406   PPID=1      UID=0     COMM=tailscaled       listen 0.0.0.0:0
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b35000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b36000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b36000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b36000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b36000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b36000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b36000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b36000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b37000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b37000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b37000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b38000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b39000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b39000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b39000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b39000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b39000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b39000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b39000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b39000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b39000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b39000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3a000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3b000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3c000 len=8192 prot=R-X 
+[memory_mmap      ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3e000 len=65536 prot=R-X ANON
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3e000 len=12288 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b40000 len=12288 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b42000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b42000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b42000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b42000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b42000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b42000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b43000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b44000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b44000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b44000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b44000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b44000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b44000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b44000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b44000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b44000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b45000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b45000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b46000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b46000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b47000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b47000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b47000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b47000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b48000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b48000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b49000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b49000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b49000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b49000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[process_exit     ] PID=7724   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7725   PPID=7714   UID=1001  COMM=cat              
+[file_access      ] PID=7725   PPID=7714   UID=1001  COMM=cat              file=/etc/passwd 🔴 SENSITIVE
+[process_exit     ] PID=7725   PPID=7714   UID=1001  COMM=cat              
+[process_exec     ] PID=7726   PPID=7714   UID=1001  COMM=sleep            
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b2e000 len=65536 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b0e000 len=65536 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b3e000 len=53248 prot=R-X 
+[process_exit     ] PID=7726   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7727   PPID=7714   UID=1001  COMM=sudo             
+[file_access      ] PID=7727   PPID=7714   UID=1001  COMM=sudo             file=/etc/sudo.conf 🔴 SENSITIVE
+[file_access      ] PID=7727   PPID=7714   UID=1001  COMM=sudo             file=/etc/sudo.conf 🔴 SENSITIVE
+[file_access      ] PID=7727   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7727   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7727   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[privilege_change ] PID=7727   PPID=7714   UID=1001  COMM=sudo             uid:1001->0 euid:0->0 🔴 ESCALATION
+[privilege_change ] PID=7727   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:0->1 
+[file_access      ] PID=7727   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers 🔴 SENSITIVE
+[privilege_change ] PID=7727   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:1->0 🔴 ESCALATION
+[file_access      ] PID=7727   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers.d 🔴 SENSITIVE
+[file_access      ] PID=7727   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers.d 🔴 SENSITIVE
+[privilege_change ] PID=7727   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:0->1 
+[file_access      ] PID=7727   PPID=7714   UID=0     COMM=sudo             file=/etc/sudoers.d/README 🔴 SENSITIVE
+[privilege_change ] PID=7727   PPID=7714   UID=0     COMM=sudo             uid:0->0 euid:1->0 🔴 ESCALATION
+[privilege_change ] PID=7727   PPID=7714   UID=0     COMM=sudo             uid:0->1001 euid:0->0 🔴 ESCALATION
+[file_access      ] PID=7727   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[file_access      ] PID=7727   PPID=7714   UID=1001  COMM=sudo             file=/etc/shadow 🔴 SENSITIVE
+[file_access      ] PID=7727   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[network_connect  ] PID=1048   PPID=1      UID=101   COMM=systemd-resolve  -> 8.8.8.8:53
+[network_connect  ] PID=1200   PPID=1      UID=0     COMM=NetworkManager   -> 185.125.190.101:80
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4a000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4b000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4c000 len=8192 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4d000 len=4096 prot=R-X 
+[memory_mprotect  ] PID=1586   PPID=1542   UID=128   COMM=gnome-shell      addr=0x1f7684b4d000 len=4096 prot=R-X 
+[file_access      ] PID=7727   PPID=7714   UID=1001  COMM=sudo             file=/etc/passwd 🔴 SENSITIVE
+[process_exit     ] PID=7727   PPID=7714   UID=1001  COMM=sudo             
+[process_exec     ] PID=7728   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7728   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7729   PPID=7714   UID=1001  COMM=ls               
+[file_access      ] PID=7729   PPID=7714   UID=1001  COMM=ls               file=/root/ 🔴 SENSITIVE
+[process_exit     ] PID=7729   PPID=7714   UID=1001  COMM=ls               
+[process_exec     ] PID=7730   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7730   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7731   PPID=7714   UID=1001  COMM=curl             
+[file_access      ] PID=7731   PPID=7714   UID=1001  COMM=curl             file=/etc/passwd 🔴 SENSITIVE
+[network_connect  ] PID=7731   PPID=7714   UID=1001  COMM=curl             -> 127.0.0.53:53
+[network_connect  ] PID=7731   PPID=7714   UID=1001  COMM=curl             -> 104.20.23.154:80
+[network_connect  ] PID=7731   PPID=7714   UID=1001  COMM=curl             -> 172.66.147.243:80
+[process_exit     ] PID=7731   PPID=7714   UID=1001  COMM=curl             
+[network_connect  ] PID=7731   PPID=7714   UID=1001  COMM=curl             -> 104.20.23.154:80
+[process_exit     ] PID=7731   PPID=7714   UID=1001  COMM=curl             
+[process_exec     ] PID=7733   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7733   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7734   PPID=7714   UID=1001  COMM=curl             
+[file_access      ] PID=7734   PPID=7714   UID=1001  COMM=curl             file=/etc/passwd 🔴 SENSITIVE
+[network_connect  ] PID=7734   PPID=7714   UID=1001  COMM=curl             -> 1.1.1.1:443
+[process_exit     ] PID=7734   PPID=7714   UID=1001  COMM=curl             
+[process_exec     ] PID=7735   PPID=7714   UID=1001  COMM=sleep            
+[network_connect  ] PID=2108   PPID=1      UID=131   COMM=cups-browsed     -> 127.0.0.53:53
+[network_connect  ] PID=1048   PPID=1      UID=101   COMM=systemd-resolve  -> 8.8.8.8:53
+[network_connect  ] PID=2108   PPID=1      UID=131   COMM=cups-browsed     -> 127.0.0.53:53
+[network_connect  ] PID=2108   PPID=1      UID=131   COMM=cups-browsed     -> 127.0.0.53:53
+[network_connect  ] PID=1048   PPID=1      UID=101   COMM=systemd-resolve  -> 8.8.8.8:53
+[network_connect  ] PID=2108   PPID=1      UID=131   COMM=cups-browsed     -> 127.0.0.53:53
+[network_connect  ] PID=1048   PPID=1      UID=101   COMM=systemd-resolve  -> 8.8.8.8:53
+[network_connect  ] PID=2108   PPID=1      UID=131   COMM=cups-browsed     -> 127.0.0.53:53
+[network_connect  ] PID=2108   PPID=1      UID=131   COMM=cups-browsed     -> 127.0.0.53:53
+[network_connect  ] PID=1048   PPID=1      UID=101   COMM=systemd-resolve  -> 100.100.100.100:53
+[network_connect  ] PID=2108   PPID=1      UID=131   COMM=cups-browsed     -> 127.0.0.53:53
+[process_exit     ] PID=7735   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7736   PPID=7714   UID=1001  COMM=python3          
+[network_bind     ] PID=7736   PPID=7714   UID=1001  COMM=python3          listen 0.0.0.0:9999
+[process_exit     ] PID=7736   PPID=7714   UID=1001  COMM=python3          
+[process_exec     ] PID=7737   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7737   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7738   PPID=7714   UID=1001  COMM=python3          
+[memory_mmap      ] PID=7738   PPID=7714   UID=1001  COMM=python3          addr=0x0 len=4096 prot=RWX 🔴 RWX! ANON
+[process_exit     ] PID=7738   PPID=7714   UID=1001  COMM=python3          
+[process_exec     ] PID=7739   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7739   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7740   PPID=7714   UID=1001  COMM=python3          
+[memory_mprotect  ] PID=7740   PPID=7714   UID=1001  COMM=python3          addr=0x74723a55e000 len=4096 prot=R-X 
+[process_exit     ] PID=7740   PPID=7714   UID=1001  COMM=python3          
+[process_exec     ] PID=7741   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7741   PPID=7714   UID=1001  COMM=sleep            
+[process_exec     ] PID=7742   PPID=7714   UID=1001  COMM=bash             
+[process_exec     ] PID=7743   PPID=7742   UID=1001  COMM=curl             
+[file_access      ] PID=7743   PPID=7742   UID=1001  COMM=curl             file=/etc/passwd 🔴 SENSITIVE
+[network_connect  ] PID=7743   PPID=7742   UID=1001  COMM=curl             -> 127.0.0.53:53
+[network_connect  ] PID=7743   PPID=7742   UID=1001  COMM=curl             -> 104.20.23.154:80
+[network_connect  ] PID=7743   PPID=7742   UID=1001  COMM=curl             -> 172.66.147.243:80
+[process_exit     ] PID=7743   PPID=7742   UID=1001  COMM=curl             
+[network_connect  ] PID=7743   PPID=7742   UID=1001  COMM=curl             -> 104.20.23.154:80
+[process_exit     ] PID=7743   PPID=7742   UID=1001  COMM=curl             
+[process_exec     ] PID=7745   PPID=7742   UID=1001  COMM=cat              
+[file_access      ] PID=7745   PPID=7742   UID=1001  COMM=cat              file=/etc/passwd 🔴 SENSITIVE
+[process_exit     ] PID=7745   PPID=7742   UID=1001  COMM=cat              
+[process_exit     ] PID=7742   PPID=7714   UID=1001  COMM=bash             
+[process_exec     ] PID=7746   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7746   PPID=7714   UID=1001  COMM=sleep            
+[process_exit     ] PID=7714   PPID=7663   UID=1001  COMM=bash             
+[process_exit     ] PID=396    PPID=1      UID=0     COMM=journal-offline  
+[process_exit     ] PID=396    PPID=1      UID=0     COMM=journal-offline  
+[process_exit     ] PID=396    PPID=1      UID=0     COMM=journal-offline  
+[network_bind     ] PID=1406   PPID=1      UID=0     COMM=tailscaled       listen 0.0.0.0:0
+[network_bind     ] PID=1406   PPID=1      UID=0     COMM=tailscaled       listen 0.0.0.0:0
+[process_exit     ] PID=552    PPID=2      UID=0     COMM=kworker/dying    
+[network_bind     ] PID=1406   PPID=1      UID=0     COMM=tailscaled       listen 0.0.0.0:0
+[network_bind     ] PID=1406   PPID=1      UID=0     COMM=tailscaled       listen 0.0.0.0:0
+^C
+Shutting down kbd-sensor...
+@UbuntuVM-eBPF:~/Desktop/kernel-borderlands/kb-core/build$ 
