@@ -1,4 +1,4 @@
-@UbuntuVM-eBPF:~/home/emergence/Desktop/kernel-borderlands/kb-core/tests$ ./test_all_hooks.sh 
+ops@UbuntuVM-eBPF:~/Desktop/kernel-borderlands/kb-core/tests$ ./test_all_hooks.sh 
 
 ╔════════════════════════════════════════════╗
 ║   KB Core — All Hooks Test Script           ║
