@@ -21,5 +21,5 @@ cargo build --release
 ```
 
 ## Owner
-Pardhu Varma — Systems & Security (Rust)
-Tejaswini — Defensive Security (Collab)
+- Pardhu Varma — Systems & Security (Rust)
+- Tejaswini — Defensive Security (Collab)

@@ -43,6 +43,6 @@ make run
 - [ ] Policy Engine reading `config/policy.yaml`
 
 ## Owner
-Tejaswini — Defensive Security, Control & Communication Pipelines.
-Pardhu Varma — Security, gRPC support (Collab)
+- Tejaswini — Defensive Security, Control & Communication Pipelines.
+- Pardhu Varma — Security, gRPC support (Collab)
 

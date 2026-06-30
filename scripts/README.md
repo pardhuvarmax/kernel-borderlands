@@ -9,7 +9,7 @@ Utility scripts for setup, attack simulation, and dataset generation.
 
 
 ## Owner
-Karthik — Testing & Offensive Security
-Pardhu Varma — Testing & Safety checks validation (Collab)
-Tejaswini —  Defensive Security Implementation (Collab)
-Rupa — Environment & Dataset Processing (Collab)
+- Karthik — Testing & Offensive Security
+- Pardhu Varma — Testing & Safety checks validation (Collab)
+- Tejaswini —  Defensive Security Implementation (Collab)
+- Rupa — Environment & Dataset Processing (Collab)

@@ -25,6 +25,6 @@ python main.py
 ```
 
 ## Owner
-Karthik — AI & Agentic Systems,
-Pardhu Varma — ML & Systems (Collab)
+- Karthik — AI & Agentic Systems,
+- Pardhu Varma — ML & Systems (Collab)
 
