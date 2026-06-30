@@ -1,4 +1,4 @@
-# Cross-Kernel Portability
+# Cross-Kernel Portability 
 
 <img align="right" width="200" src="https://github.com/user-attachments/assets/ba4fdc53-151c-4477-b146-bc37b6859749" alt="Kernel Borderlands">
 
@@ -8,7 +8,7 @@ The Kernel Borderlands (KB) is designed to operate on any Linux kernel that prov
 
 Unlike traditional kernel modules, which depend on exact kernel versions and kernel structure layouts, KB targets **kernel capabilities** rather than specific Linux releases.
 
-The objective is that a single source tree and a single behavioral implementation can execute across multiple kernel versions with minimal or no modification.
+The objective is that a single source tree and a single behavioral implementation can execute across multiple kernel versions with minimal or no modification...
 
 ---
 
