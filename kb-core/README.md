@@ -22,7 +22,7 @@ Implements all 6 hook points via eBPF CO-RE programs.
 ```bash
 make vmlinux
 make
-sudo ./kb_process
+sudo ./kb_sensor
 ```
 
 ## Owner
