@@ -1,17 +1,22 @@
-# Userspace Loaders
+# Userspace
 
-C programs that load, attach, and read from eBPF programs.
-These bridge the kernel eBPF layer and the Go control plane.
+The **Userspace** layer is the native runtime of KB Core. It receives telemetry from the eBPF layer, performs behavioral analysis, and communicates behavioral intelligence to the Go Control Plane.
 
-## Programs
-- `kb_process.c`   — Loader for process lifecycle eBPF
-- `kb_syscall.c`   — Loader for syscall tracker
-- `kb_privilege.c` — Loader for privilege monitor
-- `kb_file.c`      — Loader for file access monitor
-- `kb_network.c`   — Loader for network monitor
-- `kb_memory.c`    — Loader for memory monitor
+The runtime is organized into modular subsystems with clearly defined responsibilities.
 
-## Notes
-- Each loader reads from perf ring buffer
-- Forwards events to Control Plane via Unix socket / gRPC
-- Uses libbpf skeleton API
+## Components
+
+| Directory | Responsibility |
+|-----------|----------------|
+| `collectors/` | Receive and normalize telemetry from individual eBPF programs. |
+| `sensor/` | Unified event ingestion and dispatch. |
+| `behavior/` | Stateful behavioral analysis, scoring, and process intelligence. |
+| `bridge/` | IPC between the native runtime and the Go Control Plane. |
+
+## Design Principles
+
+- Single responsibility per subsystem.
+- Low-latency native processing.
+- Stateful behavioral analysis.
+- Clear separation between analytics and orchestration.
+- Modular and extensible architecture.
