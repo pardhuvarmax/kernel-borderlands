@@ -8,7 +8,6 @@
 - K. Rupa Yeshvitha — 2311CS040082
 
 
-
 ## KB Team Information
 
 Kernel Borderlands (KB) is developed collaboratively across multiple engineering disciplines, including Linux kernel development, systems programming, eBPF, artificial intelligence, cybersecurity, distributed systems, backend engineering, frontend development, and user experience.
