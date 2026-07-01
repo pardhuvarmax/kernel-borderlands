@@ -1,19 +1,30 @@
 # KB Core Makefile — All 6 Hooks
+
 OUTPUT     := .output
 BUILD      := build
+
+COLLECTORS := userspace/collectors
+SENSOR      := userspace/sensor
+BEHAVIOR    := userspace/behavior
+BRIDGE      := userspace/bridge
+
 BPFTOOL    := $(shell which bpftool)
 CLANG      := clang
+
 ARCH       := $(shell uname -m | \
                sed 's/x86_64/x86/' | \
                sed 's/aarch64/arm64/')
+
 LIBBPF     := ../libbpf/src/libbpf.a
+
 INCLUDES   := -I$(OUTPUT) -I../libbpf/include/uapi -Iinclude
 CFLAGS     := -g -Wall $(INCLUDES)
 BPF_CFLAGS := -g -O2 -target bpf \
-               -D__TARGET_ARCH_$(ARCH) $(INCLUDES)
+              -D__TARGET_ARCH_$(ARCH) $(INCLUDES)
 
 HOOKS := kb_process kb_syscall kb_privilege \
-         kb_file kb_network kb_memory
+         kb_file kb_network kb_memory \
+         kbd_sensor
 
 BINARIES := $(addprefix $(BUILD)/,$(HOOKS))
 
@@ -21,12 +32,18 @@ BINARIES := $(addprefix $(BUILD)/,$(HOOKS))
 
 all: $(BINARIES)
 
-# ── vmlinux.h ──────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────
+# Generate vmlinux.h
+# ────────────────────────────────────────────────────────────
+
 vmlinux:
 	$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux \
 		format c > include/vmlinux.h
 
-# ── Generic rules for all hooks ────────────────────────────
+# ────────────────────────────────────────────────────────────
+# Generic eBPF Rules
+# ────────────────────────────────────────────────────────────
+
 $(OUTPUT)/%.bpf.o: ebpf/%.bpf.c include/vmlinux.h
 	@mkdir -p $(OUTPUT)
 	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
@@ -37,43 +54,50 @@ $(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o
 $(BUILD):
 	@mkdir -p $(BUILD)
 
-# Each binary links against libbpf
-# kb_memory and kb_network need no extra libs
-# kb_syscall needs -lm for math
+# ────────────────────────────────────────────────────────────
+# Userspace Collectors
+# ────────────────────────────────────────────────────────────
 
-$(BUILD)/kb_process: userspace/kb_process.c $(OUTPUT)/kb_process.skel.h | $(BUILD)
+$(BUILD)/kb_process: $(COLLECTORS)/kb_process.c $(OUTPUT)/kb_process.skel.h | $(BUILD)
 	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
-$(BUILD)/kb_syscall: userspace/kb_syscall.c $(OUTPUT)/kb_syscall.skel.h | $(BUILD)
+$(BUILD)/kb_syscall: $(COLLECTORS)/kb_syscall.c $(OUTPUT)/kb_syscall.skel.h | $(BUILD)
 	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -lm -o $@
 
-$(BUILD)/kb_privilege: userspace/kb_privilege.c $(OUTPUT)/kb_privilege.skel.h | $(BUILD)
+$(BUILD)/kb_privilege: $(COLLECTORS)/kb_privilege.c $(OUTPUT)/kb_privilege.skel.h | $(BUILD)
 	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
-$(BUILD)/kb_file: userspace/kb_file.c $(OUTPUT)/kb_file.skel.h | $(BUILD)
+$(BUILD)/kb_file: $(COLLECTORS)/kb_file.c $(OUTPUT)/kb_file.skel.h | $(BUILD)
 	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
-$(BUILD)/kb_network: userspace/kb_network.c $(OUTPUT)/kb_network.skel.h | $(BUILD)
+$(BUILD)/kb_network: $(COLLECTORS)/kb_network.c $(OUTPUT)/kb_network.skel.h | $(BUILD)
 	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
-$(BUILD)/kb_memory: userspace/kb_memory.c $(OUTPUT)/kb_memory.skel.h | $(BUILD)
+$(BUILD)/kb_memory: $(COLLECTORS)/kb_memory.c $(OUTPUT)/kb_memory.skel.h | $(BUILD)
 	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
-# Add near the bottom, before clean:
+# ────────────────────────────────────────────────────────────
+# Unified Sensor
+# ────────────────────────────────────────────────────────────
 
-$(BUILD)/kbd_sensor: userspace/kbd_sensor.c $(OUTPUT)/kbd_sensor.skel.h | $(BUILD)
+$(BUILD)/kbd_sensor: $(SENSOR)/kbd_sensor.c $(OUTPUT)/kbd_sensor.skel.h | $(BUILD)
 	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
-kbd_sensor: $(BUILD)/kbd_sensor
+# ────────────────────────────────────────────────────────────
+# Convenience Targets
+# ────────────────────────────────────────────────────────────
 
-# ── Convenience targets (build/run by short name) ──────────
-kb_process: $(BUILD)/kb_process
-kb_syscall: $(BUILD)/kb_syscall
-kb_privilege: $(BUILD)/kb_privilege
-kb_file: $(BUILD)/kb_file
-kb_network: $(BUILD)/kb_network
-kb_memory: $(BUILD)/kb_memory
+kb_process:    $(BUILD)/kb_process
+kb_syscall:    $(BUILD)/kb_syscall
+kb_privilege:  $(BUILD)/kb_privilege
+kb_file:       $(BUILD)/kb_file
+kb_network:    $(BUILD)/kb_network
+kb_memory:     $(BUILD)/kb_memory
+kbd_sensor:    $(BUILD)/kbd_sensor
 
-# ── Clean ───────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────
+# Clean
+# ────────────────────────────────────────────────────────────
+
 clean:
 	rm -rf $(OUTPUT) $(BUILD)
