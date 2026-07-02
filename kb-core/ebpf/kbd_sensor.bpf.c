@@ -84,6 +84,19 @@ struct {
     __type(value, __u64);
 } kb_syscall_totals SEC(".maps");
 
+// Per-process, per-syscall-number counts — the actual distribution
+// needed for Shannon entropy / KL divergence scoring. kb_syscall_totals
+// alone (a single scalar) cannot produce entropy; this is what was
+// missing from the unified object versus the standalone kb_syscall
+// collector. Key: (pid << 32 | syscall_nr). Sized generously since
+// most processes touch well under 512 distinct syscalls.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, KB_MAX_PROCESSES * 64);
+    __type(key,   __u64);
+    __type(value, __u64);
+} kb_syscall_counts SEC(".maps");
+
 struct kb_cred_snapshot {
     __u32 uid;
     __u32 gid;
@@ -175,6 +188,16 @@ int kb_handle_syscall(struct trace_event_raw_sys_enter *ctx)
     } else {
         __u64 one = 1;
         bpf_map_update_elem(&kb_syscall_totals, &pid, &one, BPF_ANY);
+    }
+
+    // Per-syscall-number breakdown — feeds entropy calc in userspace.
+    __u64 count_key = ((__u64)pid << 32) | (__u32)syscall_nr;
+    __u64 *count = bpf_map_lookup_elem(&kb_syscall_counts, &count_key);
+    if (count) {
+        __sync_fetch_and_add(count, 1);
+    } else {
+        __u64 one = 1;
+        bpf_map_update_elem(&kb_syscall_counts, &count_key, &one, BPF_ANY);
     }
 
     __u64 *t = bpf_map_lookup_elem(&kb_syscall_totals, &pid);

@@ -15,6 +15,28 @@
 #include <arpa/inet.h>
 #include <bpf/libbpf.h>
 #include "../.output/kbd_sensor.skel.h"
+#include "../../include/kb_scoring.h"
+#include "../bridge/kb_bridge.h"
+
+// Send a full ProcessState at most once every N events per process,
+// plus always on zone change. Avoids hammering the socket on hot
+// pids (e.g. tight syscall loops) while keeping the Go side's view
+// reasonably fresh. Tune once Teju has real throughput numbers.
+#define KB_STATE_SYNC_EVERY_N 20
+
+static int   bridge_fd = -1;
+static char  bridge_sock_path[108] = KB_BRIDGE_DEFAULT_SOCK;
+
+// Reconnect on demand rather than crashing the sensor if kbd's
+// listener isn't up yet / drops. Events are dropped (not buffered)
+// while disconnected — buffering is a deliberate non-goal for now,
+// call this out if Teju's side needs replay/backfill instead.
+static void bridge_ensure_connected(void)
+{
+    if (bridge_fd >= 0)
+        return;
+    bridge_fd = kb_bridge_try_connect(bridge_sock_path);
+}
 
 #define KB_EVT_PROCESS_EXEC      0
 #define KB_EVT_PROCESS_EXIT      1
@@ -25,41 +47,6 @@
 #define KB_EVT_NETWORK_BIND      6
 #define KB_EVT_MEMORY_MMAP       7
 #define KB_EVT_MEMORY_MPROTECT   8
-
-struct kb_unified_event {
-    __u32 pid;
-    __u32 ppid;
-    __u32 uid;
-    __u8  comm[16];
-    __u8  event_type;
-    __u64 ts_ns;
-
-    __u32 syscall_nr;
-
-    __u32 old_uid;
-    __u32 new_uid;
-    __u32 old_euid;
-    __u32 new_euid;
-    __u64 cap_effective;
-    __u8  escalation;
-
-    __u8  filename[128];
-    __u8  sensitive;
-    __u32 flags;
-
-    __u32 saddr;
-    __u32 daddr;
-    __u16 sport;
-    __u16 dport;
-    __u8  proto;
-
-    __u64 addr;
-    __u64 length;
-    __u32 prot;
-    __u32 mmap_flags;
-    __u8  rwx;
-    __u8  anonymous;
-};
 
 static volatile int running = 1;
 void handle_sigint(int sig) { running = 0; }
@@ -92,12 +79,46 @@ static int handle_event(void *ctx, void *data, size_t sz)
 {
     const struct kb_unified_event *e = data;
 
-    // Suppress syscall noise — too frequent for clean demo output
-    // Syscall entropy is still being sampled in-kernel (every 100
-    // syscalls per process) and would feed the scoring engine in
-    // the real pipeline; this only suppresses the printf display.
+    // Suppress syscall noise — too frequent for clean demo output.
+    // NOTE: this also means KB_DIM_SYSCALL never gets scored from
+    // this path. Syscall entropy needs a separate periodic reader
+    // over kb_syscall_counts/kb_syscall_totals feeding
+    // kb_scoring_update_syscall_entropy() — that map isn't wired
+    // into kbd_sensor.bpf.c yet, so KB_DIM_SYSCALL sits at 0 for now.
     if (e->event_type == KB_EVT_SYSCALL)
         return 0;
+
+    // --- scoring + bridge send ---
+    // kb_unified_event here and the one in kb_scoring.h are two
+    // separate definitions kept in sync by hand (documented wart in
+    // kb_scoring.h) — cast is safe as long as layouts match.
+    kb_scoring_result_t r =
+        kb_scoring_update((const struct kb_unified_event *)e);
+
+    if (r.state) {
+        bridge_ensure_connected();
+        if (bridge_fd >= 0) {
+            int err = 0;
+
+            if (r.zone_changed) {
+                err = kb_bridge_send_zone_transition(
+                    bridge_fd, r.state->pid, r.prev_zone, r.state->zone,
+                    r.state->ema_score, e->ts_ns);
+            }
+
+            if (!err && (r.zone_changed ||
+                         r.state->event_count % KB_STATE_SYNC_EVERY_N == 0)) {
+                err = kb_bridge_send_state(bridge_fd, r.state);
+            }
+
+            if (err) {
+                // Peer went away mid-write — drop and reconnect on
+                // the next event rather than retry-looping here.
+                kb_bridge_close(bridge_fd);
+                bridge_fd = -1;
+            }
+        }
+    }
 
     char dst[INET_ADDRSTRLEN] = {0};
     char src[INET_ADDRSTRLEN] = {0};
@@ -165,6 +186,16 @@ int main(void)
     int err;
 
     signal(SIGINT, handle_sigint);
+    kb_scoring_init();
+
+    // Best-effort connect at startup; if kbd's listener isn't up yet
+    // this just falls through and handle_event()'s bridge_ensure_connected()
+    // retries opportunistically on later events. Not a fatal condition —
+    // the sensor should still run (and print) even with no bridge peer.
+    bridge_fd = kb_bridge_try_connect(bridge_sock_path);
+    if (bridge_fd < 0)
+        fprintf(stderr, "kbd_sensor: bridge not connected yet (%s) — will retry on events\n",
+                bridge_sock_path);
 
     printf("╔══════════════════════════════════════════════╗\n");
     printf("║   KB Unified Sensor — kbd-sensor             ║\n");
@@ -204,6 +235,7 @@ int main(void)
     printf("\nShutting down kbd-sensor...\n");
 
 cleanup:
+    kb_bridge_close(bridge_fd);
     ring_buffer__free(rb);
     kbd_sensor_bpf__destroy(skel);
     return err < 0 ? -err : 0;

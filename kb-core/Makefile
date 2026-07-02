@@ -17,7 +17,11 @@ ARCH       := $(shell uname -m | \
 
 LIBBPF     := ../libbpf/src/libbpf.a
 
-INCLUDES   := -I$(OUTPUT) -I../libbpf/include/uapi -Iinclude
+INCLUDES := \
+    -I$(OUTPUT) \
+    -Iinclude \
+    -I$(BRIDGE) \
+    -I../libbpf/include/uapi
 CFLAGS     := -g -Wall $(INCLUDES)
 BPF_CFLAGS := -g -O2 -target bpf \
               -D__TARGET_ARCH_$(ARCH) $(INCLUDES)
@@ -80,8 +84,14 @@ $(BUILD)/kb_memory: $(COLLECTORS)/kb_memory.c $(OUTPUT)/kb_memory.skel.h | $(BUI
 # Unified Sensor
 # ────────────────────────────────────────────────────────────
 
-$(BUILD)/kbd_sensor: $(SENSOR)/kbd_sensor.c $(OUTPUT)/kbd_sensor.skel.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
+SENSOR_SRCS := \
+    $(SENSOR)/kbd_sensor.c \
+    $(BEHAVIOR)/kb_scoring.c \
+    $(BRIDGE)/kb_bridge.c
+
+$(BUILD)/kbd_sensor: $(SENSOR_SRCS) $(OUTPUT)/kbd_sensor.skel.h | $(BUILD)
+	$(CLANG) $(CFLAGS) $(SENSOR_SRCS) \
+	    $(LIBBPF) -lelf -lz -lm -o $@
 
 # ────────────────────────────────────────────────────────────
 # Convenience Targets
