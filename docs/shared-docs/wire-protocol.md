@@ -75,7 +75,7 @@ Total: 2+1+1+4+4+4+8+8 = 32 bytes
   On kbd restart: kbd_sensor detects EPIPE and reconnects.
 
 - refer these files :
-    - [bridge files](kernel-borderlands/kb-core/userspace/bridge)
-    - [scoring engine](kernel-borderlands/kb-core/userspace/behavior)
-    - [scoring header](kernel-borderlands/kb-core/include/kb_scoring.h)
+    - [bridge files](../../kb-core/userspace/bridge)
+    - [scoring engine](../../kb-core/userspace/behavior)
+    - [scoring header](../../kb-core/include/kb_scoring.h)
 
