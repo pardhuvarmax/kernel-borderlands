@@ -1653,11 +1653,10 @@
       </div>
       <div class="layer-body">
         <div class="layer-name">Control Plane — kbd daemon</div>
-        <div class="layer-desc">Consumes ring buffer events, maintains per-process state (SQLite), evaluates YAML-defined operator policies, and exposes a gRPC API. All enforcement actions are authorized and executed exclusively through this layer. Audit logs written as append-only SHA-256 chained JSON to PostgreSQL.</div>
+        <div class="layer-desc">Consumes ring buffer events, manages a dual-tiered state topology (L1 lock-free Go heap cache backed by an asynchronous L2 embedded SQLite WAL data engine), evaluates YAML-defined operator policies, and exposes a gRPC-over-UDS API. All enforcement actions are authorized and executed exclusively through this layer. To mitigate ephemeral eBPF ring buffer volatility on boot, a cold-start initialization routine synchronizes current state by direct scraping of the /proc file system. Validated audit logs are committed out-of-band to an immutable, append-only SHA-256 chained JSON ledger within the L2 persistent layer.</div>
         <div class="layer-tags">
-          <span class="ltag">gRPC · protobuf</span>
+          <span class="ltag">gRPC</span>
           <span class="ltag">SQLite</span>
-          <span class="ltag">PostgreSQL</span>
           <span class="ltag">SHA-256 chain</span>
           <span class="ltag">Cobra CLI</span>
           <span class="ltag">seccomp · namespaces · cgroup v2</span>
