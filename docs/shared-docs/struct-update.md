@@ -1,7 +1,3 @@
-Yes — send her something like this:
-
----
-
 **Struct update — before you finalize `wire.go`:**
 
 `kb_wire_process_state` grew by one field since you last read it: added `double syscall_entropy_lifetime`, sitting between `ema_score` and `zone`. New size is **128 bytes** (not 120, not the spec's 122).
