@@ -2576,7 +2576,7 @@
   <div class="pipe-grid r">
     <div class="pipe-detail">
       <div class="pipe-detail-label">Inter-Agent</div>
-      <div class="pipe-detail-val">Apache Kafka · ZeroMQ</div>
+      <div class="pipe-detail-val">ZeroMQ/IPC</div>
     </div>
     <div class="pipe-detail">
       <div class="pipe-detail-label">State Store</div>
@@ -2584,7 +2584,7 @@
     </div>
     <div class="pipe-detail">
       <div class="pipe-detail-label">Audit Trail</div>
-      <div class="pipe-detail-val">SHA-256 chained · PostgreSQL</div>
+      <div class="pipe-detail-val">SHA-256 chained · SQLite-WAL</div>
     </div>
     <div class="pipe-detail">
       <div class="pipe-detail-label">Transport Security</div>
@@ -2647,11 +2647,10 @@
       </div>
       <div class="ss-body">
         <div class="ss-name">Control Plane Daemon</div>
-        <p class="ss-desc">The <code style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--volt)">kbd</code> daemon — consumes ring buffer events, maintains per-process state in SQLite, evaluates YAML operator policies, and exposes a gRPC API. All enforcement is authorized and executed exclusively here. SHA-256 chained audit log to PostgreSQL.</p>
+        <p class="ss-desc">The <code style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--volt)">kbd</code> daemon — Consumes ring buffer events, manages a dual-tiered state topology (L1 lock-free Go heap cache backed by an asynchronous L2 embedded SQLite WAL data engine), evaluates YAML-defined operator policies, and exposes a gRPC-over-UDS API. All enforcement actions are authorized and executed exclusively through this layer. To mitigate ephemeral eBPF ring buffer volatility on boot, a cold-start initialization routine synchronizes current state by direct scraping of the /proc file system. Validated audit logs are committed out-of-band to an immutable, append-only SHA-256 chained JSON ledger within the L2 persistent layer.</p>
         <div class="ss-tags">
-          <span class="ss-tag">gRPC · protobuf</span>
+          <span class="ss-tag">gRPC</span>
           <span class="ss-tag">SQLite</span>
-          <span class="ss-tag">PostgreSQL</span>
           <span class="ss-tag">seccomp</span>
           <span class="ss-tag">namespaces</span>
           <span class="ss-tag">cgroup v2</span>
@@ -2674,10 +2673,9 @@
       </div>
       <div class="ss-body">
         <div class="ss-name">Agent Defense Swarm</div>
-        <p class="ss-desc">Behavioral reasoning and multi-agent coordination — Judge, Jury, Executor over Apache Kafka with protobuf serialization. Optional and advisory: no enforcement occurs on agent recommendation alone. MARL infrastructure, QLoRA fine-tuning, Ray RLlib.</p>
+        <p class="ss-desc">Behavioral reasoning and multi-agent coordination — Judge, Jury, Executor over a decentralized, brokerless ZeroMQ mesh utilizing native Unix Domain Sockets with protobuf serialization. Optional and advisory: no enforcement occurs on agent recommendation alone. MARL infrastructure, QLoRA fine-tuning, Ray RLlib.</p>
         <div class="ss-tags">
           <span class="ss-tag">Judge · Jury · Executor</span>
-          <span class="ss-tag">Kafka 3.x</span>
           <span class="ss-tag">ZeroMQ</span>
           <span class="ss-tag">Ray RLlib</span>
           <span class="ss-tag">QLoRA</span>
