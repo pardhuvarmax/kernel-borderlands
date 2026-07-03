@@ -17,7 +17,7 @@
 #include <sys/un.h>
 
 #define KB_WIRE_MAGIC    0x4B42  // "KB"
-#define KB_WIRE_VERSION  1
+#define KB_WIRE_VERSION  2  // v2: added syscall_entropy_lifetime to ProcessState
 
 #define KB_WIRE_MSG_PROCESS_STATE    1
 #define KB_WIRE_MSG_ZONE_TRANSITION  2
@@ -37,9 +37,10 @@ struct kb_wire_process_state {
     char     comm[16];
     uint64_t start_time_ns;
     uint64_t last_updated_ns;
-    double   dim_score[KB_DIM_COUNT];
+    double   dim_score[KB_DIM_COUNT];      // dim_score[KB_DIM_SYSCALL] is windowed
     double   composite_score;
     double   ema_score;
+    double   syscall_entropy_lifetime;     // advisory, not part of composite/ema
     uint32_t zone;
     uint32_t event_count;
 };
@@ -166,10 +167,11 @@ int kb_bridge_send_state(int fd, const kb_process_state_t *s)
     w.start_time_ns    = s->start_time_ns;
     w.last_updated_ns  = s->last_updated_ns;
     memcpy(w.dim_score, s->dim_score, sizeof(w.dim_score));
-    w.composite_score  = s->composite_score;
-    w.ema_score        = s->ema_score;
-    w.zone             = (uint32_t)s->zone;
-    w.event_count      = s->event_count;
+    w.composite_score          = s->composite_score;
+    w.ema_score                = s->ema_score;
+    w.syscall_entropy_lifetime = s->syscall_entropy_lifetime;
+    w.zone                     = (uint32_t)s->zone;
+    w.event_count              = s->event_count;
 
     return send_framed(fd, &w, sizeof(w));
 }

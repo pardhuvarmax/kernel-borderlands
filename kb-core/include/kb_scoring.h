@@ -13,8 +13,6 @@
 #define KB_MAX_TRACKED_PROCS 10240
 #define KB_EMA_ALPHA         0.3   // weight on new sample vs history
 
-// Dimension weights sum to 1.0 — values taken from the "Weight: N%"
-// comments already present in each ebpf/kb_*.bpf.c header.
 typedef enum {
     KB_DIM_PROCESS   = 0,  // 20%
     KB_DIM_SYSCALL   = 1,  // 25% — NOT scored from kb_unified_event, see note in kb_scoring.c
@@ -31,7 +29,6 @@ typedef enum {
     KB_ZONE_BORDERLANDS = 2,
 } kb_zone_t;
 
-// Event type codes — must match kbd_sensor.c's KB_EVT_* defines exactly.
 #define KB_EVT_PROCESS_EXEC      0
 #define KB_EVT_PROCESS_EXIT      1
 #define KB_EVT_SYSCALL           2
@@ -42,9 +39,6 @@ typedef enum {
 #define KB_EVT_MEMORY_MMAP       7
 #define KB_EVT_MEMORY_MPROTECT   8
 
-// Mirrors struct kb_unified_event in userspace/sensor/kbd_sensor.c.
-// Kept as a separate definition (not shared via a common header) is a
-// known wart — worth moving both to one shared header once this compiles.
 struct kb_unified_event {
     uint32_t pid;
     uint32_t ppid;
@@ -85,23 +79,26 @@ typedef struct {
     uint32_t ppid;
     uint32_t uid;
     char     comm[16];
-
-    uint64_t start_time_ns;   // ts of first event seen for this pid —
-                               // PID-reuse guard for the enforcement side
+    uint64_t start_time_ns;
     uint64_t last_updated_ns;
 
-    double   dim_score[KB_DIM_COUNT]; // latest raw 0-100 score per dimension
-    double   composite_score;         // weighted sum of dim_score
-    double   ema_score;                // EMA of composite_score over time
+    double   dim_score[KB_DIM_COUNT]; // dim_score[KB_DIM_SYSCALL] is the WINDOWED
+                                       // (sliding) entropy — this is what drives
+                                       // composite_score/ema_score/zone below.
+    double   composite_score;
+    double   ema_score;
+
+    // Advisory only — does NOT feed composite_score/ema_score/zone.
+    // Full-lifetime syscall-distribution entropy for this pid, for
+    // audit/history purposes (e.g. "was this process ever unusual",
+    // vs. dim_score[KB_DIM_SYSCALL]'s "is it unusual right now").
+    double   syscall_entropy_lifetime;
 
     kb_zone_t zone;
     uint32_t  event_count;
     int       in_use;
 } kb_process_state_t;
 
-// Result of feeding one event in — the bridge reads zone_changed to
-// decide whether a ZoneTransition message needs to go out now, vs.
-// just letting the state ride in the next periodic ProcessState sync.
 typedef struct {
     kb_process_state_t *state;
     int        zone_changed;
@@ -109,16 +106,18 @@ typedef struct {
 } kb_scoring_result_t;
 
 void kb_scoring_init(void);
-
-// Feed one kb_unified_event into the engine. Handles process_exit
-// internally (removes the pid from the table after scoring the exit).
 kb_scoring_result_t kb_scoring_update(const struct kb_unified_event *evt);
 
-// Separate path for the syscall dimension — see note in kb_scoring.c
-// on why this can't come from kb_unified_event. entropy expected as
-// a 0-100 normalized score, already computed by the caller from
-// kb_syscall_counts / kb_syscall_totals.
+// Feeds dim_score[KB_DIM_SYSCALL] — expects a WINDOWED (sliding, e.g.
+// EMA-smoothed) entropy value, since this drives composite/zone and
+// should reflect current behavior, not lifetime history.
 kb_scoring_result_t kb_scoring_update_syscall_entropy(uint32_t pid, double entropy_0_100);
+
+// Sets syscall_entropy_lifetime only — no effect on composite/ema/zone.
+// No-op if the pid isn't already tracked (call after
+// kb_scoring_update_syscall_entropy for the same pid this scan, which
+// creates the slot if needed).
+void kb_scoring_set_syscall_entropy_lifetime(uint32_t pid, double entropy_0_100);
 
 kb_process_state_t *kb_scoring_get_state(uint32_t pid);
 void kb_scoring_remove(uint32_t pid);
