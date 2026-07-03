@@ -1,10 +1,11 @@
 ## ARCHITECTURAL DECISION RECORD 1 (ADR)
 
-## STATUS
-APPROVED/PROPOSED BY LEAD, DEVELOPER DECISIONS PENDING...
+* STATUS : APPROVED/PROPOSED BY LEAD, DEVELOPER DECISIONS PENDING...
 
-## CONTEXT & SYSTEM TOPOLOGY
+### CONTEXT & SYSTEM TOPOLOGY
+
 The Kernel Borderlands (kb-aads) subsystem acts as a high-performance endpoint security monitor operating at the boundary of Linux Kernel Ring 0 and User Space. Real-time system telemetry originates from kernel-level eBPF hooks via kbd_sensor, streaming metrics across a native Unix Domain Socket (UDS) Bridge directly into the Core-GoPlane IPC Bridge (wire.go, listener.go).
+
 The central hub (Go Control Plane) must ingest high-velocity event loops, maintain per-process state machines, evaluate YAML-defined operator policies, and provide a low-latency gRPC-over-UDS interface to the Python automated agent layer (kb-aads Subsystem).
 
 
@@ -26,7 +27,7 @@ Historically, Apache Kafka with Docker/Docker-Compose abstraction layers was pro
 
 ------------------------------
 
-## DECISION: EMBEDDED HYBRID TWO-TIER IN-PROCESS STORAGE ARCHITECTURE
+### DECISION: EMBEDDED HYBRID TWO-TIER IN-PROCESS STORAGE ARCHITECTURE
 
 We reject external message brokers (Apache Kafka) and client-server database daemons (PostgreSQL). We adopt a Two-Tier (L1 Cache / L2 Storage) In-Process Storage Engine built natively within the Go Control Plane kernel space wrapper.
 
@@ -44,9 +45,9 @@ No enforcement decision may synchronously depend on disk I/O.
 
 ------------------------------
 
-## RATIONALE & CRITICAL ENGINEERING METRICS
+### RATIONALE & CRITICAL ENGINEERING METRICS
 
-### 1. Eliminating the CGO Context-Switching Translation Tax
+#### 1. Eliminating the CGO Context-Switching Translation Tax
 
 Any native database driver written in C (including SQLite, [RocksDB](https://rocksdb.org/), and LevelDB) requires Go’s runtime allocator to transition via cgo.Crossing the Go↔C boundary through cgo introduces additional scheduling, marshalling, and runtime overhead. While often acceptable for infrequent operations, it is undesirable on the critical telemetry ingestion path : 
 
@@ -56,25 +57,25 @@ Any native database driver written in C (including SQLite, [RocksDB](https://roc
 
 This boundary translation taxes every synchronization transaction by a baseline overhead of ~50ns to 100ns per invocation before the storage layer executes logic. By routing the kernel ingestion loop straight to pure-Go L1 memory primitives, we execute state assignments in 30ns to 50ns, bypassing CGO entirely on the critical telemetry ingestion loop.
 
-### 2. Lockless Concurrency Isolation via Dual-Track Routing
+#### 2. Lockless Concurrency Isolation via Dual-Track Routing
 
 * Sync Hot Path (Ingestion ➔ Enforcement): listener.go reads raw byte strings from the kernel loop descriptor, and wire.go unpacks data structs natively. The control path updates L1 memory maps instantaneously. The Enforcement engine processes policy rules entirely within CPU L1/L2 caches.
 * Async Cold Path (Persistence ➔ Auditing): Database writes are offloaded to buffered Go memory channels (chan). A decoupled background worker group pulls batched intervals from the queues and pipes them down to SQLite disk space out-of-band. I/O wait-states and journal flush bottlenecks are safely isolated from eBPF event loops.
 
-### 3. Exploiting SQLite WAL (Write-Ahead Logging) Properties
+#### 3. Exploiting SQLite WAL (Write-Ahead Logging) Properties
 By specifying PRAGMA journal_mode=WAL; and PRAGMA synchronous=NORMAL;, the engine breaks the classic atomic file-lock constraint:
 
 * Single-Writer Dominance: The Go Control Plane holds exclusive, isolated write permission to the L2 file engine via a single pool wrapper (SetMaxOpenConns(1)), removing file lock contention.
 * Concurrent Zero-Block Readers: The Python kb-aads Subsystem and the operator plane dashboard pull live telemetry records via gRPC-over-UDS. SQLite uses shared memory mapping structures (-shm) to handle concurrent reads simultaneously as the Go background pipeline commits transactions—guaranteeing zero read blocks on the upstream monitoring endpoints.
 
-### 4. Rejection of Key-Value Systems (RocksDB / LevelDB)
+#### 4. Rejection of Key-Value Systems (RocksDB / LevelDB)
 While LSM-tree architectures offer rapid append write metrics, they break under complex evaluation rules. LevelDB limits access to exactly one OS process, creating blocking states for local debugging tools and external dashboard handlers. RocksDB adds extreme tuning complexity; unpredicted internal background compaction stalls trigger catastrophic write locks. Furthermore, raw byte Key-Value stores lack declarative query abstractions, forcing development of manual parsing code to correlate YAML security expressions with system processes. SQLite gives us native JSONB support and standardized relational SQL processing at minimal cost.
 
 ------------------------------
 
-## Go Store Architecture Definitions, & Implementation Referencing 
+### Go Store Architecture Definitions, & Implementation Referencing 
 
-### 1. Core State Definition & In-Memory Layout (process.go)
+#### 1. Core State Definition & In-Memory Layout (process.go)
 
 ```go
 // Package store implements the low-overhead L1/L2 state-machine.package store
@@ -133,7 +134,7 @@ func (s *CentralTelemetryStore) flushToL2Worker() {
 }
 ```
 
-### 2. Embedded Database Orchestration Schema (schema.go)
+#### 2. Embedded Database Orchestration Schema (schema.go)
 
 ```go
 // Package store maps the structured schema configurations.package store
@@ -194,15 +195,15 @@ func InitializePersistentEngine(dsn string) (*sql.DB, error) {
 
 ------------------------------
 
-## CONSEQUENCES & TRADE-OFFS
+### CONSEQUENCES & TRADE-OFFS
 
-### Positive
+#### Positive
 
 * Deterministic Nanosecond Latency: Intercept loops achieve ~30-100ns execution windows, safe from execution pauses and socket limits.
 * Minimal Infrastructure Footprint: Eliminates Docker orchestration wrappers, container runtime processes, and 1GB JRE overhead requirements. The total component footprint consumes less than 15MB RAM at idle.
 * Thread-Safe Data Extraction: The core data models can be shared simultaneously with multiple local processes (live_server.py, Python control nodes) without using manual tracking code.
 
-### Negative / Mitigations
+#### Negative / Mitigations
 
 * Volatile Memory Risk: Real-time state metrics inside the L1 layer that have not yet cleared the L2 channel buffer can be lost during an abrupt user-space crash or unexpected OS panic. Standard eBPF ring buffers (BPF_MAP_TYPE_RINGBUF) are non-persistent kernel memory structures; they do not natively support message replays upon consumer re-attachments.
 * Mitigation: The user-space control plane will treat the L1 memory cache as an ephemeral view. Upon recovery or cold start, the Go Control Plane will execute a rapid sweeping initialization phase—scanning the Linux /proc filesystem directly—to fully reconstruct the baseline process_state table in memory before activating the hot eBPF ingestion hook.
