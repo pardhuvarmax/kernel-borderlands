@@ -111,7 +111,7 @@ kb_scoring_result_t kb_scoring_update(const struct kb_unified_event *evt);
 // Feeds dim_score[KB_DIM_SYSCALL] — expects a WINDOWED (sliding, e.g.
 // EMA-smoothed) entropy value, since this drives composite/zone and
 // should reflect current behavior, not lifetime history.
-kb_scoring_result_t kb_scoring_update_syscall_entropy(uint32_t pid, double entropy_0_100);
+kb_scoring_result_t kb_scoring_update_syscall_entropy(uint32_t pid, double entropy_0_100, uint64_t ts_ns);
 
 // Sets syscall_entropy_lifetime only — no effect on composite/ema/zone.
 // No-op if the pid isn't already tracked (call after

@@ -172,7 +172,7 @@ kb_scoring_result_t kb_scoring_update(const struct kb_unified_event *evt)
 // kb_scoring_set_syscall_entropy_lifetime() below for the advisory
 // lifetime figure, which is tracked separately and does not affect
 // scoring.
-kb_scoring_result_t kb_scoring_update_syscall_entropy(uint32_t pid, double entropy_0_100)
+kb_scoring_result_t kb_scoring_update_syscall_entropy(uint32_t pid, double entropy_0_100, uint64_t ts_ns)
 {
     kb_scoring_result_t r = {0};
     kb_process_state_t *s = find_or_create(pid);
@@ -182,7 +182,7 @@ kb_scoring_result_t kb_scoring_update_syscall_entropy(uint32_t pid, double entro
     if (entropy_0_100 > 100.0) entropy_0_100 = 100.0;
 
     s->dim_score[KB_DIM_SYSCALL] = entropy_0_100;
-    return recompute(s, 0);
+    return recompute(s, ts_ns);
 }
 
 // Advisory-only — does not touch composite_score/ema_score/zone.

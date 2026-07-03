@@ -14,12 +14,24 @@
 #include <signal.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include <arpa/inet.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include "../.output/kbd_sensor.skel.h"
 #include "../../include/kb_scoring.h"
 #include "../bridge/kb_bridge.h"
+
+// Timestamp source for sends not triggered by a live kb_unified_event
+// (i.e. the entropy scan). BPF-side ts_ns comes from bpf_ktime_get_ns()
+// (CLOCK_MONOTONIC-based); mirror that clock here so values from both
+// paths are comparable, not sending 0 as a placeholder.
+static uint64_t now_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
 
 // Send a full ProcessState at most once every N events per process,
 // plus always on zone change. Avoids hammering the socket on hot
@@ -179,8 +191,8 @@ static void bridge_dispatch(kb_scoring_result_t r, uint64_t ts_ns)
     int err = 0;
     if (r.zone_changed) {
         err = kb_bridge_send_zone_transition(
-            bridge_fd, r.state->pid, r.prev_zone, r.state->zone,
-            r.state->ema_score, ts_ns);
+            bridge_fd, r.state->pid, r.state->start_time_ns,
+            r.prev_zone, r.state->zone, r.state->ema_score, ts_ns);
     }
     if (!err && (r.zone_changed ||
                  r.state->event_count % KB_STATE_SYNC_EVERY_N == 0)) {
@@ -308,8 +320,9 @@ static void scan_syscall_entropy(struct kbd_sensor_bpf *skel)
             ema->primed = 1;
         }
 
-        kb_scoring_result_t r = kb_scoring_update_syscall_entropy(pid, smoothed);
-        bridge_dispatch(r, 0);
+        uint64_t ts = now_ns();
+        kb_scoring_result_t r = kb_scoring_update_syscall_entropy(pid, smoothed, ts);
+        bridge_dispatch(r, ts);
     }
 }
 

@@ -43,7 +43,7 @@ void kb_bridge_close(int fd);
 
 int kb_bridge_send_state(int fd, const kb_process_state_t *s);
 
-int kb_bridge_send_zone_transition(int fd, uint32_t pid,
+int kb_bridge_send_zone_transition(int fd, uint32_t pid, uint64_t start_time_ns,
                                     kb_zone_t from, kb_zone_t to,
                                     double score, uint64_t ts_ns);
 

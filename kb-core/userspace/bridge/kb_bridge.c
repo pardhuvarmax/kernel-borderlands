@@ -17,7 +17,7 @@
 #include <sys/un.h>
 
 #define KB_WIRE_MAGIC    0x4B42  // "KB"
-#define KB_WIRE_VERSION  2  // v2: added syscall_entropy_lifetime to ProcessState
+#define KB_WIRE_VERSION  3  // v3: added start_time_ns to ZoneTransition (PID-reuse guard)
 
 #define KB_WIRE_MSG_PROCESS_STATE    1
 #define KB_WIRE_MSG_ZONE_TRANSITION  2
@@ -48,6 +48,11 @@ struct kb_wire_process_state {
 struct kb_wire_zone_transition {
     struct kb_wire_header hdr;
     uint32_t pid;
+    uint64_t start_time_ns;  // pid-reuse guard — enforcement should
+                              // verify this still matches the pid's
+                              // known start time before acting, since
+                              // pids get reused and a stale/reused pid
+                              // must not get contained by mistake.
     uint32_t from_zone;
     uint32_t to_zone;
     double   score;
@@ -176,7 +181,7 @@ int kb_bridge_send_state(int fd, const kb_process_state_t *s)
     return send_framed(fd, &w, sizeof(w));
 }
 
-int kb_bridge_send_zone_transition(int fd, uint32_t pid,
+int kb_bridge_send_zone_transition(int fd, uint32_t pid, uint64_t start_time_ns,
                                     kb_zone_t from, kb_zone_t to,
                                     double score, uint64_t ts_ns)
 {
@@ -185,11 +190,12 @@ int kb_bridge_send_zone_transition(int fd, uint32_t pid,
     w.hdr.version  = KB_WIRE_VERSION;
     w.hdr.msg_type = KB_WIRE_MSG_ZONE_TRANSITION;
 
-    w.pid       = pid;
-    w.from_zone = (uint32_t)from;
-    w.to_zone   = (uint32_t)to;
-    w.score     = score;
-    w.ts_ns     = ts_ns;
+    w.pid            = pid;
+    w.start_time_ns  = start_time_ns;
+    w.from_zone      = (uint32_t)from;
+    w.to_zone        = (uint32_t)to;
+    w.score          = score;
+    w.ts_ns          = ts_ns;
 
     return send_framed(fd, &w, sizeof(w));
 }
