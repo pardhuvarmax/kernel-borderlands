@@ -72,11 +72,9 @@ While LSM-tree architectures offer rapid append write metrics, they break under 
 
 ------------------------------
 
-## IMPLEMENTATION PATTERN REFERENCING SPECIFIED CORE FILES
+## Go Store Architecture Definitions, & Implementation Referencing 
 
-### Go Store Architecture Definitions 
-
-#### 1. Core State Definition & In-Memory Layout (process.go)
+### 1. Core State Definition & In-Memory Layout (process.go)
 
 ```go
 // Package store implements the low-overhead L1/L2 state-machine.package store
@@ -135,7 +133,7 @@ func (s *CentralTelemetryStore) flushToL2Worker() {
 }
 ```
 
-#### 2. Embedded Database Orchestration Schema (schema.go)
+### 2. Embedded Database Orchestration Schema (schema.go)
 
 ```go
 // Package store maps the structured schema configurations.package store
