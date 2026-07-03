@@ -7,6 +7,8 @@ APPROVED/PROPOSED BY LEAD, DEVELOPER DECISIONS PENDING...
 The Kernel Borderlands (kb-aads) subsystem acts as a high-performance endpoint security monitor operating at the boundary of Linux Kernel Ring 0 and User Space. Real-time system telemetry originates from kernel-level eBPF hooks via kbd_sensor, streaming metrics across a native Unix Domain Socket (UDS) Bridge directly into the Core-GoPlane IPC Bridge (wire.go, listener.go).
 The central hub (Go Control Plane) must ingest high-velocity event loops, maintain per-process state machines, evaluate YAML-defined operator policies, and provide a low-latency gRPC-over-UDS interface to the Python automated agent layer (kb-aads Subsystem).
 
+
+```text
 [ Ring 0: eBPF Hooks ] 
           │
           ▼ (Ring Buffer - Ephemeral)
@@ -18,6 +20,7 @@ The central hub (Go Control Plane) must ingest high-velocity event loops, mainta
           │                                         ▼ (Non-blocking Ring Buffer)
           └───────────────────────────────► [ L2 Store: Embedded SQLite WAL ] ──► [ Audit Logging ]
                                                     (10-50μs Async Cold-Path)
+```
 
 Historically, Apache Kafka with Docker/Docker-Compose abstraction layers was proposed for inter-subsystem data transport. However, production deployment constraints for an endpoint security tool make virtualization layers, JVM memory overhead, and network loopback constraints completely unacceptable.
 
@@ -69,6 +72,7 @@ While LSM-tree architectures offer rapid append write metrics, they break under 
 
 ## IMPLEMENTATION PATTERN REFERENCING SPECIFIED CORE FILES## Go Store Architecture Definition## 1. Core State Definition & In-Memory Layout (process.go)
 
+```go
 // Package store implements the low-overhead L1/L2 state-machine.package store
 import (
 	"context"
@@ -123,9 +127,11 @@ func (s *CentralTelemetryStore) flushToL2Worker() {
 		_, _ = stmt.Exec(telemetry.PID, telemetry.Comm, telemetry.UID, telemetry.ContainerID, telemetry.State)
 	}
 }
+```
 
 ## 2. Embedded Database Orchestration Schema (schema.go)
 
+```go
 // Package store maps the structured schema configurations.package store
 import (
 	"database/sql"
@@ -180,6 +186,7 @@ func InitializePersistentEngine(dsn string) (*sql.DB, error) {
 
 	return db, nil
 }
+```
 
 ------------------------------
 
