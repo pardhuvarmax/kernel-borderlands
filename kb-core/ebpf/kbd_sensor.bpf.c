@@ -15,6 +15,7 @@
 char LICENSE[] SEC("license") = "GPL";
 
 #define KB_MAX_PROCESSES 10240
+#define KB_MAX_SYSCALLS  512   // matches kb_syscall.bpf.c's standalone collector
 
 // ── Unified event types (locked contract — see docs/event-contract.md) ──
 #define KB_EVT_PROCESS_EXEC      0
@@ -84,12 +85,11 @@ struct {
     __type(value, __u64);
 } kb_syscall_totals SEC(".maps");
 
-// Per-process, per-syscall-number counts — the actual distribution
-// needed for Shannon entropy / KL divergence scoring. kb_syscall_totals
-// alone (a single scalar) cannot produce entropy; this is what was
-// missing from the unified object versus the standalone kb_syscall
-// collector. Key: (pid << 32 | syscall_nr). Sized generously since
-// most processes touch well under 512 distinct syscalls.
+// Per-process, per-syscall-number count — the piece kb_syscall_totals
+// alone can't give you. Needed for entropy/KL-divergence scoring
+// (KB_DIM_SYSCALL, 25% weight); was present in the standalone
+// kb_syscall.bpf.c collector but never carried over into the unified
+// object. Key: (pid << 32 | syscall_nr), same as the standalone hook.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, KB_MAX_PROCESSES * 64);
@@ -182,22 +182,23 @@ int kb_handle_syscall(struct trace_event_raw_sys_enter *ctx)
     if (pid == 0 || syscall_nr < 0 || pid != tid)
         return 0;
 
+    // Per-(pid, syscall_nr) count — feeds userspace entropy scan.
+    // Ported as-is from the standalone kb_syscall.bpf.c collector.
+    __u64 ckey = ((__u64)pid << 32) | (__u32)syscall_nr;
+    __u64 *ccount = bpf_map_lookup_elem(&kb_syscall_counts, &ckey);
+    if (ccount) {
+        __sync_fetch_and_add(ccount, 1);
+    } else {
+        __u64 one = 1;
+        bpf_map_update_elem(&kb_syscall_counts, &ckey, &one, BPF_ANY);
+    }
+
     __u64 *total = bpf_map_lookup_elem(&kb_syscall_totals, &pid);
     if (total) {
         __sync_fetch_and_add(total, 1);
     } else {
         __u64 one = 1;
         bpf_map_update_elem(&kb_syscall_totals, &pid, &one, BPF_ANY);
-    }
-
-    // Per-syscall-number breakdown — feeds entropy calc in userspace.
-    __u64 count_key = ((__u64)pid << 32) | (__u32)syscall_nr;
-    __u64 *count = bpf_map_lookup_elem(&kb_syscall_counts, &count_key);
-    if (count) {
-        __sync_fetch_and_add(count, 1);
-    } else {
-        __u64 one = 1;
-        bpf_map_update_elem(&kb_syscall_counts, &count_key, &one, BPF_ANY);
     }
 
     __u64 *t = bpf_map_lookup_elem(&kb_syscall_totals, &pid);
