@@ -125,18 +125,46 @@ The Go daemon will consume these messages and expose them through higher-level i
 
 ---
 
-## Future Expansion
+## Feature Sheet
 
-As Kernel Borderlands evolves, the Bridge may support additional capabilities including:
+### Current Features
 
-- Structured binary serialization
-- Protocol Buffers
-- Versioned message schemas
-- Event batching
-- Message prioritization
-- Flow control and backpressure
-- Health monitoring
-- Telemetry statistics
-- Secure authenticated communication
+-    Unix Domain Socket (UDS) IPC transport
+-    Lightweight binary wire protocol
+-    Length-prefixed message framing
+-    Wire protocol versioning
+-    ProcessState message transport
+-    ZoneTransition message transport
+-    Automatic connection establishment
+-    Automatic reconnection on disconnect
+-    Exponential backoff retry strategy
+-    Reliable blocking writes with partial-write handling
+-    PID reuse protection (start_time_ns validation)
+-    Low-latency userspace IPC
+-    Minimal-copy message transport
+-    Transport abstraction between Core and Control Planes
+-    Extensible wire protocol foundation
+
+### Future Expansion
+
+As Kernel Borderlands evolves, the Bridge transport layer may be extended with additional capabilities while maintaining compatibility with the existing IPC architecture.
+
+Planned enhancements include:
+
+-    Protocol Buffers (protobuf) serialization
+-    Versioned protobuf schemas
+-    Event batching and coalescing
+-    Message prioritization
+-    Flow control and backpressure handling
+-    Connection health monitoring
+-    Transport and telemetry statistics
+-    Secure authenticated communication
+-    Optional message compression
+-    Capability negotiation
+-    Stream multiplexing
+-    Zero-copy optimizations where applicable
+-    Delivery acknowledgements for critical messages
+-    High-availability and failover support
+-    Multi-channel transport support
 
 Regardless of implementation details, the Bridge will remain responsible solely for communication. All behavioral intelligence originates within the Behavior Engine, while all operational decisions remain within the Control Plane.
