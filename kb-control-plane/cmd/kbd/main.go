@@ -7,11 +7,14 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/kb-research/kb-control-plane/internal/controlplane"
+	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/controlplane"
 	"github.com/spf13/cobra"
 )
 
-var configPath string
+var (
+	dbPath     string
+	policyPath string
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "kbd",
@@ -23,8 +26,10 @@ and coordinates with the AADS agent swarm.`,
 }
 
 func init() {
-	rootCmd.Flags().StringVarP(&configPath, "config", "c", "config/kb.yaml",
-		"path to kb.yaml config file")
+	rootCmd.Flags().StringVarP(&dbPath, "db", "d", "/var/lib/kbd/state.db",
+		"path to SQLite state database (L2 durable store)")
+	rootCmd.Flags().StringVarP(&policyPath, "policy", "p", "config/policy.yaml",
+		"path to policy.yaml (per-process thresholds, auto-terminate rules)")
 }
 
 func runDaemon(cmd *cobra.Command, args []string) {
@@ -33,7 +38,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	fmt.Println("║   kbd v0.1.0                              ║")
 	fmt.Println("╚══════════════════════════════════════════╝")
 
-	cp, err := controlplane.New(configPath)
+	cp, err := controlplane.New(dbPath, policyPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize control plane: %v", err)
 	}

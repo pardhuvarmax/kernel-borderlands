@@ -1,0 +1,21 @@
+defaults:
+  suspicious:   40.0
+  borderlands:  75.0
+
+policies:
+  - comm: nginx
+    suspicious:   55.0
+    borderlands:  85.0
+    allow_network: true
+    auto_terminate: false
+
+  - comm: postgres
+    suspicious:   50.0
+    borderlands:  80.0
+    allow_network: false
+    auto_terminate: true
+
+  - comm: bash
+    suspicious:   45.0
+    borderlands:  70.0
+    auto_terminate: false

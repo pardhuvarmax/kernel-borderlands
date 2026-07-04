@@ -1,404 +1,206 @@
 package controlplane
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net"
 	"sync"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	pb "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/proto"
+	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/audit"
+	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/enforcement"
+	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/ipc"
+	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/policy"
+	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/store"
 )
 
-// Zone mirrors pb.Zone but lives independently in this package so the
-// scoring/classification logic below has no compile-time dependency on the
-// wire format beyond the final pb.Zone(...) conversion at the API boundary.
-type Zone int
-
-const (
-	ZoneSafe Zone = iota
-	ZoneSuspicious
-	ZoneBorderlands
-)
-
-func (z Zone) String() string {
-	switch z {
-	case ZoneSafe:
-		return "SAFE"
-	case ZoneSuspicious:
-		return "SUSPICIOUS"
-	case ZoneBorderlands:
-		return "BORDERLANDS"
-	default:
-		return "UNKNOWN"
-	}
-}
-
-// ProcessState tracks behavioral state per process. Access is always
-// mediated through ControlPlane.mu — this struct holds no lock of its own
-// to avoid lock-ordering bugs when a caller holds cp.mu and touches a state
-// pointer it pulled out of the map.
-type ProcessState struct {
-	PID         uint32
-	PPID        uint32
-	Comm        string
-	UID         uint32
-	Score       float64
-	Zone        Zone
-	Containment pb.ContainmentLevel
-	FirstSeen   int64
-	LastSeen    int64
-}
-
-// ControlPlane is the main KB daemon. It implements pb.KernelBorderlandsServer
-// directly.
 type ControlPlane struct {
 	pb.UnimplementedKernelBorderlandsServer
+	store    *store.Store
+	audit    *audit.Logger
+	enforcer *enforcement.Enforcer
+	policy   *policy.Engine
+	grpc     *grpc.Server
 
-	cfg *Config
+	// comm cache — pid → comm (populated by ProcessState messages)
+	commCache sync.Map
 
-	mu        sync.RWMutex
-	processes map[uint32]*ProcessState
+	// event fan-out
+	subMu     sync.Mutex
+	eventSubs []chan *pb.KBEvent
 
-	grpcServer *grpc.Server
-	eventChan  chan *pb.KBEvent
-	alertChan  chan *pb.Alert
-
-	subMu            sync.Mutex
-	eventSubscribers map[chan *pb.KBEvent]struct{}
-	alertSubscribers map[chan *pb.Alert]struct{}
+	alertMu   sync.Mutex
+	alertSubs []chan *pb.Alert
 }
 
-// New creates a new ControlPlane instance, loading configuration from
-// configPath (falling back to defaults if the file doesn't exist yet).
-func New(configPath string) (*ControlPlane, error) {
-	cfg, err := LoadConfig(configPath)
+func New(dbPath, policyPath string) (*ControlPlane, error) {
+	s, err := store.New(dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("load config %q: %w", configPath, err)
+		return nil, err
 	}
 
+	// ADR-1 cold-start recovery: L1 is volatile (in-process memory), so on
+	// every fresh start we rebuild it from the last durable L2 (SQLite)
+	// state *before* the eBPF ingestion hook goes live. Without this, a
+	// restart would make VerifyStartTime miss on every already-tracked PID
+	// until a fresh ProcessState message arrived for it.
+	if err := s.Restore(); err != nil {
+		log.Printf("[KB] L1 restore failed: %v — starting with empty cache", err)
+	}
+
+	p, err := policy.New(policyPath)
+	if err != nil {
+		return nil, err
+	}
 	return &ControlPlane{
-		cfg:              cfg,
-		processes:        make(map[uint32]*ProcessState),
-		eventChan:        make(chan *pb.KBEvent, 10000),
-		alertChan:        make(chan *pb.Alert, 1000),
-		eventSubscribers: make(map[chan *pb.KBEvent]struct{}),
-		alertSubscribers: make(map[chan *pb.Alert]struct{}),
+		store:    s,
+		audit:    audit.New(s.DB()),
+		enforcer: enforcement.New(),
+		policy:   p,
 	}, nil
 }
 
-// Start initializes and starts the control plane.
 func (cp *ControlPlane) Start() error {
-	log.Println("[KB] Initializing state store...")
-	// TODO(internal/scoring + SQLite): the process map below is in-memory
-	// only and resets on restart. Swap for the SQLite-backed store
-	// (mattn/go-sqlite3 is already in go.mod) so behavioral history
-	// survives daemon restarts.
+	go func() {
+		if err := ipc.NewListener(cp).Listen(); err != nil {
+			log.Fatalf("[KB] IPC: %v", err)
+		}
+	}()
 
-	log.Printf("[KB] Starting gRPC server on :%d...", cp.cfg.GRPCPort)
-	if err := cp.startGRPC(); err != nil {
-		return err
-	}
-
-	log.Println("[KB] Starting event processor...")
-	go cp.processEvents()
-
-	log.Printf("[KB] Control plane ready. (enforcement mode: %s)", cp.cfg.Enforcement.Mode)
-	return nil
-}
-
-// Stop gracefully shuts down the control plane.
-func (cp *ControlPlane) Stop() {
-	if cp.grpcServer != nil {
-		cp.grpcServer.GracefulStop()
-	}
-}
-
-func (cp *ControlPlane) startGRPC() error {
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cp.cfg.GRPCPort))
+	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		return err
 	}
-
-	cp.grpcServer = grpc.NewServer()
-	pb.RegisterKernelBorderlandsServer(cp.grpcServer, cp)
-
+	cp.grpc = grpc.NewServer()
+	pb.RegisterKernelBorderlandsServer(cp.grpc, cp)
 	go func() {
-		if err := cp.grpcServer.Serve(lis); err != nil {
-			log.Printf("[KB] gRPC server stopped: %v", err)
-		}
+		log.Println("[KB] gRPC on :50051")
+		cp.grpc.Serve(lis)
 	}()
 
+	log.Println("[KB] Control plane ready")
 	return nil
 }
 
-// UpdateScore applies EMA smoothing and updates a process's score, returning
-// the new smoothed score. This is the entry point the eBPF event pipeline
-// (internal/scoring, once it exists) will call after computing a raw
-// per-dimension composite score for an event.
-//
-//	S_t = alpha * s_t + (1 - alpha) * S_{t-1}
-func (cp *ControlPlane) UpdateScore(pid uint32, rawScore float64) float64 {
-	cp.mu.Lock()
-	defer cp.mu.Unlock()
+func (cp *ControlPlane) Stop() {
+	cp.grpc.GracefulStop()
+	cp.store.Close()
+}
 
-	state, exists := cp.processes[pid]
-	if !exists {
-		state = &ProcessState{PID: pid, Score: rawScore, Zone: cp.classifyZone(rawScore)}
-		cp.processes[pid] = state
-		return state.Score
+// ── MessageHandler (called by IPC listener) ──
+
+func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
+	cp.commCache.Store(msg.PID, msg.Comm)
+
+	if err := cp.store.UpsertProcessState(msg); err != nil {
+		log.Printf("[KB] store: %v", err)
 	}
 
-	alpha := cp.cfg.Scoring.Alpha
-	state.Score = alpha*rawScore + (1-alpha)*state.Score
+	// Remove on process exit — event_count won't increment after exit,
+	// so use the zone: if a process_exit event came through the C side
+	// it already called kb_scoring_remove(), but the last state message
+	// may not reflect that. Use EventCount==0 as proxy? No — just leave
+	// the store row; it'll get overwritten when/if the PID is reused.
+	// TODO: C side should send a dedicated process_exit wire message type.
 
-	if newZone := cp.classifyZone(state.Score); newZone != state.Zone {
-		cp.onZoneTransition(state, newZone)
-		state.Zone = newZone
+	cp.fanOutEvent(&pb.KBEvent{
+		Pid:        msg.PID,
+		Ppid:       msg.PPID,
+		Comm:       msg.Comm,
+		EventType:  "process_state",
+		ScoreDelta: float32(msg.EMAScore),
+		Timestamp:  int64(msg.LastUpdatedNs),
+		Metadata: map[string]string{
+			"zone":          ipc.KBZone(msg.Zone).String(),
+			"composite":     fmt.Sprintf("%.2f", msg.CompositeScore),
+			"dim_syscall":   fmt.Sprintf("%.2f", msg.DimScore[ipc.DimCount-5]),
+			"dim_privilege": fmt.Sprintf("%.2f", msg.DimScore[2]),
+		},
+	})
+}
+
+func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
+	comm := ""
+	if v, ok := cp.commCache.Load(msg.PID); ok {
+		comm = v.(string)
 	}
 
-	return state.Score
-}
+	log.Printf("[KB] Zone PID=%d COMM=%s %s→%s score=%.1f",
+		msg.PID, comm, msg.FromZone, msg.ToZone, msg.Score)
 
-// classifyZone maps a smoothed score to a zone using the configured
-// thresholds (defaults: Safe < 40 <= Suspicious < 75 <= Borderlands).
-func (cp *ControlPlane) classifyZone(score float64) Zone {
-	if score < cp.cfg.Scoring.Thresholds.Suspicious {
-		return ZoneSafe
+	// PID-reuse guard — L1-backed, ~30-50ns per ADR-1.
+	ok, err := cp.store.VerifyStartTime(msg.PID, msg.StartTimeNs)
+	if err != nil {
+		log.Printf("[KB] start_time verify: %v — allowing", err)
+	} else if !ok {
+		log.Printf("[KB] PID=%d start_time mismatch — stale transition, skipping enforcement", msg.PID)
+		return
 	}
-	if score < cp.cfg.Scoring.Thresholds.Borderlands {
-		return ZoneSuspicious
+
+	cp.store.InsertZoneTransition(msg, comm)
+	cp.audit.LogZoneTransition(msg, comm)
+
+	if msg.ToZone == ipc.ZoneBorderlands {
+		alert := &pb.Alert{
+			AlertId:    fmt.Sprintf("alert-%d-%d", msg.PID, msg.TsNs),
+			AlertType:  "BORDERLANDS_ENTRY",
+			Pid:        msg.PID,
+			Comm:       comm,
+			Confidence: float32(msg.Score / 100.0),
+			Severity:   "CRITICAL",
+			Timestamp:  int64(msg.TsNs),
+			Evidence: []string{
+				fmt.Sprintf("ema_score=%.1f", msg.Score),
+				fmt.Sprintf("from=%s", msg.FromZone),
+			},
+		}
+		cp.fanOutAlert(alert)
+
+		if cp.policy.AutoTerminate(comm) {
+			cp.enforcer.Apply(msg.PID, pb.ContainmentLevel_TERMINATE)
+			cp.audit.Log("AUTO_TERMINATE",
+				fmt.Sprintf("pid=%d comm=%s", msg.PID, comm),
+				"SYSTEM_AUTO", "policy:auto_terminate=true")
+		} else {
+			cp.enforcer.Apply(msg.PID, pb.ContainmentLevel_CGROUP)
+			cp.audit.Log("CGROUP_THROTTLE",
+				fmt.Sprintf("pid=%d comm=%s", msg.PID, comm),
+				"SYSTEM_AUTO", "zone=BORDERLANDS")
+		}
 	}
-	return ZoneBorderlands
+
+	cp.fanOutEvent(&pb.KBEvent{
+		Pid:        msg.PID,
+		Comm:       comm,
+		EventType:  "zone_transition",
+		ScoreDelta: float32(msg.Score),
+		Timestamp:  int64(msg.TsNs),
+		Metadata: map[string]string{
+			"from_zone": msg.FromZone.String(),
+			"to_zone":   msg.ToZone.String(),
+		},
+	})
 }
 
-// onZoneTransition handles a zone change: logs it and kicks off the
-// (currently stubbed) graduated response for the new zone.
-func (cp *ControlPlane) onZoneTransition(state *ProcessState, newZone Zone) {
-	log.Printf("[KB] Zone transition: PID=%d COMM=%s %s -> %s score=%.2f",
-		state.PID, state.Comm, state.Zone, newZone, state.Score)
-
-	switch newZone {
-	case ZoneSuspicious:
-		go cp.applyMonitoring(state.PID)
-	case ZoneBorderlands:
-		go cp.applyContainment(state.PID)
-	case ZoneSafe:
-		go cp.relaxContainment(state.PID)
-	}
-}
-
-// applyContainment, applyMonitoring, and relaxContainment are placeholders
-// for the graduated containment ladder (Observe -> Restrict -> Isolate ->
-// Terminate). The real namespace/seccomp/cgroup primitives belong in
-// internal/enforcement — wiring them in is the next milestone, not today's.
-func (cp *ControlPlane) applyContainment(pid uint32) {
-	log.Printf("[KB] Applying containment to PID=%d", pid)
-	// TODO(internal/enforcement): namespace isolation + cgroup throttle.
-}
-
-func (cp *ControlPlane) applyMonitoring(pid uint32) {
-	log.Printf("[KB] Increasing monitoring for PID=%d", pid)
-	// TODO(internal/enforcement): seccomp network-syscall block.
-}
-
-func (cp *ControlPlane) relaxContainment(pid uint32) {
-	log.Printf("[KB] Relaxing containment for PID=%d", pid)
-	// TODO(internal/enforcement): reverse the containment ladder.
-}
-
-func (cp *ControlPlane) processEvents() {
-	for event := range cp.eventChan {
-		cp.handleEvent(event)
-	}
-}
-
-func (cp *ControlPlane) handleEvent(event *pb.KBEvent) {
-	log.Printf("[KB] Event: type=%s pid=%d comm=%s", event.EventType, event.Pid, event.Comm)
-	// TODO(internal/scoring): route this event into the six weighted
-	// behavioral dimensions and call cp.UpdateScore(event.Pid, rawScore).
-	cp.broadcastEvent(event)
-}
-
-// broadcastEvent fans an event out to every active StreamEvents subscriber.
-// Sends are non-blocking: a slow consumer drops events rather than stalling
-// the whole event processor.
-func (cp *ControlPlane) broadcastEvent(event *pb.KBEvent) {
+func (cp *ControlPlane) fanOutEvent(e *pb.KBEvent) {
 	cp.subMu.Lock()
 	defer cp.subMu.Unlock()
-	for ch := range cp.eventSubscribers {
+	for _, ch := range cp.eventSubs {
 		select {
-		case ch <- event:
+		case ch <- e:
 		default:
 		}
 	}
 }
 
-func (cp *ControlPlane) broadcastAlert(alert *pb.Alert) {
-	cp.subMu.Lock()
-	defer cp.subMu.Unlock()
-	for ch := range cp.alertSubscribers {
+func (cp *ControlPlane) fanOutAlert(a *pb.Alert) {
+	cp.alertMu.Lock()
+	defer cp.alertMu.Unlock()
+	for _, ch := range cp.alertSubs {
 		select {
-		case ch <- alert:
+		case ch <- a:
 		default:
 		}
 	}
-}
-
-func stateToProto(s *ProcessState) *pb.ProcessState {
-	return &pb.ProcessState{
-		Pid:         s.PID,
-		Ppid:        s.PPID,
-		Comm:        s.Comm,
-		Score:       float32(s.Score),
-		Zone:        pb.Zone(s.Zone),
-		Uid:         s.UID,
-		Containment: s.Containment,
-		FirstSeen:   s.FirstSeen,
-		LastSeen:    s.LastSeen,
-	}
-}
-
-// ---------------------------------------------------------------------------
-// gRPC service implementation (pb.KernelBorderlandsServer)
-// ---------------------------------------------------------------------------
-
-func (cp *ControlPlane) GetProcessState(ctx context.Context, req *pb.PidRequest) (*pb.ProcessState, error) {
-	cp.mu.RLock()
-	defer cp.mu.RUnlock()
-
-	state, exists := cp.processes[req.Pid]
-	if !exists {
-		return nil, status.Errorf(codes.NotFound, "no state tracked for pid %d", req.Pid)
-	}
-	return stateToProto(state), nil
-}
-
-func (cp *ControlPlane) ListZone(req *pb.ZoneRequest, stream pb.KernelBorderlands_ListZoneServer) error {
-	cp.mu.RLock()
-	matches := make([]*pb.ProcessState, 0)
-	for _, state := range cp.processes {
-		if pb.Zone(state.Zone) == req.Zone {
-			matches = append(matches, stateToProto(state))
-		}
-	}
-	cp.mu.RUnlock()
-
-	for _, m := range matches {
-		if err := stream.Send(m); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (cp *ControlPlane) SetContainment(ctx context.Context, req *pb.ContainmentRequest) (*pb.ContainmentResponse, error) {
-	cp.mu.Lock()
-	state, exists := cp.processes[req.Pid]
-	if !exists {
-		cp.mu.Unlock()
-		return &pb.ContainmentResponse{Success: false}, status.Errorf(codes.NotFound, "no state tracked for pid %d", req.Pid)
-	}
-	state.Containment = req.Level
-	cp.mu.Unlock()
-
-	log.Printf("[KB] Operator override: containment for PID=%d set to %s (reason: %q)",
-		req.Pid, req.Level, req.Reason)
-	// TODO(internal/enforcement): actually apply/relax the requested
-	// primitive instead of just recording the requested level.
-	// TODO(internal/audit): this is exactly the kind of action that needs
-	// a tamper-evident audit entry (who/what/when/why).
-
-	return &pb.ContainmentResponse{Success: true}, nil
-}
-
-func (cp *ControlPlane) StreamEvents(filter *pb.EventFilter, stream pb.KernelBorderlands_StreamEventsServer) error {
-	ch := make(chan *pb.KBEvent, 100)
-
-	cp.subMu.Lock()
-	cp.eventSubscribers[ch] = struct{}{}
-	cp.subMu.Unlock()
-
-	defer func() {
-		cp.subMu.Lock()
-		delete(cp.eventSubscribers, ch)
-		cp.subMu.Unlock()
-	}()
-
-	wanted := toSet(filter.GetEventTypes())
-
-	for {
-		select {
-		case event := <-ch:
-			if len(wanted) > 0 && !wanted[event.EventType] {
-				continue
-			}
-			if err := stream.Send(event); err != nil {
-				return err
-			}
-		case <-stream.Context().Done():
-			return nil
-		}
-	}
-}
-
-func (cp *ControlPlane) StreamAlerts(filter *pb.EventFilter, stream pb.KernelBorderlands_StreamAlertsServer) error {
-	ch := make(chan *pb.Alert, 100)
-
-	cp.subMu.Lock()
-	cp.alertSubscribers[ch] = struct{}{}
-	cp.subMu.Unlock()
-
-	defer func() {
-		cp.subMu.Lock()
-		delete(cp.alertSubscribers, ch)
-		cp.subMu.Unlock()
-	}()
-
-	for {
-		select {
-		case alert := <-ch:
-			if err := stream.Send(alert); err != nil {
-				return err
-			}
-		case <-stream.Context().Done():
-			return nil
-		}
-	}
-}
-
-func (cp *ControlPlane) SubmitAgentDecision(ctx context.Context, decision *pb.AgentDecision) (*pb.DecisionAck, error) {
-	log.Printf("[KB] Agent decision: id=%s agent=%s action=%s pid=%d confidence=%.2f authorized_by=%v",
-		decision.DecisionId, decision.AgentId, decision.Action, decision.Pid,
-		decision.Confidence, decision.AuthorizedBy)
-
-	// AI Dependency Constraint (design doc Sec 7.1): no enforcement action
-	// may be taken solely on an agent recommendation without a corresponding
-	// policy authorization. This is a minimal placeholder for that check —
-	// the real policy engine (YAML rules -> authorization) isn't built yet.
-	if len(decision.AuthorizedBy) == 0 {
-		return &pb.DecisionAck{
-			Success: false,
-			Message: "rejected: no policy authorization attached to decision",
-		}, nil
-	}
-
-	// TODO(internal/audit): record full decision provenance to the
-	// tamper-evident chain before/while acting on it.
-	return &pb.DecisionAck{Success: true, Message: "decision recorded"}, nil
-}
-
-func toSet(items []string) map[string]bool {
-	if len(items) == 0 {
-		return nil
-	}
-	set := make(map[string]bool, len(items))
-	for _, item := range items {
-		set[item] = true
-	}
-	return set
 }
