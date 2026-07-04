@@ -198,3 +198,26 @@ void kb_scoring_set_syscall_entropy_lifetime(uint32_t pid, double entropy_0_100)
 
     s->syscall_entropy_lifetime = entropy_0_100;
 }
+
+int kb_scoring_has_identity(uint32_t pid)
+{
+    kb_process_state_t *s = kb_scoring_get_state(pid);
+    return s ? s->has_identity : 0;
+}
+
+// Never overwrites an identity already set from a real kb_unified_event —
+// /proc reads are a fallback for pids that predate the sensor, not a
+// source of truth that should ever race against or clobber live data.
+void kb_scoring_set_identity(uint32_t pid, const char comm[16],
+                              uint32_t ppid, uint32_t uid,
+                              uint64_t start_time_ns)
+{
+    kb_process_state_t *s = kb_scoring_get_state(pid);
+    if (!s || s->has_identity) return;
+
+    memcpy(s->comm, comm, sizeof(s->comm));
+    s->ppid = ppid;
+    s->uid  = uid;
+    s->start_time_ns = start_time_ns;
+    s->has_identity = 1;
+}
