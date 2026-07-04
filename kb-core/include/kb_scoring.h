@@ -130,4 +130,17 @@ kb_process_state_t *kb_scoring_get_state(uint32_t pid);
 void kb_scoring_remove(uint32_t pid);
 const char *kb_zone_name(kb_zone_t z);
 
+// /proc-backfill support. kb_scoring_update_syscall_entropy() alone can
+// never populate comm/ppid/uid/start_time_ns for a pid that predates
+// kbd_sensor's attach — no exec/exit/privilege/file/network/memory event
+// ever fires for it, since it's already running. kb_scoring_has_identity()
+// lets the caller check before doing the (more expensive) /proc read;
+// kb_scoring_set_identity() is a no-op if identity is already set, so a
+// later real kb_unified_event's data can never be clobbered by a stale
+// /proc read racing behind it.
+int  kb_scoring_has_identity(uint32_t pid);
+void kb_scoring_set_identity(uint32_t pid, const char comm[16],
+                              uint32_t ppid, uint32_t uid,
+                              uint64_t start_time_ns);
+
 #endif // KB_SCORING_H

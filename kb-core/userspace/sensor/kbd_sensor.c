@@ -443,6 +443,14 @@ int main(void)
     signal(SIGINT, handle_sigint);
     kb_scoring_init();
 
+    // Matches wire.go's envOr("KBD_SOCKET_PATH", "/var/run/kbd.sock") on
+    // the Go side — both must agree or they'll never connect. Falls back
+    // to KB_BRIDGE_DEFAULT_SOCK (bridge_sock_path's compiled-in default)
+    // if unset, same as before this existed.
+    const char *env_sock = getenv("KBD_SOCKET_PATH");
+    if (env_sock)
+        strncpy(bridge_sock_path, env_sock, sizeof(bridge_sock_path) - 1);
+
     // Best-effort connect at startup; if kbd's listener isn't up yet
     // this just falls through and handle_event()'s bridge_ensure_connected()
     // retries opportunistically on later events. Not a fatal condition —
