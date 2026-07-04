@@ -96,6 +96,13 @@ typedef struct {
 
     kb_zone_t zone;
     uint32_t  event_count;
+    int       has_identity;  // true once comm/ppid/uid/start_time_ns are
+                              // populated from a real kb_unified_event.
+                              // MUST NOT be derived from event_count —
+                              // kb_scoring_update_syscall_entropy() also
+                              // increments event_count (via recompute()),
+                              // and the entropy scan frequently creates a
+                              // pid's slot before any real event does.
     int       in_use;
 } kb_process_state_t;
 

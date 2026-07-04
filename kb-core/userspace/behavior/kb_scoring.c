@@ -138,11 +138,12 @@ kb_scoring_result_t kb_scoring_update(const struct kb_unified_event *evt)
     kb_process_state_t *s = find_or_create(evt->pid);
     if (!s) return r; // table full
 
-    if (s->event_count == 0) {
+    if (!s->has_identity) {
         s->ppid = evt->ppid;
         s->uid  = evt->uid;
         memcpy(s->comm, evt->comm, sizeof(s->comm));
         s->start_time_ns = evt->ts_ns;
+        s->has_identity = 1;
     }
 
     kb_dimension_t dim; double raw;
@@ -151,8 +152,6 @@ kb_scoring_result_t kb_scoring_update(const struct kb_unified_event *evt)
 
     r = recompute(s, evt->ts_ns);
 
-    // process_exit: score it, report the transition if any, then
-    // drop the pid from the table so it doesn't grow unbounded.
     if (evt->event_type == KB_EVT_PROCESS_EXIT)
         s->in_use = 0;
 
