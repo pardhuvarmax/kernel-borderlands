@@ -10,6 +10,7 @@
 // stdout so the pipeline can be visually verified end-to-end.
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <signal.h>
 #include <string.h>
@@ -203,6 +204,115 @@ static void bridge_dispatch(kb_scoring_result_t r, uint64_t ts_ns)
         // send rather than retry-looping here.
         kb_bridge_close(bridge_fd);
         bridge_fd = -1;
+    }
+}
+
+// /proc fallback for pids kb_scoring never got identity for via a real
+// event — see kb_scoring_set_identity()'s doc comment in kb_scoring.h.
+// Read-only /proc parsing, no eBPF involved. Best-effort: if the pid has
+// already exited by the time we read it, every fopen below just fails
+// and the pid stays without identity — same outcome as before this
+// existed, no new failure mode introduced.
+//
+// CAVEAT: start_time_ns here is derived from /proc/uptime (effectively
+// CLOCK_BOOTTIME) converted against now_ns()'s CLOCK_MONOTONIC reading.
+// These two clocks diverge by however long the machine has spent
+// suspended since boot. On a server/VM that never suspends this is
+// exact; on a laptop that sleeps/wakes, a pid identified this way can
+// carry a start_time_ns off by the cumulative suspended duration —
+// worth knowing before trusting it blindly in the PID-reuse guard on
+// a machine that suspends.
+static void proc_backfill_identity(uint32_t pid)
+{
+    if (kb_scoring_has_identity(pid))
+        return;
+
+    char path[64], comm[16] = {0};
+
+    snprintf(path, sizeof(path), "/proc/%u/comm", pid);
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return; // pid already gone — leave blank, harmless
+    if (fgets(comm, sizeof(comm), f)) {
+        size_t n = strlen(comm);
+        if (n && comm[n - 1] == '\n') comm[n - 1] = '\0';
+    }
+    fclose(f);
+
+    uint32_t ppid = 0, uid = 0;
+    snprintf(path, sizeof(path), "/proc/%u/status", pid);
+    f = fopen(path, "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            if (!strncmp(line, "PPid:", 5))
+                ppid = (uint32_t)strtoul(line + 5, NULL, 10);
+            else if (!strncmp(line, "Uid:", 4))
+                uid = (uint32_t)strtoul(line + 4, NULL, 10); // real uid, 1st field
+        }
+        fclose(f);
+    }
+
+    uint64_t start_time_ns = 0;
+    snprintf(path, sizeof(path), "/proc/%u/stat", pid);
+    f = fopen(path, "r");
+    if (f) {
+        char statbuf[512] = {0};
+        size_t rd = fread(statbuf, 1, sizeof(statbuf) - 1, f);
+        fclose(f);
+        char *rparen = rd ? strrchr(statbuf, ')') : NULL;
+        if (rparen && rparen[1] == ' ') {
+            // Field 22 (starttime, in clock ticks since boot) is the
+            // 20th whitespace-separated token after the comm's closing
+            // ')' — verified against real /proc/[pid]/stat layout.
+            char *tok = strtok(rparen + 2, " ");
+            int field = 3;
+            while (tok && field < 22) { tok = strtok(NULL, " "); field++; }
+            if (tok) {
+                unsigned long long ticks = strtoull(tok, NULL, 10);
+                long clk_tck = sysconf(_SC_CLK_TCK);
+                double starttime_s = (double)ticks / (double)clk_tck;
+
+                double uptime_s = 0.0;
+                FILE *uf = fopen("/proc/uptime", "r");
+                if (uf) {
+                    if (fscanf(uf, "%lf", &uptime_s) != 1) uptime_s = 0.0;
+                    fclose(uf);
+                }
+                double age_s = uptime_s - starttime_s;
+                if (age_s < 0) age_s = 0; // clock skew guard
+                start_time_ns = now_ns() - (uint64_t)(age_s * 1e9);
+            }
+        }
+    }
+
+    kb_scoring_set_identity(pid, comm, ppid, uid, start_time_ns);
+}
+
+// Reads kb_ringbuf_drops and logs if it's grown since the last check.
+// Cumulative counter (never reset in-kernel), so this tracks the delta
+// itself rather than re-reporting the same total every scan.
+static void check_ringbuf_drops(struct kbd_sensor_bpf *skel)
+{
+    int fd = bpf_map__fd(skel->maps.kb_ringbuf_drops);
+    if (fd < 0)
+        return; // map not present in this skeleton build — regen needed
+
+    static uint64_t last_seen = 0;
+    __u32 zero = 0;
+    __u64 total = 0;
+    if (bpf_map_lookup_elem(fd, &zero, &total) != 0)
+        return;
+
+    if (total > last_seen) {
+        fprintf(stderr,
+            "kbd_sensor: ring buffer full — %llu event(s) dropped since start "
+            "(+%llu since last check). kb_events is 1MB shared across all 9 "
+            "hooks; a burst (e.g. a `go build` spawning many short-lived "
+            "processes) can exceed that. Dropped exec/exit events are the "
+            "likely cause of blank comm on very short-lived pids.\n",
+            (unsigned long long)total, (unsigned long long)(total - last_seen));
+        last_seen = total;
     }
 }
 
