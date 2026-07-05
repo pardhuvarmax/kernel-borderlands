@@ -1,4 +1,4 @@
-module github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane
+module github.com/pardhuvarmax/kernel-borderlands/kb-control-plane
 
 go 1.25.0
 

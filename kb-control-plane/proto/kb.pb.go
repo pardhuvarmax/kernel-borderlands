@@ -890,7 +890,7 @@ const file_proto_kb_proto_rawDesc = "" +
 	"\x0eSetContainment\x12\x16.kb.ContainmentRequest\x1a\x17.kb.ContainmentResponse\x12.\n" +
 	"\fStreamEvents\x12\x0f.kb.EventFilter\x1a\v.kb.KBEvent0\x01\x129\n" +
 	"\x13SubmitAgentDecision\x12\x11.kb.AgentDecision\x1a\x0f.kb.DecisionAck\x12,\n" +
-	"\fStreamAlerts\x12\x0f.kb.EventFilter\x1a\t.kb.Alert0\x01BSZQgithub.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/protob\x06proto3"
+	"\fStreamAlerts\x12\x0f.kb.EventFilter\x1a\t.kb.Alert0\x01BSZQgithub.com/pardhuvarmax/kernel-borderlands/kb-control-plane/protob\x06proto3"
 
 var (
 	file_proto_kb_proto_rawDescOnce sync.Once

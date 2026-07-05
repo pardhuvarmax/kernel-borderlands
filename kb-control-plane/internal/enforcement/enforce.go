@@ -6,7 +6,7 @@ import (
     "os"
     "syscall"
 
-    pb "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/proto"
+    pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 )
 
 type Enforcer struct{}

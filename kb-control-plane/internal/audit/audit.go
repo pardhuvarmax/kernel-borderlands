@@ -8,7 +8,7 @@ import (
     "sync"
     "time"
 
-    "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/ipc"
+    "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 )
 
 type Logger struct {

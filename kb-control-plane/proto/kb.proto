@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package kb;
 
-option go_package = "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/proto";
+option go_package = "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto";
 
 // Zone classification
 enum Zone {

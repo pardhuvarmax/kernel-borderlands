@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/ipc"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 )
 
 // newTestControlPlane wires a real ControlPlane against an in-memory

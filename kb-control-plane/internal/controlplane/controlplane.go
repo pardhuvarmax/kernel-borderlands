@@ -7,12 +7,12 @@ import (
 	"sync"
 
 	"google.golang.org/grpc"
-	pb "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/proto"
-	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/audit"
-	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/enforcement"
-	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/ipc"
-	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/policy"
-	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/store"
+	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/audit"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/enforcement"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/policy"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 )
 
 type ControlPlane struct {
