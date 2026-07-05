@@ -35,11 +35,10 @@ Complete installation instructions, dependency setup, project architecture, deve
 
 **Please Begin with:**
 
-```text
-docs/README.md
-```
+[Kernel Borderlands Wiki](../../wiki)
 
-The documentation provides:
+
+The wiki provides:
 
 * Installation and environment setup
 * Software and hardware requirements
@@ -64,21 +63,3 @@ python main.py
 cd kb-dashboard
 npm run dev
 ```
-
----
-
-### Documentation
-
-The complete documentation for Kernel Borderlands is located in the `docs/` directory.
-
-The recommended reading order for new contributors is:
-
-1. `docs/README.md`
-2. `docs/installation.md`
-3. `docs/requirements.md`
-4. `docs/hookpoints.md`
-5. `docs/kb-team.md`
-6. `docs/KB.pdf`
-7. `docs/KB_Synopsis-1.pdf`
-
----
