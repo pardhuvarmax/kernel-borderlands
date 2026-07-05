@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/controlplane"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/controlplane"
 	"github.com/spf13/cobra"
 )
 

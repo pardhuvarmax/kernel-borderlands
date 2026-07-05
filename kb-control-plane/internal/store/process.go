@@ -3,7 +3,7 @@ package store
 import (
 	"log"
 
-	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/ipc"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 )
 
 // CachedState is the L1, in-memory mirror of a process_state row — the

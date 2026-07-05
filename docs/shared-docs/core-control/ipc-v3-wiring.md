@@ -366,7 +366,7 @@ func (s *Store) Close()      { s.db.Close() }
 package store
 
 import (
-    "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/ipc"
+    "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 )
 
 func (s *Store) UpsertProcessState(msg *ipc.ProcessStateMsg) error {
@@ -448,7 +448,7 @@ import (
     "sync"
     "time"
 
-    "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/ipc"
+    "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 )
 
 type Logger struct {
@@ -535,7 +535,7 @@ import (
     "os"
     "syscall"
 
-    pb "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/proto"
+    pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 )
 
 type Enforcer struct{}
@@ -658,12 +658,12 @@ import (
     "sync"
 
     "google.golang.org/grpc"
-    pb   "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/proto"
-    "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/audit"
-    "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/enforcement"
-    "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/ipc"
-    "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/policy"
-    "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/store"
+    pb   "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
+    "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/audit"
+    "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/enforcement"
+    "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
+    "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/policy"
+    "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 )
 
 type ControlPlane struct {
@@ -839,8 +839,8 @@ import (
     "database/sql"
     "fmt"
 
-    pb "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/proto"
-    "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/ipc"
+    pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
+    "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 )
 
 func (cp *ControlPlane) GetProcessState(

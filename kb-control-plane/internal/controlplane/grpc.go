@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	pb "github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/proto"
-	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/ipc"
-	"github.com/PardhuSreeRushiVarma20060119/kernel-borderlands/kb-control-plane/internal/store"
+	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 )
 
 // cachedToProto converts the store's L1 CachedState into the gRPC wire
