@@ -1653,7 +1653,7 @@
       </div>
       <div class="layer-body">
         <div class="layer-name">Control Plane — kbd daemon</div>
-        <div class="layer-desc">Consumes ring buffer events, manages a dual-tiered state topology (L1 lock-free Go heap cache backed by an asynchronous L2 embedded SQLite WAL data engine), evaluates YAML-defined operator policies, and exposes a gRPC-over-UDS API. All enforcement actions are authorized and executed exclusively through this layer. To mitigate ephemeral eBPF ring buffer volatility on boot, a cold-start initialization routine synchronizes current state by direct scraping of the /proc file system. Validated audit logs are committed out-of-band to an immutable, append-only SHA-256 chained JSON ledger within the L2 persistent layer.</div>
+        <div class="layer-desc">Consumes ring buffer events, manages a dual-tiered state topology (L1 thread-safe sync.Map cache backed by an asynchronous L2 SQLite WAL storage engine), evaluates YAML-defined operator policies, and exposes a gRPC-over-UDS API. All enforcement actions are authorized and executed exclusively through this layer. To mitigate ephemeral eBPF ring buffer volatility on boot, a cold-start initialization routine synchronizes current state by direct scraping of the /proc file system. Validated audit logs are committed out-of-band to an immutable, append-only SHA-256 chained JSON ledger within the L2 persistent layer.</div>
         <div class="layer-tags">
           <span class="ltag">gRPC</span>
           <span class="ltag">SQLite</span>
@@ -1780,8 +1780,8 @@
   </div>
   <div class="r">
     <div class="eyebrow">Execution Zone Model</div>
-    <h2 class="section-title">THREE ZONES.<br>CONTINUOUS SCORING.</h2>
-    <p class="body-text" style="margin-top:16px;max-width:640px">Every process is continuously assigned to one of three execution zones based on its smoothed Behavioral Risk Score S<sub>t</sub>. Zone transition is the unit of analysis — not individual syscalls.</p>
+    <h2 class="section-title">THREE ZONES.<br>STATE TRANSITIONS.</h2>
+    <p class="body-text" style="margin-top:16px;max-width:640px">Every process is continuously evaluated by the Behavior State Machine sequence checks. Transitions between execution zones (SAFE → SUSPICIOUS → BORDERLANDS) are triggered by dynamic rule matches across historical event lineages, while the Behavioral Risk Score S<sub>t</sub> provides auxiliary risk metrics.</p>
   </div>
 
   <div class="zone-grid">
@@ -2646,7 +2646,7 @@
       </div>
       <div class="ss-body">
         <div class="ss-name">Control Plane Daemon</div>
-        <p class="ss-desc">The <code style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--volt)">kbd</code> daemon — Consumes ring buffer events, manages a dual-tiered state topology (L1 lock-free Go heap cache backed by an asynchronous L2 embedded SQLite WAL data engine), evaluates YAML-defined operator policies, and exposes a gRPC-over-UDS API. All enforcement actions are authorized and executed exclusively through this layer. To mitigate ephemeral eBPF ring buffer volatility on boot, a cold-start initialization routine synchronizes current state by direct scraping of the /proc file system. Validated audit logs are committed out-of-band to an immutable, append-only SHA-256 chained JSON ledger within the L2 persistent layer.</p>
+        <p class="ss-desc">The <code style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--volt)">kbd</code> daemon — Consumes ring buffer events, manages a dual-tiered state topology (L1 thread-safe sync.Map cache backed by an asynchronous L2 SQLite WAL storage engine), evaluates YAML-defined operator policies, and exposes a gRPC-over-UDS API. All enforcement actions are authorized and executed exclusively through this layer. To mitigate ephemeral eBPF ring buffer volatility on boot, a cold-start initialization routine synchronizes current state by direct scraping of the /proc file system. Validated audit logs are committed out-of-band to an immutable, append-only SHA-256 chained JSON ledger within the L2 persistent layer.</p>
         <div class="ss-tags">
           <span class="ss-tag">gRPC</span>
           <span class="ss-tag">SQLite</span>
