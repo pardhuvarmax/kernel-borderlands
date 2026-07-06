@@ -1,30 +1,64 @@
-# KB Core — eBPF Instrumentation Layer
+# KB Core — eBPF Instrumentation & Security Layer
 
-The kernel-level observability layer for Kernel Borderlands.
-Implements all 6 hook points via eBPF CO-RE programs.
+The kernel-level observability and security enforcement layer for Kernel Borderlands. Implements dynamic system tracing, out-of-band TLS inspection, and in-kernel security containment using eBPF CO-RE (Compile Once – Run Everywhere) and BPF LSM.
 
-## Structure
-- `ebpf/`      — eBPF C programs (kernel side)
-- `userspace/` — Userspace loaders (C)
-- `include/`   — vmlinux.h and shared headers
-- `scripts/`   — Build and test scripts
-- `tests/`     — Unit and integration tests
+---
 
-## Hook Points
-- `tracepoint:syscalls` — All syscall entry/exit
-- `tracepoint:sched`    — Fork, exec, exit events
-- `kprobe:commit_creds` — Privilege changes
-- `bpf_lsm`            — File access (LSM hooks)
-- `tracepoint:net`      — Network activity
-- `kprobe:mmap_region`  — Memory mapping
+## Subsystem Architecture
 
-## Build
+### 1. Directory Structure
+*   **`ebpf/`**: Core eBPF C programs running in Ring 0 (kernel-space).
+    -   `kbd_sensor.bpf.c`: Consolidated eBPF sensor implementing execution tracking, privilege changes, file accesses, memory violations, and uprobes.
+*   **`userspace/`**: Userspace loader and bridge client written in C.
+    -   `sensor/kbd_sensor.c`: Main loader daemon. Manages maps, processes ELF symbols, dynamically attaches uprobes, and forwards events to the IPC bridge.
+    -   `bridge/kb_bridge.c`: Low-level IPC bridge client using Unix domain sockets.
+*   **`include/`**: Struct mappings and shared C headers.
+*   **`tests/`**: Unit tests for scoring/behavior and mock hook integration triggers.
+
+---
+
+## eBPF Telemetry & Containment Hooks
+
+### A. Authoritative VFS LSM File Blocking (BPF LSM)
+*   **Hook**: `lsm/file_open`
+*   **Description**: Intercepts file open operations at the Virtual File System (VFS) layer after symlinks and relative directories are resolved.
+*   **Verdict**: Queries the dynamic `kb_sensitive_paths` eBPF map. Returns `-EACCES` (-13) to natively block open attempts inside kernel-space before they return to userland.
+*   **Verifier-Safe Directory Traversal**: Resolves parent directories dynamically using an unrolled loop (`#pragma unroll`) to perform suffix checks without exceeding BPF verifier complexity limits.
+
+### B. Out-of-Band Plaintext TLS Inspection
+Using userspace uprobes, KB intercepts decrypted payloads directly in memory before encryption or after decryption, supporting:
+*   **OpenSSL (`libssl.so`)**: Hooks `SSL_write`. Collects parameters using the System V ABI (receiver in `RDI`, buffer in `RSI`, length in `RDX`).
+*   **GnuTLS (`libgnutls.so`)**: Hooks `gnutls_record_send` (System V ABI).
+*   **NSS (`libnss3.so`)**: Hooks NSPR socket `PR_Write` (System V ABI).
+*   **Go Runtime (`crypto/tls`)**: Dynamic offset parsing in `/proc/[pid]/exe`. Reads slices using Go `ABIInternal` register conventions (`RBX` for backing array address, `RCX` for length).
+
+### C. In-Context Hijacking Protection
+*   **`/proc/*/mem` Protection**: The path auditor detects and flags file access queries attempting to read/write process memory spaces via procfs.
+*   **Cross-Process Memory Injection**: Hooks `sys_enter_process_vm_writev` system call to intercept shellcode injection between distinct PIDs.
+*   **Sensitive Capability Probing**: Hooks `kprobe/security_capable` to audit capability requests (such as `CAP_SYS_ADMIN`, `CAP_SYS_PTRACE`, `CAP_SYS_RAWIO`, and `CAP_DAC_OVERRIDE`) by non-root users.
+
+---
+
+## Build and Run
+
+### Prerequisites
+*   Clang/LLVM, bpftool, libelf, libz.
+*   BPF LSM support enabled in grub (`lsm=...,bpf`).
+
+### Recompilation
+To perform a clean rebuild of the entire C sensor, dynamic skeletons, and shared loaders:
 ```bash
-make vmlinux
-make
-sudo ./kb_sensor
+make clean && make
 ```
 
-## Owner
-- Pardhu Varma — Systems & Security
-- Karthik — Systems Integration & Subsystem Testing (Collab)
+### Execution
+Run the sensor as superuser to load eBPF hooks into the kernel:
+```bash
+sudo ./build/kbd_sensor
+```
+
+---
+
+## Contributors & Subsystem Owners
+*   **Pardhu Varma** — Lead Kernel & Security Subsystems Engineer (`kb-core` Lead)
+*   **Karthik** — Systems Integration & Test Simulation (Collaboration)

@@ -112,6 +112,13 @@ struct {
     __type(value, __u64);
 } kb_ringbuf_drops SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 64);
+    __type(key, char[64]);
+    __type(value, __u32);
+} kb_sensitive_paths SEC(".maps");
+
 static __always_inline struct kb_unified_event *kb_reserve_event(void)
 {
     struct kb_unified_event *e =
@@ -239,12 +246,35 @@ int kb_handle_commit_creds(struct pt_regs *ctx)
 
 static __always_inline int is_sensitive_path(const char *fname)
 {
-    char buf[16] = {};
+    char buf[64] = {};
     bpf_probe_read_user_str(buf, sizeof(buf), fname);
-    if (buf[0]=='/' && buf[1]=='e' && buf[2]=='t' && buf[3]=='c' && buf[4]=='/' && buf[5]=='s' && buf[6]=='h' && buf[7]=='a') return 1;
-    if (buf[0]=='/' && buf[1]=='e' && buf[2]=='t' && buf[3]=='c' && buf[4]=='/' && buf[5]=='p' && buf[6]=='a' && buf[7]=='s') return 1;
-    if (buf[0]=='/' && buf[1]=='e' && buf[2]=='t' && buf[3]=='c' && buf[4]=='/' && buf[5]=='s' && buf[6]=='u' && buf[7]=='d') return 1;
-    if (buf[0]=='/' && buf[1]=='r' && buf[2]=='o' && buf[3]=='o' && buf[4]=='t' && buf[5]=='/') return 1;
+
+    // 1. Direct path lookup in the dynamic map
+    __u32 *val = bpf_map_lookup_elem(&kb_sensitive_paths, buf);
+    if (val) return 1;
+
+    // 2. Directory prefix check (safe, unrolled loop to satisfy verifier)
+    #pragma unroll
+    for (int i = 63; i > 0; i--) {
+        if (buf[i] == '/') {
+            buf[i] = '\0'; // truncate at directory boundary
+            val = bpf_map_lookup_elem(&kb_sensitive_paths, buf);
+            if (val) return 1;
+            // Restore '/' in case we need to check higher directories in future
+            buf[i] = '/';
+        }
+    }
+
+    // 3. Keep hardware/kernel protection for /proc/*/mem (not easily directory-listed)
+    if (buf[0]=='/' && buf[1]=='p' && buf[2]=='r' && buf[3]=='o' && buf[4]=='c' && buf[5]=='/') {
+        for (int i = 6; i < 24; i++) {
+            if (buf[i] == '\0') break;
+            if (buf[i] == '/' && buf[i+1] == 'm' && buf[i+2] == 'e' && buf[i+3] == 'm' && buf[i+4] == '\0') {
+                return 1;
+            }
+        }
+    }
+
     return 0;
 }
 
@@ -357,5 +387,138 @@ int kb_handle_mprotect(struct trace_event_raw_sys_enter *ctx)
     e->addr = addr; e->length = length; e->prot = prot;
     e->rwx = ((prot & KB_PROT_RWX) == KB_PROT_RWX) ? 1 : 0;
     bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("uprobe")
+int kb_ssl_write(struct pt_regs *ctx)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    if (pid == 0) return 0;
+
+    // OpenSSL SSL_write(SSL *ssl, const void *buf, int num)
+    // Parameter 2: buf in RSI (ctx->si), Parameter 3: num in RDX (ctx->dx)
+    const char *buf = (const char *)PT_REGS_PARM2(ctx);
+    int num = (int)PT_REGS_PARM3(ctx);
+
+    if (num <= 0 || !buf) return 0;
+
+    struct kb_unified_event *e = kb_reserve_event();
+    if (!e) return 0;
+
+    kb_fill_common(e, pid, 9); // 9 = KB_EVT_TLS_PLAINTEXT
+    e->flags = num; // store original length
+    int copy_len = num > 127 ? 127 : num;
+    bpf_probe_read_user(&e->filename, copy_len, buf);
+    e->filename[copy_len] = '\0';
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("uprobe")
+int kb_go_tls_write(struct pt_regs *ctx)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    if (pid == 0) return 0;
+
+    // Go ABI: b.ptr in RBX (ctx->bx), b.len in RCX (ctx->cx)
+    const char *buf = (const char *)ctx->bx;
+    int num = (int)ctx->cx;
+
+    if (num <= 0 || !buf) return 0;
+
+    struct kb_unified_event *e = kb_reserve_event();
+    if (!e) return 0;
+
+    kb_fill_common(e, pid, 9); // 9 = KB_EVT_TLS_PLAINTEXT
+    e->flags = num;
+    int copy_len = num > 127 ? 127 : num;
+    bpf_probe_read_user(&e->filename, copy_len, buf);
+    e->filename[copy_len] = '\0';
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_process_vm_writev")
+int kb_handle_process_vm_writev(struct trace_event_raw_sys_enter *ctx)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    if (pid == 0) return 0;
+
+    __u32 target_pid = (__u32)ctx->args[0];
+    if (target_pid == pid) return 0;
+
+    struct kb_unified_event *e = kb_reserve_event();
+    if (!e) return 0;
+
+    kb_fill_common(e, pid, KB_EVT_MEMORY_MMAP);
+    e->addr = 0;
+    e->length = target_pid;
+    e->prot = 0;
+    e->rwx = 1;
+    e->anonymous = 1;
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("kprobe/security_capable")
+int kb_handle_security_capable(struct pt_regs *ctx)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    if (pid == 0) return 0;
+
+    __u32 uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
+    if (uid == 0) return 0; // skip root noise
+
+    int cap = (int)PT_REGS_PARM3(ctx);
+    // Sensitive capabilities: CAP_CHOWN(0), CAP_DAC_OVERRIDE(1), CAP_SYS_PTRACE(19), CAP_SYS_ADMIN(21), CAP_SYS_RAWIO(17)
+    if (cap != 19 && cap != 21 && cap != 17 && cap != 1)
+        return 0;
+
+    struct kb_unified_event *e = kb_reserve_event();
+    if (!e) return 0;
+
+    kb_fill_common(e, pid, KB_EVT_PRIVILEGE_CHANGE);
+    e->old_uid = uid;
+    e->new_uid = uid;
+    e->old_euid = cap;
+    e->new_euid = 0xFFFFFFFF; // Indicator for capability probe
+    e->escalation = 1;
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+static __always_inline int is_sensitive_kernel_path(char *buf)
+{
+    // 1. Direct path lookup in the dynamic map
+    __u32 *val = bpf_map_lookup_elem(&kb_sensitive_paths, buf);
+    if (val) return 1;
+
+    // 2. Directory prefix check (safe, unrolled loop to satisfy verifier)
+    #pragma unroll
+    for (int i = 63; i > 0; i--) {
+        if (buf[i] == '/') {
+            buf[i] = '\0'; // truncate at directory boundary
+            val = bpf_map_lookup_elem(&kb_sensitive_paths, buf);
+            if (val) {
+                buf[i] = '/'; // restore
+                return 1;
+            }
+            buf[i] = '/'; // restore
+        }
+    }
+    return 0;
+}
+
+SEC("lsm/file_open")
+int BPF_PROG(kb_lsm_file_open, struct file *file, int mask)
+{
+    char path_buf[64] = {};
+    int len = bpf_d_path(&file->f_path, path_buf, sizeof(path_buf));
+    if (len < 0) return 0;
+
+    if (is_sensitive_kernel_path(path_buf)) {
+        return -13; // Block by returning -EACCES
+    }
     return 0;
 }

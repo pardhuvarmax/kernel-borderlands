@@ -92,18 +92,6 @@ static void score_event(const struct kb_unified_event *e,
     }
 }
 
-static kb_zone_t classify(double ema)
-{
-    if (ema >= 75.0) return KB_ZONE_BORDERLANDS;
-    if (ema >= 40.0) return KB_ZONE_SUSPICIOUS;
-    return KB_ZONE_SAFE;
-}
-
-// Shared recompute path: given a process state whose dim_score[] has
-// just been updated in one slot, recompute composite/EMA/zone and
-// build the result. Used by both kb_scoring_update() and
-// kb_scoring_update_syscall_entropy() so the two entry points can't
-// drift out of sync on how a zone transition is derived.
 static kb_scoring_result_t recompute(kb_process_state_t *s, uint64_t ts_ns)
 {
     kb_scoring_result_t r = {0};
@@ -117,18 +105,10 @@ static kb_scoring_result_t recompute(kb_process_state_t *s, uint64_t ts_ns)
         ? composite
         : KB_EMA_ALPHA * composite + (1 - KB_EMA_ALPHA) * s->ema_score;
 
-    kb_zone_t prev = s->zone;
-    kb_zone_t next = classify(s->ema_score);
-
     s->event_count++;
     if (ts_ns) s->last_updated_ns = ts_ns;
 
     r.state = s;
-    r.prev_zone = prev;
-    if (next != prev) {
-        s->zone = next;
-        r.zone_changed = 1;
-    }
     return r;
 }
 

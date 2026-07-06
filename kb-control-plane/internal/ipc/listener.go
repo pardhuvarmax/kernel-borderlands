@@ -27,8 +27,13 @@ func (l *Listener) Listen() error {
 }
 
 func (l *Listener) handle(conn net.Conn) {
-    defer func() { conn.Close(); log.Printf("[IPC] kbd_sensor disconnected") }()
-    if err := NewReader(conn, l.handler).ReadLoop(); err != nil {
-        log.Printf("[IPC] read: %v", err)
-    }
+	defer func() { conn.Close(); log.Printf("[IPC] kbd_sensor disconnected") }()
+
+	if err := SendRulesPayload(conn, "config/rules.yaml"); err != nil {
+		log.Printf("[IPC] failed to send rules payload: %v", err)
+	}
+
+	if err := NewReader(conn, l.handler).ReadLoop(); err != nil {
+		log.Printf("[IPC] read: %v", err)
+	}
 }

@@ -70,10 +70,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts  ON audit_log(ts_ns);
 // enqueues the durable write; reads that back enforcement (VerifyStartTime,
 // GetProcessState, ListZone) are served from L1 only.
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
 
 	l1     sync.Map // pid uint32 -> *CachedState
 	l2Pipe chan any // async write-behind queue to SQLite
+	l2Done chan struct{}
 }
 
 func New(path string) (*Store, error) {
@@ -106,7 +107,10 @@ func New(path string) (*Store, error) {
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(time.Hour)
 
-	s := &Store{db: db}
+	s := &Store{
+		db:     db,
+		l2Done: make(chan struct{}),
+	}
 	s.initL1()
 
 	log.Printf("[Store] Ready: %s (L1/L2 hybrid, WAL)", path)
@@ -117,5 +121,6 @@ func (s *Store) DB() *sql.DB { return s.db }
 
 func (s *Store) Close() {
 	close(s.l2Pipe)
+	<-s.l2Done
 	s.db.Close()
 }

@@ -3,10 +3,6 @@
 # KB Core — Hook Verification Test Script
 # Triggers all 9 event types one at a time with labels,
 # so output can be matched against kbd_sensor's live stream.
-#
-# Usage:
-#   Terminal 1: sudo ./build/kbd_sensor
-#   Terminal 2: ./scripts/test_all_hooks.sh
 # ═══════════════════════════════════════════════════════════
 
 set -uo pipefail
@@ -32,6 +28,25 @@ ok() {
     echo -e "${GREEN}  ✓ Triggered: $1${NC}"
 }
 
+run_sudo_optional() {
+    local cmd="$1"
+    local desc="$2"
+    echo -e "${YELLOW}  [Sudo Option] This test can run with sudo: $desc${NC}"
+    read -t 5 -p "  Do you want to authorize sudo? (y/N) [Timeout 5s -> No]: " -n 1 -r choice
+    echo ""
+    if [[ "${choice:-n}" =~ ^[Yy]$ ]]; then
+        if sudo -v; then
+            eval "sudo $cmd"
+        else
+            echo -e "${RED}  Sudo authorization failed or rejected, falling back to non-sudo...${NC}"
+            eval "$cmd"
+        fi
+    else
+        echo -e "${YELLOW}  Sudo skipped, running without privilege...${NC}"
+        eval "$cmd"
+    fi
+}
+
 echo -e "${YELLOW}"
 echo "╔════════════════════════════════════════════╗"
 echo "║   KB Core — All Hooks Test Script           ║"
@@ -55,10 +70,8 @@ pause
 section "TEST 2 — privilege_change"
 # ─────────────────────────────────────────────
 echo "Expect: [privilege_change] event, possibly 🔴 ESCALATION"
-echo "(Requires sudo — will prompt for password)"
-sudo -v   # refresh/validate sudo credential, triggers commit_creds
-sudo whoami > /dev/null
-ok "privilege_change (via sudo whoami)"
+run_sudo_optional "whoami > /dev/null" "whoami (triggers commit_creds privilege change)"
+ok "privilege_change test complete"
 pause
 
 # ─────────────────────────────────────────────
@@ -74,7 +87,7 @@ cat /etc/passwd > /dev/null 2>&1
 ok "file_access — /etc/passwd"
 pause
 
-sudo cat /etc/sudoers > /dev/null 2>&1
+run_sudo_optional "cat /etc/sudoers > /dev/null 2>&1" "cat /etc/sudoers (triggers sensitive file open)"
 ok "file_access — /etc/sudoers"
 pause
 
@@ -143,11 +156,10 @@ m = mmap.mmap(-1, PAGESIZE, prot=PROT_READ | PROT_WRITE)
 
 # Get the address of the mapping
 addr = ctypes.addressof(ctypes.c_char.from_buffer(m))
-# Align down to page boundary (mmap.mmap already page-aligns, but be safe)
+# Align down to page boundary
 page_addr = addr - (addr % PAGESIZE)
 
-# Call mprotect() directly via libc — this is what fires
-# the kprobe:mprotect / sys_enter_mprotect hook
+# Call mprotect() directly via libc
 ret = libc.mprotect(
     ctypes.c_void_p(page_addr),
     ctypes.c_size_t(PAGESIZE),
