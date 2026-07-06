@@ -504,7 +504,7 @@ stateDiagram-v2
 ```
 
 ### C. Advisory Scoring Engine (EMA Calculations)
-Advisory scoring sums risk indices across 6 weighted dimensions smoothed over time using Exponential Moving Average.
+The Behavioral Risk Score $S_t$ calculated by the scoring engine is strictly advisory-only and does not trigger zone transitions. Actual zone transitions are driven exclusively by sequence checks and dynamic rule matches within the Behavior State Machine. The advisory score sums risk indices across 6 weighted dimensions smoothed over time using Exponential Moving Average.
 
 #### 1. Dimension Layout
 *   **Process Context ($D_{\text{proc}}$)** — weight: `0.20`
