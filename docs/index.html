@@ -1255,33 +1255,111 @@
     #team > *:not(.cine) { position:relative;z-index:1; }
     .team-intro { max-width:600px;font-size:14.5px;color:var(--muted);line-height:1.78;font-weight:300;margin-top:28px; }
     .team-intro strong { color:var(--text);font-weight:500; }
-    .team-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);margin-top:64px; }
+    .team-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:24px;margin-top:64px; }
     .member {
-      background:var(--black);padding:44px 36px;transition:background .2s;cursor:none;
-      position:relative;overflow:hidden;
+      background:rgba(255, 255, 255, 0.015);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding:44px 36px;
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      position:relative;
+      overflow:hidden;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
     .member::before {
-      content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
-      background:var(--ember);transform:scaleX(0);transform-origin:left;transition:transform .3s ease;
+      content:'';position:absolute;top:0;left:0;right:0;height:3px;
+      background:var(--accent-color, var(--ember));
+      transform:scaleX(0);transform-origin:left;transition:transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     }
-    .member:hover { background:var(--s2); }
+    .member::after {
+      content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;
+      background: radial-gradient(circle, rgba(var(--accent-rgb), 0.05) 0%, transparent 60%);
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .member:hover {
+      transform: translateY(-8px);
+      border-color: rgba(var(--accent-rgb), 0.3);
+      box-shadow: 0 12px 40px rgba(var(--accent-rgb), 0.1);
+      background: rgba(var(--accent-rgb), 0.02);
+    }
     .member:hover::before { transform:scaleX(1); }
+    .member:hover::after { opacity: 1; }
     .member-initial {
-      width:52px;height:52px;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;
-      font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--ember);margin-bottom:24px;
-      transition:border-color .2s;
+      width:64px;height:64px;
+      border:1px dashed var(--border2);
+      border-radius: 50%;
+      display:flex;align-items:center;justify-content:center;
+      font-family:'Bebas Neue',sans-serif;font-size:24px;
+      color:var(--accent-color, var(--ember));
+      margin-bottom:24px;
+      position: relative;
+      z-index: 1;
+      transition: all 0.4s ease;
     }
-    .member:hover .member-initial { border-color:var(--ember); }
-    .member-name { font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:.03em;margin-bottom:6px; }
-    .member-id { font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.12em;color:var(--muted);margin-bottom:18px; }
-    .member-domain { font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.6;margin-bottom:18px; }
-    .member-owns { display:flex;flex-direction:column;gap:6px; }
+    .member-initial::after {
+      content: '';
+      position: absolute;
+      top: -3px; left: -3px; right: -3px; bottom: -3px;
+      border: 1px solid var(--accent-color, var(--ember));
+      border-radius: 50%;
+      opacity: 0;
+      transform: scale(0.9);
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      animation: spin-initial 8s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes spin-initial {
+      100% { transform: rotate(360deg); }
+    }
+    .member:hover .member-initial {
+      border-color: transparent;
+      transform: scale(1.1);
+      box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.2);
+    }
+    .member:hover .member-initial::after {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .member-name {
+      font-family:'Bebas Neue',sans-serif;font-size:24px;
+      letter-spacing:.03em;margin-bottom:6px;
+      position: relative;
+      z-index: 1;
+      transition: color 0.3s ease;
+    }
+    .member:hover .member-name {
+      color: var(--accent-color, var(--text));
+    }
+    .member-domain {
+      font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.6;margin-bottom:24px;
+      position: relative;
+      z-index: 1;
+    }
+    .member-owns {
+      display:flex;flex-wrap: wrap;gap:8px;
+      position: relative;
+      z-index: 1;
+    }
     .member-own-tag {
-      font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
-      border:1px solid var(--border2);color:var(--dim);padding:4px 10px;display:inline-block;
-      width:fit-content;transition:color .2s,border-color .2s;
+      font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.05em;
+      border:1px solid var(--border2);
+      color:var(--dim);
+      padding:4px 10px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.005);
+      transition: all 0.3s ease;
     }
-    .member:hover .member-own-tag { color:var(--muted);border-color:var(--border2); }
+    .member:hover .member-own-tag {
+      color:var(--text);
+      border-color: rgba(var(--accent-rgb), 0.4);
+      background: rgba(var(--accent-rgb), 0.1);
+      box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.05);
+    }
 
     /* ── COMPAT ── */
     #compat { padding:110px 48px;border-bottom:1px solid var(--border); }
@@ -2931,25 +3009,49 @@
   </div>
 
   <div class="team-grid r" style="margin-top:64px">
-    <div class="member">
+    <!-- Pardhu -->
+    <div class="member" style="--accent-color:#bfff00; --accent-rgb:191,255,0;">
       <div class="member-initial">PV</div>
       <div class="member-name">Pardhu Varma</div>
       <p class="member-domain">Systems Architecture · Linux Kernel · eBPF · Rust</p>
+      <div class="member-owns">
+        <span class="member-own-tag">kb-core/</span>
+        <span class="member-own-tag">kb-checker/</span>
+        <span class="member-own-tag">Ring 0 LSM</span>
+      </div>
     </div>
-    <div class="member">
+    <!-- Karthik -->
+    <div class="member" style="--accent-color:#ff4500; --accent-rgb:255,69,0;">
       <div class="member-initial">KK</div>
       <div class="member-name">Karthik</div>
       <p class="member-domain">AI & Agentic Systems · MARL · Offensive Security</p>
+      <div class="member-owns">
+        <span class="member-own-tag">kb-aads/</span>
+        <span class="member-own-tag">marl/</span>
+        <span class="member-own-tag">Quorum Consensus</span>
+      </div>
     </div>
-    <div class="member">
+    <!-- Tejaswini -->
+    <div class="member" style="--accent-color:#00f0ff; --accent-rgb:0,240,255;">
       <div class="member-initial">KT</div>
       <div class="member-name">Tejaswini</div>
       <p class="member-domain">Control Plane · Defensive Security · TUI · Go</p>
+      <div class="member-owns">
+        <span class="member-own-tag">kb-control-plane/</span>
+        <span class="member-own-tag">kb-tui/</span>
+        <span class="member-own-tag">gRPC IPC listener</span>
+      </div>
     </div>
-    <div class="member">
+    <!-- Rupa -->
+    <div class="member" style="--accent-color:#da00ff; --accent-rgb:218,0,255;">
       <div class="member-initial">KR</div>
       <div class="member-name">Rupa</div>
       <p class="member-domain">Dashboard · Frontend Engineering · UI/UX · CLI</p>
+      <div class="member-owns">
+        <span class="member-own-tag">kb-dashboard/</span>
+        <span class="member-own-tag">WebSockets</span>
+        <span class="member-own-tag">D3 Force Graph</span>
+      </div>
     </div>
   </div>
 </section>
