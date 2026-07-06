@@ -1,0 +1,22 @@
+name: Retry failed Pages deploy
+
+on:
+  workflow_run:
+    workflows:
+      - pages build and deployment
+    types:
+      - completed
+
+permissions:
+  actions: write
+
+jobs:
+  retry-deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retry failed jobs in Pages workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: gh api -X POST "repos/${{ github.repository }}/actions/runs/${RUN_ID}/rerun-failed-jobs"
