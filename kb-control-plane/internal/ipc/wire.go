@@ -6,6 +6,7 @@ import (
     "io"
     "math"
     "net"
+    "os"
 )
 
 const (
@@ -13,9 +14,15 @@ const (
     WireVersion        uint8  = 3
     WireMsgProcessState   uint8 = 1
     WireMsgZoneTransition uint8 = 2
-    SocketPath                  = "/tmp/kbd.sock"
+    DefaultSocketPath           = "/run/kb/kbd.sock"
     DimCount                    = 6
 )
+func GetSocketPath() string {
+    if p := os.Getenv("KB_SOCKET_PATH"); p != ""{
+        return p
+    }
+    return DefaultSocketPath
+}
 
 type KBZone uint32
 const (

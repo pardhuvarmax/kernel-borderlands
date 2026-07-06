@@ -11,12 +11,13 @@ type Listener struct{ handler MessageHandler }
 func NewListener(h MessageHandler) *Listener { return &Listener{h} }
 
 func (l *Listener) Listen() error {
-    os.Remove(SocketPath)
-    ln, err := net.Listen("unix", SocketPath)
+    sock := GetSocketPath()
+    os.Remove(sock)
+    ln, err := net.Listen("unix", sock)
     if err != nil { return err }
     defer ln.Close()
-    os.Chmod(SocketPath, 0666)
-    log.Printf("[IPC] Listening on %s (wire v%d)", SocketPath, WireVersion)
+    os.Chmod(sock, 0600)
+    log.Printf("[IPC] Listening on %s (wire v%d)", sock, WireVersion)
 
     for {
         conn, err := ln.Accept()

@@ -925,8 +925,12 @@ int main(void)
     kb_behavior_init();
 
     const char *env_sock = getenv("KBD_SOCKET_PATH");
-    if (env_sock)
-        strncpy(bridge_sock_path, env_sock, sizeof(bridge_sock_path) - 1);
+    if (env_sock && env_sock[0] != '\0') {
+        strncpy(bridge_sock_path,
+            env_sock,
+            sizeof(bridge_sock_path) - 1);
+        bridge_sock_path[sizeof(bridge_sock_path) - 1] = '\0';
+    }
 
     bridge_fd = kb_bridge_try_connect(bridge_sock_path);
     if (bridge_fd < 0) {

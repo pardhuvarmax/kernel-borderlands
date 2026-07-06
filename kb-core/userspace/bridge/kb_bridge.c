@@ -15,6 +15,7 @@
 #include <time.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <stdlib.h>
 
 #define KB_WIRE_MAGIC    0x4B42  // "KB"
 #define KB_WIRE_VERSION  3  // v3: added start_time_ns to ZoneTransition (PID-reuse guard)
@@ -59,6 +60,16 @@ struct kb_wire_zone_transition {
     uint64_t ts_ns;
 };
 #pragma pack(pop)
+
+// ---- socket path ----
+
+const char *kb_bridge_socket_path(void)
+{
+    const char *sock = getenv("KB_SOCKET_PATH");
+    if (sock && sock[0] != '\0')
+        return sock;
+    return KB_BRIDGE_DEFAULT_SOCK;
+}
 
 // ---- connection lifecycle ----
 
