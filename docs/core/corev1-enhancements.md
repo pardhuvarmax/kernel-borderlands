@@ -2,7 +2,7 @@
 
 - **Date**: July 6, 2026  
 - **Lead Engineer**: Pardhu Varma (Lead Kernel Space Engineer, `kb-core` Subsystem)
-- **Collaboration**: Tejaswini (Lead Go Control & Communications Pipeline Engineer, `kb-control-plane` Subsystem) 
+- **Collaboration**: Tejaswini (Go Control & Communications Pipeline Engineer, `kb-control-plane` Subsystem) 
 - **Status**: Integrated, Tested, and Verified
 
 ---
@@ -32,7 +32,7 @@ To inspect encrypted payloads without running expensive Deep Packet Inspection (
 *   **System V AMD64 ABI Hooks**: Hooked OpenSSL (`SSL_write`), GnuTLS (`gnutls_record_send`), and NSS (`PR_Write`). Since these follow the System V ABI, registers map identically:
     -   `RSI` (`PT_REGS_PARM2`) $\to$ Buffer Pointer
     -   `RDX` (`PT_REGS_PARM3`) $\to$ Buffer Length
-*   **Go ABIInternal Uprobe**: Hooked Go's statically compiled runtime `crypto/tls.(*Conn).Write` using register mappings:
+*   **Go ABI Internal Uprobe**: Hooked Go's statically compiled runtime `crypto/tls.(*Conn).Write` using register mappings:
     -   `RBX` $\to$ Slice pointer
     -   `RCX` $\to$ Slice length
 *   **Dynamic Resolution**: Implemented a raw ELF parsing offset resolver (`find_elf_symbol_offset`) in C userspace. For standard shared libraries, it resolves offsets at boot. For Go binaries, it hooks process execution events, dynamically scans `/proc/[pid]/exe` section tables (`.symtab`/`.dynsym`), and attaches uprobes on-the-fly.

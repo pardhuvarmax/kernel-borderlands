@@ -1786,36 +1786,35 @@
 
   <div class="zone-grid">
     <div class="zone-card r">
-      <div class="zone-score safe">0–39</div>
+      <div class="zone-score safe">SAFE</div>
       <div class="zone-label"><span class="zdot zdot-safe"></span>Safe</div>
-      <div class="zone-range">Score: 0 – 39</div>
-      <p class="zone-desc">Passive observation. The process exhibits normal behavioral patterns within expected bounds. No enforcement action is taken.</p>
+      <div class="zone-range">State Engine: SAFE</div>
+      <p class="zone-desc">Initial state. Telemetry is collected out-of-band. Evidence flags are tracked in userspace lineage queues without adding overhead.</p>
       <div class="zone-actions">
-        <div class="zone-action">Continuous monitoring active</div>
-        <div class="zone-action">Score updated on every event</div>
+        <div class="zone-action">Lineage cache active</div>
+        <div class="zone-action">Uprobes/tracepoints attached</div>
       </div>
     </div>
     <div class="zone-card r d1">
-      <div class="zone-score suspicious">40–74</div>
+      <div class="zone-score suspicious">SUSPICIOUS</div>
       <div class="zone-label"><span class="zdot zdot-sus"></span>Suspicious</div>
-      <div class="zone-range">Score: 40 – 74</div>
-      <p class="zone-desc">Elevated risk detected. Network syscalls blocked via seccomp filter. Increased monitoring frequency. Alerting raised to AADS layer.</p>
+      <div class="zone-range">State Engine: SUSPICIOUS</div>
+      <p class="zone-desc">Elevated risk matched on sequence check. VFS open operations on sensitive directory paths are blocked natively inside kernel-space via BPF LSM.</p>
       <div class="zone-actions">
-        <div class="zone-action">seccomp filter applied (&lt;1ms)</div>
-        <div class="zone-action">connect / bind / sendto blocked</div>
-        <div class="zone-action">AADS Judge notified</div>
+        <div class="zone-action">BPF LSM file blocking (-EACCES)</div>
+        <div class="zone-action">Plaintext TLS uprobes active</div>
+        <div class="zone-action">AADS Swarm alert raised</div>
       </div>
     </div>
     <div class="zone-card r d2">
-      <div class="zone-score borderlands">75–100</div>
+      <div class="zone-score borderlands">BORDERLANDS</div>
       <div class="zone-label"><span class="zdot zdot-bl"></span>Borderlands</div>
-      <div class="zone-range">Score: 75 – 100</div>
-      <p class="zone-desc">Critical behavioral anomaly. Process is isolated using Linux namespaces and cgroup v2 throttling. Termination is available as a final enforcement step.</p>
+      <div class="zone-range">State Engine: BORDERLANDS</div>
+      <p class="zone-desc">Critical attack chain matched. Auto-containment is triggered immediately, forcing process termination or network isolation according to policy rules.</p>
       <div class="zone-actions">
-        <div class="zone-action">namespace isolation (&lt;5ms P99)</div>
-        <div class="zone-action">mnt · net · user namespaces</div>
-        <div class="zone-action">cgroup v2 CPU/mem throttle</div>
-        <div class="zone-action">SIGKILL if policy authorizes</div>
+        <div class="zone-action">SIGKILL containment (&lt;1ms)</div>
+        <div class="zone-action">cgroup v2 CPU/memory throttling</div>
+        <div class="zone-action">AADS swarm auto-containment</div>
       </div>
     </div>
   </div>
