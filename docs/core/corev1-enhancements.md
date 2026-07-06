@@ -1,7 +1,8 @@
 # Technical Achievements Report: eBPF Core Security Subsystem
 
 **Date**: July 6, 2026  
-**Lead Engineer**: Pardhu Varma (Lead Kernel Space Engineer, `kb-core` Subsystem)  
+**Lead Engineer**: Pardhu Varma (Lead Kernel Space Engineer, `kb-core` Subsystem)
+**Collaboration**: Tejaswini (Lead Go Control & Communications Pipeline Engineer, `kb-control-plane` Subsystem) 
 **Status**: Integrated, Tested, and Verified
 
 ---
