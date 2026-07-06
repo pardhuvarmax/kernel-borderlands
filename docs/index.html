@@ -1556,13 +1556,13 @@
     <div class="eyebrow">The Design Insight</div>
     <h2 class="section-title" style="font-size:clamp(36px,4vw,60px)">BEHAVIORAL<br>TRANSITIONS,<br>NOT EVENTS</h2>
     <p class="body-text">
-      An <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">execve</code> following a privilege escalation inside an unexpected process lineage after a burst of <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">mmap</code> calls is an attack. The same <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">execve</code> in isolation is not.
+      An outbound connection preceding a dynamic TLS uprobe plaintext extraction event inside a suspicious process lineage matches an attack sequence. In isolation, the outbound socket connection is merely observed telemetry.
     </p>
     <p class="body-text" style="margin-top:16px">
-      KB evaluates <strong>behavioral transitions over time</strong> across six weighted dimensions — enabling detection of sophisticated multi-stage attacks that appear innocuous at each individual step.
+      KB traces state transitions chronologically against dynamic rule patterns — enabling BPF LSM directory blocks (<code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">-EACCES</code>) and plaintext uprobe capture when processes navigate from Safe into Suspicious or Borderlands zones.
     </p>
     <p class="body-text" style="margin-top:16px">
-      The system simultaneously functions as a <strong>production-grade runtime defense platform</strong> and a <strong>research instrument</strong> for studying post-exploitation process behavior under live attack conditions.
+      The system simultaneously functions as a <strong>production-grade Ring 0 defensive sandbox</strong> and an <strong>immutable logging engine</strong>, enforcing security policies at the VFS layer while chaining cryptographic audit records.
     </p>
   </div>
 </section>
