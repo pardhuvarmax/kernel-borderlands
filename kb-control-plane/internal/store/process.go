@@ -42,6 +42,7 @@ func (s *Store) initL1() {
 // flushL2Worker drains async writes to SQLite off the hot path. A single
 // goroutine keeps writes serialized, consistent with SetMaxOpenConns(1).
 func (s *Store) flushL2Worker() {
+	defer close(s.l2Done)
 	for item := range s.l2Pipe {
 		var err error
 		switch v := item.(type) {

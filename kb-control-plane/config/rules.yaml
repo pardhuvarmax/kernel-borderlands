@@ -1,0 +1,214 @@
+# Behavior Engine Detection Rules Policy.
+# This file is loaded by the Go control plane and serialized to the C sensor over the Unix domain socket.
+
+rules:
+  - name: known_ioc_sequence
+    description: "Exact IOC sequence matched: exec -> outbound connect -> RWX memory"
+    required_flags:
+      - KB_EV_OUTBOUND_CONNECT
+      - KB_EV_RWX_MAPPING
+    optional_flags:
+      - KB_EV_EXEC_FROM_TMP
+      - KB_EV_EXEC_FROM_PROC
+    optional_min: 1
+    sequence:
+      - KB_SEQ_EXEC
+      - KB_SEQ_OUTBOUND_CONNECT
+      - KB_SEQ_RWX_MAP
+    window_seconds: 30
+    target_state: KB_STATE_COMPROMISED
+    reason: KB_REASON_KNOWN_IOC_SEQUENCE
+    min_source_state: KB_STATE_SAFE
+
+  - name: reverse_shell_compromised
+    description: "Outbound connection followed by shell execution"
+    required_flags:
+      - KB_EV_OUTBOUND_CONNECT
+      - KB_EV_SPAWNED_SHELL
+    sequence:
+      - KB_SEQ_OUTBOUND_CONNECT
+      - KB_SEQ_EXEC_SHELL
+    window_seconds: 60
+    target_state: KB_STATE_COMPROMISED
+    reason: KB_REASON_REVERSE_SHELL_CHAIN
+    min_source_state: KB_STATE_BORDERLANDS
+
+  - name: injection_ptrace_compromised
+    description: "RWX memory allocation followed by ptrace injection"
+    required_flags:
+      - KB_EV_RWX_MAPPING
+      - KB_EV_PTRACE_USED
+    sequence:
+      - KB_SEQ_RWX_MAP
+      - KB_SEQ_PTRACE
+    window_seconds: 30
+    target_state: KB_STATE_COMPROMISED
+    reason: KB_REASON_INJECTION_CHAIN
+    min_source_state: KB_STATE_BORDERLANDS
+
+  - name: injection_proc_mem_compromised
+    description: "RWX memory allocation followed by writing to proc memory"
+    required_flags:
+      - KB_EV_RWX_MAPPING
+      - KB_EV_PROC_MEM_WRITE
+    sequence:
+      - KB_SEQ_RWX_MAP
+      - KB_SEQ_PROC_MEM_WRITE
+    window_seconds: 30
+    target_state: KB_STATE_COMPROMISED
+    reason: KB_REASON_INJECTION_CHAIN
+    min_source_state: KB_STATE_BORDERLANDS
+
+  - name: escalation_exfil_compromised
+    description: "Privilege escalation followed by credential file access and outbound connection"
+    required_flags:
+      - KB_EV_PRIVILEGE_GAINED
+      - KB_EV_OUTBOUND_CONNECT
+    optional_flags:
+      - KB_EV_SHADOW_ACCESS
+      - KB_EV_PASSWD_ACCESS
+      - KB_EV_SSH_KEY_ACCESS
+    optional_min: 1
+    window_seconds: 120
+    target_state: KB_STATE_COMPROMISED
+    reason: KB_REASON_ESCALATION_EXFIL_CHAIN
+    min_source_state: KB_STATE_BORDERLANDS
+
+  - name: rwx_memory_abuse
+    description: "RWX memory mapping or write to proc memory detected"
+    optional_flags:
+      - KB_EV_RWX_MAPPING
+      - KB_EV_PROC_MEM_WRITE
+      - KB_EV_PROCESS_VM_WRITE
+    optional_min: 1
+    target_state: KB_STATE_BORDERLANDS
+    reason: KB_REASON_RWX_MEMORY
+    min_source_state: KB_STATE_SUSPICIOUS
+
+  - name: ptrace_injection_borderlands
+    description: "Ptrace system call used by suspicious process"
+    required_flags:
+      - KB_EV_PTRACE_USED
+    target_state: KB_STATE_BORDERLANDS
+    reason: KB_REASON_PTRACE_INJECTION
+    min_source_state: KB_STATE_SUSPICIOUS
+
+  - name: c2_port_connection
+    description: "Outbound connection to suspected C2 port"
+    required_flags:
+      - KB_EV_OUTBOUND_CONNECT
+      - KB_EV_C2_CANDIDATE_PORT
+    target_state: KB_STATE_BORDERLANDS
+    reason: KB_REASON_C2_PORT_CONNECT
+    min_source_state: KB_STATE_SUSPICIOUS
+
+  - name: proc_mem_write_borderlands
+    description: "Write to /proc/*/mem by suspicious process"
+    required_flags:
+      - KB_EV_PROC_MEM_WRITE
+    target_state: KB_STATE_BORDERLANDS
+    reason: KB_REASON_PROC_MEM_WRITE
+    min_source_state: KB_STATE_SUSPICIOUS
+
+  - name: rapid_connect_burst_borderlands
+    description: "Rapid connections to multiple distinct destination IPs"
+    required_flags:
+      - KB_EV_RAPID_CONNECT_BURST
+    target_state: KB_STATE_BORDERLANDS
+    reason: KB_REASON_RAPID_CONNECT_BURST
+    min_source_state: KB_STATE_SUSPICIOUS
+
+  - name: multi_anomaly_suspicious
+    description: "Multiple distinct behavioral anomaly categories set"
+    optional_flags:
+      - KB_EV_EXEC_FROM_TMP
+      - KB_EV_EXEC_FROM_PROC
+      - KB_EV_SPAWNED_SHELL
+      - KB_EV_PRIVILEGE_GAINED
+      - KB_EV_ROOT_ACHIEVED
+      - KB_EV_RWX_MAPPING
+      - KB_EV_ANON_EXEC
+      - KB_EV_WX_TRANSITION
+      - KB_EV_OUTBOUND_CONNECT
+      - KB_EV_NONSTANDARD_PORT
+      - KB_EV_SHADOW_ACCESS
+      - KB_EV_SSH_KEY_ACCESS
+      - KB_EV_HIGH_SYSCALL_ENTROPY
+    optional_min: 3
+    target_state: KB_STATE_SUSPICIOUS
+    reason: KB_REASON_MULTI_ANOMALY
+    min_source_state: KB_STATE_OBSERVED
+
+  - name: privilege_plus_network_suspicious
+    description: "Privilege change combined with outbound connection"
+    required_flags:
+      - KB_EV_PRIVILEGE_GAINED
+      - KB_EV_OUTBOUND_CONNECT
+    window_seconds: 60
+    target_state: KB_STATE_SUSPICIOUS
+    reason: KB_REASON_PRIVILEGE_PLUS_NETWORK
+    min_source_state: KB_STATE_OBSERVED
+
+  - name: cred_file_access_suspicious
+    description: "Access to sensitive system credential stores"
+    optional_flags:
+      - KB_EV_SHADOW_ACCESS
+      - KB_EV_PASSWD_ACCESS
+      - KB_EV_SUDOERS_ACCESS
+      - KB_EV_SSH_KEY_ACCESS
+    optional_min: 1
+    target_state: KB_STATE_SUSPICIOUS
+    reason: KB_REASON_CRED_FILE_ACCESS
+    min_source_state: KB_STATE_OBSERVED
+
+  - name: anon_exec_mapping_suspicious
+    description: "Anonymous executable memory mapping"
+    required_flags:
+      - KB_EV_ANON_EXEC
+    target_state: KB_STATE_SUSPICIOUS
+    reason: KB_REASON_ANON_EXEC_MAPPING
+    min_source_state: KB_STATE_OBSERVED
+
+  - name: shell_spawn_suspicious
+    description: "Unexpected command interpreter invocation"
+    required_flags:
+      - KB_EV_SPAWNED_SHELL
+    target_state: KB_STATE_SUSPICIOUS
+    reason: KB_REASON_SHELL_SPAWN
+    min_source_state: KB_STATE_OBSERVED
+
+  - name: unexpected_outbound_connection
+    description: "Any outbound connection"
+    required_flags:
+      - KB_EV_OUTBOUND_CONNECT
+    target_state: KB_STATE_OBSERVED
+    reason: KB_REASON_OUTBOUND_CONNECT
+    min_source_state: KB_STATE_SAFE
+
+  - name: privilege_change_observed
+    description: "Credential change (UID drop / Root achieved)"
+    optional_flags:
+      - KB_EV_PRIVILEGE_GAINED
+      - KB_EV_ROOT_ACHIEVED
+      - KB_EV_CAP_GAINED
+    optional_min: 1
+    target_state: KB_STATE_OBSERVED
+    reason: KB_REASON_PRIVILEGE_CHANGE
+    min_source_state: KB_STATE_SAFE
+
+  - name: high_syscall_entropy_observed
+    description: "Divergent syscall profile (high syscall entropy)"
+    required_flags:
+      - KB_EV_HIGH_SYSCALL_ENTROPY
+    target_state: KB_STATE_OBSERVED
+    reason: KB_REASON_HIGH_SYSCALL_ENTROPY
+    min_source_state: KB_STATE_SAFE
+
+  - name: first_anomaly_observed
+    description: "Any initial anomaly flag set"
+    optional_flags:
+      - 0xFFFFFFFFFFFFFFFF # Match any flag (this is handled as a special wildcard in parsing)
+    optional_min: 1
+    target_state: KB_STATE_OBSERVED
+    reason: KB_REASON_FIRST_ANOMALY
+    min_source_state: KB_STATE_SAFE

@@ -3,11 +3,6 @@
 //
 // Loads ALL 6 hooks at once from kbd_sensor.bpf.c, reads from
 // the single shared ring buffer, and prints unified events.
-//
-// This is the binary that will eventually feed the gRPC
-// Control Plane (Tejaswini's kbd daemon) via StreamEvents-style
-// push, or a local Unix socket bridge. For now it prints to
-// stdout so the pipeline can be visually verified end-to-end.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,16 +12,17 @@
 #include <math.h>
 #include <time.h>
 #include <arpa/inet.h>
+#include <elf.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include "../.output/kbd_sensor.skel.h"
 #include "../../include/kb_scoring.h"
+#include "../../include/kb_evidence.h"
+#include "../../include/kb_behavior.h"
+#include "../../include/kb_rules.h"
 #include "../bridge/kb_bridge.h"
 
 // Timestamp source for sends not triggered by a live kb_unified_event
-// (i.e. the entropy scan). BPF-side ts_ns comes from bpf_ktime_get_ns()
-// (CLOCK_MONOTONIC-based); mirror that clock here so values from both
-// paths are comparable, not sending 0 as a placeholder.
 static uint64_t now_ns(void)
 {
     struct timespec ts;
@@ -34,52 +30,22 @@ static uint64_t now_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 
-// Send a full ProcessState at most once every N events per process,
-// plus always on zone change. Avoids hammering the socket on hot
-// pids (e.g. tight syscall loops) while keeping the Go side's view
-// reasonably fresh. Tune once Teju has real throughput numbers.
+static kb_zone_t map_state_to_zone(kb_behavior_state_t state);
+
 #define KB_STATE_SYNC_EVERY_N 20
 
 // ── Syscall entropy scan (KB_DIM_SYSCALL, 25% weight) ──
-//
-// Computes two numbers per pid, once per scan:
-//   1. WINDOWED entropy — from the DELTA in counts since the last
-//      scan, EMA-smoothed across scans. This is what feeds
-//      kb_scoring_update_syscall_entropy() and therefore drives
-//      composite_score/ema_score/zone. Answers "is this process
-//      behaving unusually right now."
-//   2. LIFETIME entropy — from the raw cumulative counts/totals,
-//      same as before. Advisory only, via
-//      kb_scoring_set_syscall_entropy_lifetime(); does not affect
-//      zone/composite. Answers "was this process ever unusual."
-//
-// kb_syscall_counts/kb_syscall_totals themselves are never reset in
-// the kernel (cumulative for process lifetime) — the windowing
-// happens entirely in userspace by diffing against a snapshot of the
-// previous scan.
-#define KB_ENTROPY_SCAN_EVERY_N_POLLS 10     // ~1s at the 100ms poll timeout below
-#define KB_ENTROPY_MAX_TRACKED_PIDS   4096   // per-scan accumulator table size
-#define KB_ENTROPY_SNAPSHOT_TABLE_SIZE 65536 // distinct (pid,syscall_nr) pairs remembered
-                                              // across scans for delta computation; if this
-                                              // fills, excess keys fall back to delta=0 for
-                                              // that scan (self-corrects once older pids exit
-                                              // and free slots — no eviction implemented)
-#define KB_ENTROPY_MAX_MAP_ITER       50000  // hard cap on counts-map entries walked per scan —
-                                              // bounds worst-case scan cost; entries past this
-                                              // cap are silently skipped for that pass and picked
-                                              // up on a later scan as counts keep accumulating.
-                                              // NOTE: also caps how many keys can be diffed for
-                                              // the window computation in the same pass.
-#define KB_ENTROPY_LOG2_MAX_SYSCALLS  9.0    // log2(512) == log2(KB_MAX_SYSCALLS in the .bpf.c)
-#define KB_ENTROPY_WINDOW_EMA_ALPHA   0.3    // smoothing across scans for the windowed value —
-                                              // same alpha style as KB_EMA_ALPHA in kb_scoring.c
+#define KB_ENTROPY_SCAN_EVERY_N_POLLS 10     
+#define KB_ENTROPY_MAX_TRACKED_PIDS   4096   
+#define KB_ENTROPY_SNAPSHOT_TABLE_SIZE 65536 
+#define KB_ENTROPY_MAX_MAP_ITER       50000  
+#define KB_ENTROPY_LOG2_MAX_SYSCALLS  9.0    
+#define KB_ENTROPY_WINDOW_EMA_ALPHA   0.3    
 
-// Per-pid accumulator, reset every scan. Shared shape for both the
-// lifetime pass and the window pass (used as two separate tables).
 struct kb_entropy_acc {
     uint32_t pid;
     int      in_use;
-    double   sum_neg_p_logp; // running Shannon entropy accumulator, in bits
+    double   sum_neg_p_logp; 
 };
 static struct kb_entropy_acc lifetime_acc_table[KB_ENTROPY_MAX_TRACKED_PIDS];
 static struct kb_entropy_acc window_acc_table[KB_ENTROPY_MAX_TRACKED_PIDS];
@@ -98,11 +64,9 @@ static struct kb_entropy_acc *acc_slot(struct kb_entropy_acc *table, uint32_t pi
             return &table[slot];
         }
     }
-    return NULL; // table full this scan — dropped, retried next scan
+    return NULL; 
 }
 
-// Persistent (NOT reset per scan) snapshot of each (pid,syscall_nr)
-// key's count as of the last scan, so this scan can compute a delta.
 struct kb_syscall_snapshot {
     uint64_t key;
     int      in_use;
@@ -124,17 +88,13 @@ static struct kb_syscall_snapshot *snapshot_slot(uint64_t key)
             return &snapshot_table[slot];
         }
     }
-    return NULL; // snapshot table full — see KB_ENTROPY_SNAPSHOT_TABLE_SIZE note above
+    return NULL; 
 }
 
-// Persistent (NOT reset per scan) EMA of the windowed entropy value,
-// so a single noisy 1s sample doesn't itself cause a zone flap —
-// the smoothing happens here, before the value ever reaches
-// kb_scoring_update_syscall_entropy()'s own EMA over composite_score.
 struct kb_window_ema {
     uint32_t pid;
     int      in_use;
-    int      primed;   // false until the first real sample lands
+    int      primed;   
     double   ema_0_100;
 };
 static struct kb_window_ema window_ema_table[KB_ENTROPY_MAX_TRACKED_PIDS];
@@ -154,22 +114,15 @@ static struct kb_window_ema *window_ema_slot(uint32_t pid)
             return &window_ema_table[slot];
         }
     }
-    return NULL; // table full — pid just won't get window smoothing this scan
+    return NULL; 
 }
 
-// One (key, delta_count) pair collected during the map walk, resolved
-// against per-pid delta totals in the second, in-memory-only pass.
-// Static: ~50000 * 16 bytes = 800KB, avoids a giant stack frame.
 struct kb_delta_entry { uint64_t key; uint64_t delta; };
 static struct kb_delta_entry delta_buf[KB_ENTROPY_MAX_MAP_ITER];
 
 static int   bridge_fd = -1;
 static char  bridge_sock_path[108] = KB_BRIDGE_DEFAULT_SOCK;
 
-// Reconnect on demand rather than crashing the sensor if kbd's
-// listener isn't up yet / drops. Events are dropped (not buffered)
-// while disconnected — buffering is a deliberate non-goal for now,
-// call this out if Teju's side needs replay/backfill instead.
 static void bridge_ensure_connected(void)
 {
     if (bridge_fd >= 0)
@@ -177,9 +130,6 @@ static void bridge_ensure_connected(void)
     bridge_fd = kb_bridge_try_connect(bridge_sock_path);
 }
 
-// Send whatever kb_scoring gave us back for one pid, over the bridge.
-// Shared by handle_event() and the entropy scan so the two send paths
-// can't drift on framing/reconnect logic.
 static void bridge_dispatch(kb_scoring_result_t r, uint64_t ts_ns)
 {
     if (!r.state)
@@ -200,28 +150,11 @@ static void bridge_dispatch(kb_scoring_result_t r, uint64_t ts_ns)
         err = kb_bridge_send_state(bridge_fd, r.state);
     }
     if (err) {
-        // Peer went away mid-write — drop and reconnect on the next
-        // send rather than retry-looping here.
         kb_bridge_close(bridge_fd);
         bridge_fd = -1;
     }
 }
 
-// /proc fallback for pids kb_scoring never got identity for via a real
-// event — see kb_scoring_set_identity()'s doc comment in kb_scoring.h.
-// Read-only /proc parsing, no eBPF involved. Best-effort: if the pid has
-// already exited by the time we read it, every fopen below just fails
-// and the pid stays without identity — same outcome as before this
-// existed, no new failure mode introduced.
-//
-// CAVEAT: start_time_ns here is derived from /proc/uptime (effectively
-// CLOCK_BOOTTIME) converted against now_ns()'s CLOCK_MONOTONIC reading.
-// These two clocks diverge by however long the machine has spent
-// suspended since boot. On a server/VM that never suspends this is
-// exact; on a laptop that sleeps/wakes, a pid identified this way can
-// carry a start_time_ns off by the cumulative suspended duration —
-// worth knowing before trusting it blindly in the PID-reuse guard on
-// a machine that suspends.
 static void proc_backfill_identity(uint32_t pid)
 {
     if (kb_scoring_has_identity(pid))
@@ -232,71 +165,67 @@ static void proc_backfill_identity(uint32_t pid)
     snprintf(path, sizeof(path), "/proc/%u/comm", pid);
     FILE *f = fopen(path, "r");
     if (!f)
-        return; // pid already gone — leave blank, harmless
+        return; 
     if (fgets(comm, sizeof(comm), f)) {
         size_t n = strlen(comm);
         if (n && comm[n - 1] == '\n') comm[n - 1] = '\0';
     }
     fclose(f);
 
-    uint32_t ppid = 0, uid = 0;
     snprintf(path, sizeof(path), "/proc/%u/status", pid);
     f = fopen(path, "r");
-    if (f) {
-        char line[256];
-        while (fgets(line, sizeof(line), f)) {
-            if (!strncmp(line, "PPid:", 5))
-                ppid = (uint32_t)strtoul(line + 5, NULL, 10);
-            else if (!strncmp(line, "Uid:", 4))
-                uid = (uint32_t)strtoul(line + 4, NULL, 10); // real uid, 1st field
+    if (!f)
+        return;
+    char line[128];
+    uint32_t ppid = 0, uid = 0xFFFFFFFF;
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "PPid:", 5) == 0) {
+            ppid = strtoul(line + 5, NULL, 10);
+        } else if (strncmp(line, "Uid:", 4) == 0) {
+            uid = strtoul(line + 4, NULL, 10);
         }
-        fclose(f);
     }
+    fclose(f);
 
     uint64_t start_time_ns = 0;
     snprintf(path, sizeof(path), "/proc/%u/stat", pid);
     f = fopen(path, "r");
     if (f) {
-        char statbuf[512] = {0};
-        size_t rd = fread(statbuf, 1, sizeof(statbuf) - 1, f);
-        fclose(f);
-        char *rparen = rd ? strrchr(statbuf, ')') : NULL;
-        if (rparen && rparen[1] == ' ') {
-            // Field 22 (starttime, in clock ticks since boot) is the
-            // 20th whitespace-separated token after the comm's closing
-            // ')' — verified against real /proc/[pid]/stat layout.
-            char *tok = strtok(rparen + 2, " ");
-            int field = 3;
-            while (tok && field < 22) { tok = strtok(NULL, " "); field++; }
+        char stat_line[512];
+        if (fgets(stat_line, sizeof(stat_line), f)) {
+            char *tok = strrchr(stat_line, ')');
             if (tok) {
-                unsigned long long ticks = strtoull(tok, NULL, 10);
-                long clk_tck = sysconf(_SC_CLK_TCK);
-                double starttime_s = (double)ticks / (double)clk_tck;
+                int field = 3;
+                tok = strtok(tok + 1, " ");
+                while (tok && field < 22) { tok = strtok(NULL, " "); field++; }
+                if (tok) {
+                    unsigned long long ticks = strtoull(tok, NULL, 10);
+                    long clk_tck = sysconf(_SC_CLK_TCK);
+                    double starttime_s = (double)ticks / (double)clk_tck;
 
-                double uptime_s = 0.0;
-                FILE *uf = fopen("/proc/uptime", "r");
-                if (uf) {
-                    if (fscanf(uf, "%lf", &uptime_s) != 1) uptime_s = 0.0;
-                    fclose(uf);
+                    double uptime_s = 0.0;
+                    FILE *uf = fopen("/proc/uptime", "r");
+                    if (uf) {
+                        if (fscanf(uf, "%lf", &uptime_s) != 1) uptime_s = 0.0;
+                        fclose(uf);
+                    }
+                    double age_s = uptime_s - starttime_s;
+                    if (age_s < 0) age_s = 0; 
+                    start_time_ns = now_ns() - (uint64_t)(age_s * 1e9);
                 }
-                double age_s = uptime_s - starttime_s;
-                if (age_s < 0) age_s = 0; // clock skew guard
-                start_time_ns = now_ns() - (uint64_t)(age_s * 1e9);
             }
         }
+        fclose(f);
     }
 
     kb_scoring_set_identity(pid, comm, ppid, uid, start_time_ns);
 }
 
-// Reads kb_ringbuf_drops and logs if it's grown since the last check.
-// Cumulative counter (never reset in-kernel), so this tracks the delta
-// itself rather than re-reporting the same total every scan.
 static void check_ringbuf_drops(struct kbd_sensor_bpf *skel)
 {
     int fd = bpf_map__fd(skel->maps.kb_ringbuf_drops);
     if (fd < 0)
-        return; // map not present in this skeleton build — regen needed
+        return; 
 
     static uint64_t last_seen = 0;
     __u32 zero = 0;
@@ -316,16 +245,12 @@ static void check_ringbuf_drops(struct kbd_sensor_bpf *skel)
     }
 }
 
-// One pass over kb_syscall_counts computing both lifetime entropy
-// (from raw cumulative values) and per-key deltas (for the window
-// pass below), then a second, BPF-free pass resolving those deltas
-// into per-pid windowed entropy. Bounded by KB_ENTROPY_MAX_MAP_ITER.
 static void scan_syscall_entropy(struct kbd_sensor_bpf *skel)
 {
     int counts_fd = bpf_map__fd(skel->maps.kb_syscall_counts);
     int totals_fd = bpf_map__fd(skel->maps.kb_syscall_totals);
     if (counts_fd < 0 || totals_fd < 0)
-        return; // maps not present in this skeleton build — regen needed
+        return; 
 
     memset(lifetime_acc_table, 0, sizeof(lifetime_acc_table));
     memset(window_acc_table, 0, sizeof(window_acc_table));
@@ -335,7 +260,6 @@ static void scan_syscall_entropy(struct kbd_sensor_bpf *skel)
     int iterations = 0;
     int delta_count_n = 0;
 
-    // Pass 1 (live BPF map walk): lifetime accumulation + delta capture.
     while (bpf_map_get_next_key(counts_fd, have_key ? &key : NULL, &next_key) == 0) {
         key = next_key;
         have_key = 1;
@@ -349,97 +273,524 @@ static void scan_syscall_entropy(struct kbd_sensor_bpf *skel)
 
         uint32_t pid = (uint32_t)(key >> 32);
 
-        // -- lifetime --
-        uint64_t total = 0;
-        if (bpf_map_lookup_elem(totals_fd, &pid, &total) == 0 && total > 0) {
-            struct kb_entropy_acc *acc = acc_slot(lifetime_acc_table, pid);
-            if (acc) {
-                double p = (double)count / (double)total;
-                if (p > 0.0)
-                    acc->sum_neg_p_logp += -(p * (log(p) / log(2.0)));
+        proc_backfill_identity(pid);
+
+        struct kb_entropy_acc *acc = acc_slot(lifetime_acc_table, pid);
+        if (acc) {
+            uint64_t pid_total = 0;
+            if (bpf_map_lookup_elem(totals_fd, &pid, &pid_total) == 0 && pid_total > 0) {
+                double p = (double)count / (double)pid_total;
+                acc->sum_neg_p_logp += -p * (log2(p) / KB_ENTROPY_LOG2_MAX_SYSCALLS);
             }
         }
 
-        // -- delta capture (window input) --
         struct kb_syscall_snapshot *snap = snapshot_slot(key);
         if (snap) {
-            uint64_t prev = snap->last_count;
-            uint64_t delta = (count >= prev) ? (count - prev) : 0; // guard pid reuse / map churn
+            uint64_t delta = (count > snap->last_count) ? (count - snap->last_count) : 0;
             snap->last_count = count;
 
-            if (delta > 0 && delta_count_n < KB_ENTROPY_MAX_MAP_ITER) {
-                delta_buf[delta_count_n].key   = key;
+            if (delta > 0) {
+                delta_buf[delta_count_n].key = key;
                 delta_buf[delta_count_n].delta = delta;
                 delta_count_n++;
             }
         }
     }
 
-    // Pass 2 (in-memory only): per-pid delta totals, then per-key
-    // probabilities against those totals — same Shannon computation
-    // as lifetime, just over this scan's deltas instead of raw counts.
-    static struct kb_entropy_acc pid_delta_total[KB_ENTROPY_MAX_TRACKED_PIDS];
-    memset(pid_delta_total, 0, sizeof(pid_delta_total));
+    check_ringbuf_drops(skel);
 
     for (int i = 0; i < delta_count_n; i++) {
         uint32_t pid = (uint32_t)(delta_buf[i].key >> 32);
-        struct kb_entropy_acc *tot = acc_slot(pid_delta_total, pid);
-        if (tot)
-            tot->sum_neg_p_logp += (double)delta_buf[i].delta; // reusing field as a plain sum here
-    }
+        uint64_t delta = delta_buf[i].delta;
 
-    for (int i = 0; i < delta_count_n; i++) {
-        uint32_t pid = (uint32_t)(delta_buf[i].key >> 32);
-        struct kb_entropy_acc *tot = acc_slot(pid_delta_total, pid);
-        if (!tot || tot->sum_neg_p_logp <= 0.0)
-            continue;
-
-        double p = (double)delta_buf[i].delta / tot->sum_neg_p_logp;
-        struct kb_entropy_acc *acc = acc_slot(window_acc_table, pid);
-        if (acc && p > 0.0)
-            acc->sum_neg_p_logp += -(p * (log(p) / log(2.0)));
-    }
-
-    // Push lifetime figures (advisory, no scoring side effects).
-    for (int i = 0; i < KB_ENTROPY_MAX_TRACKED_PIDS; i++) {
-        if (!lifetime_acc_table[i].in_use)
-            continue;
-        double lifetime_0_100 =
-            (lifetime_acc_table[i].sum_neg_p_logp / KB_ENTROPY_LOG2_MAX_SYSCALLS) * 100.0;
-        kb_scoring_set_syscall_entropy_lifetime(lifetime_acc_table[i].pid, lifetime_0_100);
-    }
-
-    // Push windowed figures (drives scoring) — EMA-smooth across
-    // scans first so one noisy 1s sample can't flap a zone on its own.
-    for (int i = 0; i < KB_ENTROPY_MAX_TRACKED_PIDS; i++) {
-        if (!window_acc_table[i].in_use)
-            continue;
-
-        uint32_t pid = window_acc_table[i].pid;
-        double raw_0_100 =
-            (window_acc_table[i].sum_neg_p_logp / KB_ENTROPY_LOG2_MAX_SYSCALLS) * 100.0;
-
-        struct kb_window_ema *ema = window_ema_slot(pid);
-        double smoothed = raw_0_100;
-        if (ema) {
-            smoothed = ema->primed
-                ? KB_ENTROPY_WINDOW_EMA_ALPHA * raw_0_100
-                  + (1 - KB_ENTROPY_WINDOW_EMA_ALPHA) * ema->ema_0_100
-                : raw_0_100;
-            ema->ema_0_100 = smoothed;
-            ema->primed = 1;
+        uint64_t pid_delta_total = 0;
+        for (int j = 0; j < delta_count_n; j++) {
+            if ((uint32_t)(delta_buf[j].key >> 32) == pid) {
+                pid_delta_total += delta_buf[j].delta;
+            }
         }
 
-        uint64_t ts = now_ns();
-        kb_scoring_result_t r = kb_scoring_update_syscall_entropy(pid, smoothed, ts);
-        bridge_dispatch(r, ts);
+        if (pid_delta_total > 0) {
+            struct kb_entropy_acc *acc = acc_slot(window_acc_table, pid);
+            if (acc) {
+                double p = (double)delta / (double)pid_delta_total;
+                acc->sum_neg_p_logp += -p * (log2(p) / KB_ENTROPY_LOG2_MAX_SYSCALLS);
+            }
+        }
+    }
+
+    uint64_t ts = now_ns();
+
+    for (int i = 0; i < KB_ENTROPY_MAX_TRACKED_PIDS; i++) {
+        if (lifetime_acc_table[i].in_use) {
+            uint32_t pid = lifetime_acc_table[i].pid;
+            double entropy_0_100 = lifetime_acc_table[i].sum_neg_p_logp * 100.0;
+            if (entropy_0_100 > 100.0) entropy_0_100 = 100.0;
+            kb_scoring_set_syscall_entropy_lifetime(pid, entropy_0_100);
+        }
+    }
+
+    for (int i = 0; i < KB_ENTROPY_MAX_TRACKED_PIDS; i++) {
+        if (window_acc_table[i].in_use) {
+            uint32_t pid = window_acc_table[i].pid;
+            double raw_entropy_0_100 = window_acc_table[i].sum_neg_p_logp * 100.0;
+            if (raw_entropy_0_100 > 100.0) raw_entropy_0_100 = 100.0;
+
+            struct kb_window_ema *w = window_ema_slot(pid);
+            if (w) {
+                double smoothed = w->ema_0_100;
+                if (!w->primed) {
+                    smoothed = raw_entropy_0_100;
+                    w->primed = 1;
+                } else {
+                    smoothed = KB_ENTROPY_WINDOW_EMA_ALPHA * raw_entropy_0_100 +
+                               (1 - KB_ENTROPY_WINDOW_EMA_ALPHA) * smoothed;
+                }
+                w->ema_0_100 = smoothed;
+
+                kb_scoring_result_t r = kb_scoring_update_syscall_entropy(pid, smoothed, ts);
+                
+                if (r.state) {
+                    kb_evidence_t *ev = kb_evidence_get_or_create(pid, r.state->ppid, r.state->uid, r.state->comm, r.state->start_time_ns);
+                    if (ev) {
+                        ev->advisory_ema = r.state->ema_score;
+                        ev->advisory_composite = r.state->composite_score;
+
+                        if (smoothed >= 60.0) {
+                            kb_evidence_set_flag(ev, KB_EV_HIGH_SYSCALL_ENTROPY, ts);
+                            kb_evidence_push_seq(ev, KB_SEQ_HIGH_ENTROPY);
+                        }
+
+                        kb_behavior_result_t r_beh = kb_behavior_evaluate(ev);
+                        if (r_beh.state_changed) {
+                            printf("[BEHAVIOR ENGINE] PID=%u COMM=%s State transition (entropy): %s -> %s (Reason: %s, Chain: %s)\n",
+                                   pid, r.state->comm,
+                                   kb_state_name(r_beh.prev_state),
+                                   kb_state_name(r_beh.new_state),
+                                   r_beh.reason_str,
+                                   r_beh.chain_name ? r_beh.chain_name : "none");
+                        }
+
+                        kb_zone_t next_zone = map_state_to_zone(r_beh.record->state);
+                        kb_zone_t prev_zone = r.state->zone;
+                        r.state->zone = next_zone;
+                        if (prev_zone != next_zone) {
+                            r.zone_changed = 1;
+                            r.prev_zone = prev_zone;
+                        } else {
+                            r.zone_changed = 0;
+                        }
+                    }
+                }
+                bridge_dispatch(r, ts);
+            }
+        }
     }
 }
 
-// KB_EVT_* macros and struct kb_unified_event now come from
-// kb_scoring.h (already #included above) instead of being redefined
-// here — this was the "kept in sync by hand" wart kb_scoring.h's
-// header comment flagged; one definition now, not two.
+static int read_rules_from_bridge(int fd)
+{
+    uint32_t payload_len = 0;
+    if (read(fd, &payload_len, 4) != 4) {
+        return -1;
+    }
+    
+    char *buf = malloc(payload_len);
+    if (!buf) return -1;
+    
+    size_t total = 0;
+    while (total < payload_len) {
+        ssize_t n = read(fd, buf + total, payload_len - total);
+        if (n <= 0) {
+            free(buf);
+            return -1;
+        }
+        total += n;
+    }
+    
+    if (payload_len < 8) {
+        free(buf);
+        return -1;
+    }
+    uint16_t magic = *(uint16_t *)buf;
+    uint8_t version = buf[2];
+    uint8_t msg_type = buf[3];
+    if (magic != 0x4B42 || version != 3 || msg_type != 3) {
+        free(buf);
+        return -1;
+    }
+    
+    uint32_t rule_count = *(uint32_t *)(buf + 4);
+    size_t expected_size = 8 + rule_count * sizeof(struct kb_wire_attack_rule);
+    if (payload_len < expected_size) {
+        free(buf);
+        return -1;
+    }
+    
+    kb_rules_load_wire((const struct kb_wire_attack_rule *)(buf + 8), rule_count);
+    free(buf);
+    return 0;
+}
+
+static kb_zone_t map_state_to_zone(kb_behavior_state_t state)
+{
+    switch (state) {
+        case KB_STATE_SAFE:
+        case KB_STATE_OBSERVED:
+            return KB_ZONE_SAFE;
+        case KB_STATE_SUSPICIOUS:
+            return KB_ZONE_SUSPICIOUS;
+        case KB_STATE_BORDERLANDS:
+        case KB_STATE_COMPROMISED:
+        case KB_STATE_CONTAINED:
+        case KB_STATE_RECOVERING:
+            return KB_ZONE_BORDERLANDS;
+        default:
+            return KB_ZONE_SAFE;
+    }
+}
+
+static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_event *e)
+{
+    kb_scoring_result_t r = kb_scoring_update(e);
+    if (!r.state)
+        return r;
+
+    uint64_t ts = e->ts_ns;
+    uint32_t pid = e->pid;
+
+    kb_evidence_t *ev = kb_evidence_get_or_create(pid, r.state->ppid, r.state->uid, r.state->comm, r.state->start_time_ns);
+    if (ev) {
+        ev->advisory_ema = r.state->ema_score;
+        ev->advisory_composite = r.state->composite_score;
+
+        switch (e->event_type) {
+            case KB_EVT_PROCESS_EXEC:
+                kb_evidence_set_flag(ev, KB_EV_NONE, ts);
+                kb_evidence_push_seq(ev, KB_SEQ_EXEC);
+                break;
+            case KB_EVT_PRIVILEGE_CHANGE:
+                if (e->new_euid == 0xFFFFFFFF) {
+                    kb_evidence_set_flag(ev, KB_EV_CAP_GAINED, ts);
+                    kb_evidence_push_seq(ev, KB_SEQ_PRIVILEGE_UP);
+                } else if (e->escalation) {
+                    kb_evidence_set_flag(ev, KB_EV_PRIVILEGE_GAINED, ts);
+                    kb_evidence_push_seq(ev, KB_SEQ_PRIVILEGE_UP);
+                    if (e->new_uid == 0) {
+                        kb_evidence_set_flag(ev, KB_EV_ROOT_ACHIEVED, ts);
+                        kb_evidence_push_seq(ev, KB_SEQ_PRIVILEGE_ROOT);
+                    }
+                }
+                break;
+            case KB_EVT_FILE_ACCESS:
+                if (e->sensitive) {
+                    if (strstr((const char *)e->filename, "shadow")) {
+                        kb_evidence_set_flag(ev, KB_EV_SHADOW_ACCESS, ts);
+                    } else if (strstr((const char *)e->filename, "passwd")) {
+                        kb_evidence_set_flag(ev, KB_EV_PASSWD_ACCESS, ts);
+                    } else if (strstr((const char *)e->filename, "sudoers")) {
+                        kb_evidence_set_flag(ev, KB_EV_SUDOERS_ACCESS, ts);
+                    } else {
+                        kb_evidence_set_flag(ev, KB_EV_SSH_KEY_ACCESS, ts);
+                    }
+                    kb_evidence_push_seq(ev, KB_SEQ_SHADOW_ACCESS);
+                }
+                break;
+            case KB_EVT_NETWORK_CONNECT:
+                kb_evidence_set_flag(ev, KB_EV_OUTBOUND_CONNECT, ts);
+                kb_evidence_push_seq(ev, KB_SEQ_OUTBOUND_CONNECT);
+                if (e->dport == 4444 || e->dport == 1337) {
+                    kb_evidence_set_flag(ev, KB_EV_C2_CANDIDATE_PORT, ts);
+                    kb_evidence_push_seq(ev, KB_SEQ_C2_PORT);
+                }
+                break;
+            case KB_EVT_NETWORK_BIND:
+                kb_evidence_set_flag(ev, KB_EV_BIND_LISTENER, ts);
+                kb_evidence_push_seq(ev, KB_SEQ_BIND_LISTEN);
+                break;
+            case KB_EVT_MEMORY_MMAP:
+            case KB_EVT_MEMORY_MPROTECT:
+                if (e->addr == 0 && e->rwx) {
+                    kb_evidence_set_flag(ev, KB_EV_PROC_MEM_WRITE, ts);
+                    kb_evidence_push_seq(ev, KB_SEQ_PROC_MEM_WRITE);
+                } else if (e->rwx) {
+                    kb_evidence_set_flag(ev, KB_EV_RWX_MAPPING, ts);
+                    kb_evidence_push_seq(ev, KB_SEQ_RWX_MAP);
+                }
+                break;
+            default:
+                break;
+        }
+
+        kb_behavior_result_t r_beh = kb_behavior_evaluate(ev);
+        if (r_beh.state_changed) {
+            printf("[BEHAVIOR ENGINE] PID=%u COMM=%s State transition: %s -> %s (Reason: %s, Chain: %s)\n",
+                   pid, r.state->comm,
+                   kb_state_name(r_beh.prev_state),
+                   kb_state_name(r_beh.new_state),
+                   r_beh.reason_str,
+                   r_beh.chain_name ? r_beh.chain_name : "none");
+        }
+
+        kb_zone_t next_zone = map_state_to_zone(r_beh.record->state);
+        kb_zone_t prev_zone = r.state->zone;
+        r.state->zone = next_zone;
+        if (prev_zone != next_zone) {
+            r.zone_changed = 1;
+            r.prev_zone = prev_zone;
+        } else {
+            r.zone_changed = 0;
+        }
+    }
+
+    return r;
+}
+
+static size_t find_elf_symbol_offset(const char *elf_path, const char *symbol_name)
+{
+    FILE *f = fopen(elf_path, "rb");
+    if (!f) return 0;
+
+    Elf64_Ehdr ehdr;
+    if (fread(&ehdr, 1, sizeof(ehdr), f) != sizeof(ehdr)) {
+        fclose(f);
+        return 0;
+    }
+
+    if (memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0 || ehdr.e_ident[EI_CLASS] != ELFCLASS64) {
+        fclose(f);
+        return 0;
+    }
+
+    Elf64_Shdr *shdrs = malloc(ehdr.e_shentsize * ehdr.e_shnum);
+    if (!shdrs) {
+        fclose(f);
+        return 0;
+    }
+
+    if (fseek(f, ehdr.e_shoff, SEEK_SET) != 0 ||
+        fread(shdrs, ehdr.e_shentsize, ehdr.e_shnum, f) != ehdr.e_shnum) {
+        free(shdrs);
+        fclose(f);
+        return 0;
+    }
+
+    Elf64_Shdr *symtab_shdr = NULL;
+    Elf64_Shdr *strtab_shdr = NULL;
+
+    for (int i = 0; i < ehdr.e_shnum; i++) {
+        if (shdrs[i].sh_type == SHT_SYMTAB) {
+            symtab_shdr = &shdrs[i];
+            strtab_shdr = &shdrs[shdrs[i].sh_link];
+        } else if (shdrs[i].sh_type == SHT_DYNSYM && !symtab_shdr) {
+            symtab_shdr = &shdrs[i];
+            strtab_shdr = &shdrs[shdrs[i].sh_link];
+        }
+    }
+
+    if (!symtab_shdr || !strtab_shdr) {
+        free(shdrs);
+        fclose(f);
+        return 0;
+    }
+
+    size_t num_syms = symtab_shdr->sh_size / symtab_shdr->sh_entsize;
+    Elf64_Sym *syms = malloc(symtab_shdr->sh_size);
+    char *strs = malloc(strtab_shdr->sh_size);
+
+    if (!syms || !strs) {
+        free(syms);
+        free(strs);
+        free(shdrs);
+        fclose(f);
+        return 0;
+    }
+
+    if (fseek(f, symtab_shdr->sh_offset, SEEK_SET) != 0 ||
+        fread(syms, 1, symtab_shdr->sh_size, f) != symtab_shdr->sh_size ||
+        fseek(f, strtab_shdr->sh_offset, SEEK_SET) != 0 ||
+        fread(strs, 1, strtab_shdr->sh_size, f) != strtab_shdr->sh_size) {
+        free(syms);
+        free(strs);
+        free(shdrs);
+        fclose(f);
+        return 0;
+    }
+
+    size_t offset = 0;
+    for (size_t i = 0; i < num_syms; i++) {
+        const char *name = strs + syms[i].st_name;
+        if (strcmp(name, symbol_name) == 0) {
+            offset = syms[i].st_value;
+            break;
+        }
+    }
+
+    free(syms);
+    free(strs);
+    free(shdrs);
+    fclose(f);
+    return offset;
+}
+
+static void try_attach_go_tls(struct kbd_sensor_bpf *skel, uint32_t pid, const char *comm)
+{
+    if (pid == 0 || pid == getpid()) return;
+
+    char exe_path[64];
+    snprintf(exe_path, sizeof(exe_path), "/proc/%u/exe", pid);
+
+    size_t offset = find_elf_symbol_offset(exe_path, "crypto/tls.(*Conn).Write");
+    if (offset == 0) {
+        offset = find_elf_symbol_offset(exe_path, "crypto/tls.(*Conn).write");
+    }
+
+    if (offset == 0) {
+        return;
+    }
+
+    printf("[TLS DETECTOR] Found Go TLS binary for PID=%u (%s). Offset=0x%lx. Attaching uprobe...\n", 
+           pid, comm, (unsigned long)offset);
+
+    struct bpf_link *link = bpf_program__attach_uprobe(
+        skel->progs.kb_go_tls_write, false, pid, exe_path, offset
+    );
+    if (!link) {
+        fprintf(stderr, "Failed to attach Go TLS uprobe: %d\n", -errno);
+    } else {
+        printf("[TLS DETECTOR] Successfully attached Go TLS uprobe to PID=%u\n", pid);
+    }
+}
+
+static const char *common_ssl_paths[] = {
+    "/lib/x86_64-linux-gnu/libssl.so.3",
+    "/usr/lib/x86_64-linux-gnu/libssl.so.3",
+    "/lib/x86_64-linux-gnu/libssl.so.1.1",
+    "/usr/lib/x86_64-linux-gnu/libssl.so.1.1",
+    "/usr/lib/libssl.so.3",
+    "/usr/lib/libssl.so.1.1",
+    "/lib/libssl.so.3",
+    "/lib/libssl.so.1.1"
+};
+
+static const char *common_gnutls_paths[] = {
+    "/lib/x86_64-linux-gnu/libgnutls.so.30",
+    "/usr/lib/x86_64-linux-gnu/libgnutls.so.30",
+    "/usr/lib/libgnutls.so.30",
+    "/lib/libgnutls.so.30"
+};
+
+static const char *common_nss_paths[] = {
+    "/usr/lib/x86_64-linux-gnu/libnss3.so",
+    "/lib/x86_64-linux-gnu/libnss3.so",
+    "/usr/lib/libnss3.so",
+    "/lib/libnss3.so"
+};
+
+static void populate_sensitive_paths(struct kbd_sensor_bpf *skel)
+{
+    int map_fd = bpf_map__fd(skel->maps.kb_sensitive_paths);
+    if (map_fd < 0) {
+        fprintf(stderr, "Failed to get file descriptor for kb_sensitive_paths map\n");
+        return;
+    }
+
+    const char *paths[] = {
+        "/etc/shadow",
+        "/etc/passwd",
+        "/etc/sudoers",
+        "/root/"
+    };
+    __u32 one = 1;
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        char key[64] = {};
+        strncpy(key, paths[i], sizeof(key) - 1);
+        int err = bpf_map_update_elem(map_fd, key, &one, BPF_ANY);
+        if (err) {
+            fprintf(stderr, "Failed to add path %s to sensitive path map: %d\n", paths[i], err);
+        } else {
+            printf("[PATH AUDITOR] Registered sensitive path prefix: %s\n", paths[i]);
+        }
+    }
+}
+
+static void attach_ssl_uprobes(struct kbd_sensor_bpf *skel)
+{
+    // 1. OpenSSL
+    const char *libssl_path = NULL;
+    for (size_t i = 0; i < sizeof(common_ssl_paths) / sizeof(common_ssl_paths[0]); i++) {
+        if (access(common_ssl_paths[i], F_OK) == 0) {
+            libssl_path = common_ssl_paths[i];
+            break;
+        }
+    }
+    if (libssl_path) {
+        size_t offset = find_elf_symbol_offset(libssl_path, "SSL_write");
+        if (offset > 0) {
+            printf("[TLS DETECTOR] Found libssl.so at %s. SSL_write offset=0x%lx. Attaching uprobe...\n", libssl_path, (unsigned long)offset);
+            struct bpf_link *link = bpf_program__attach_uprobe(
+                skel->progs.kb_ssl_write, false, -1 /* all PIDs */, libssl_path, offset
+            );
+            if (!link) {
+                fprintf(stderr, "Failed to attach OpenSSL SSL_write uprobe: %d\n", -errno);
+            } else {
+                printf("[TLS DETECTOR] Successfully attached OpenSSL uprobe\n");
+            }
+        }
+    } else {
+        printf("[TLS DETECTOR] Warning: libssl.so not found. OpenSSL uprobe disabled.\n");
+    }
+
+    // 2. GnuTLS
+    const char *gnutls_path = NULL;
+    for (size_t i = 0; i < sizeof(common_gnutls_paths) / sizeof(common_gnutls_paths[0]); i++) {
+        if (access(common_gnutls_paths[i], F_OK) == 0) {
+            gnutls_path = common_gnutls_paths[i];
+            break;
+        }
+    }
+    if (gnutls_path) {
+        size_t offset = find_elf_symbol_offset(gnutls_path, "gnutls_record_send");
+        if (offset > 0) {
+            printf("[TLS DETECTOR] Found libgnutls.so at %s. gnutls_record_send offset=0x%lx. Attaching uprobe...\n", gnutls_path, (unsigned long)offset);
+            struct bpf_link *link = bpf_program__attach_uprobe(
+                skel->progs.kb_ssl_write, false, -1 /* all PIDs */, gnutls_path, offset
+            );
+            if (!link) {
+                fprintf(stderr, "Failed to attach GnuTLS uprobe: %d\n", -errno);
+            } else {
+                printf("[TLS DETECTOR] Successfully attached GnuTLS uprobe\n");
+            }
+        }
+    } else {
+        printf("[TLS DETECTOR] Warning: libgnutls.so not found. GnuTLS uprobe disabled.\n");
+    }
+
+    // 3. NSS
+    const char *nss_path = NULL;
+    for (size_t i = 0; i < sizeof(common_nss_paths) / sizeof(common_nss_paths[0]); i++) {
+        if (access(common_nss_paths[i], F_OK) == 0) {
+            nss_path = common_nss_paths[i];
+            break;
+        }
+    }
+    if (nss_path) {
+        size_t offset = find_elf_symbol_offset(nss_path, "PR_Write");
+        if (offset > 0) {
+            printf("[TLS DETECTOR] Found libnss3.so at %s. PR_Write offset=0x%lx. Attaching uprobe...\n", nss_path, (unsigned long)offset);
+            struct bpf_link *link = bpf_program__attach_uprobe(
+                skel->progs.kb_ssl_write, false, -1 /* all PIDs */, nss_path, offset
+            );
+            if (!link) {
+                fprintf(stderr, "Failed to attach NSS uprobe: %d\n", -errno);
+            } else {
+                printf("[TLS DETECTOR] Successfully attached NSS uprobe\n");
+            }
+        }
+    } else {
+        printf("[TLS DETECTOR] Warning: libnss3.so not found. NSS uprobe disabled.\n");
+    }
+}
 
 static volatile int running = 1;
 void handle_sigint(int sig) { running = 0; }
@@ -456,6 +807,7 @@ static const char *event_type_name(__u8 t)
         case KB_EVT_NETWORK_BIND:     return "network_bind";
         case KB_EVT_MEMORY_MMAP:      return "memory_mmap";
         case KB_EVT_MEMORY_MPROTECT:  return "memory_mprotect";
+        case 9:                       return "tls_plaintext";
         default:                      return "unknown";
     }
 }
@@ -470,20 +822,16 @@ static void prot_str(__u32 prot, char *buf)
 
 static int handle_event(void *ctx, void *data, size_t sz)
 {
+    struct kbd_sensor_bpf *skel = ctx;
     const struct kb_unified_event *e = data;
 
-    // Suppress syscall noise — too frequent for clean demo output.
-    // KB_DIM_SYSCALL is scored separately: scan_syscall_entropy() polls
-    // kb_syscall_counts/kb_syscall_totals directly, on its own cadence,
-    // instead of going through this per-event path.
     if (e->event_type == KB_EVT_SYSCALL)
         return 0;
 
-    // --- scoring + bridge send ---
-    // e is already a struct kb_unified_event * (single shared
-    // definition, from kb_scoring.h) — no cast needed.
-    kb_scoring_result_t r = kb_scoring_update(e);
-    bridge_dispatch(r, e->ts_ns);
+    if (e->event_type != 9) {
+        kb_scoring_result_t r = process_behavior_and_score(e);
+        bridge_dispatch(r, e->ts_ns);
+    }
 
     char dst[INET_ADDRSTRLEN] = {0};
     char src[INET_ADDRSTRLEN] = {0};
@@ -495,6 +843,10 @@ static int handle_event(void *ctx, void *data, size_t sz)
 
     switch (e->event_type) {
         case KB_EVT_PROCESS_EXEC:
+            try_attach_go_tls(skel, e->pid, (const char *)e->comm);
+            printf("\n");
+            break;
+
         case KB_EVT_PROCESS_EXIT:
             printf("\n");
             break;
@@ -504,10 +856,19 @@ static int handle_event(void *ctx, void *data, size_t sz)
             break;
 
         case KB_EVT_PRIVILEGE_CHANGE:
-            printf("uid:%u->%u euid:%u->%u %s\n",
-                   e->old_uid, e->new_uid,
-                   e->old_euid, e->new_euid,
-                   e->escalation ? "🔴 ESCALATION" : "");
+            if (e->new_euid == 0xFFFFFFFF) {
+                printf("🔴 SENSITIVE CAPABILITY PROBE: Cap=%u (%s)\n",
+                       e->old_euid,
+                       e->old_euid == 21 ? "CAP_SYS_ADMIN" :
+                       e->old_euid == 19 ? "CAP_SYS_PTRACE" :
+                       e->old_euid == 17 ? "CAP_SYS_RAWIO" :
+                       e->old_euid == 1 ? "CAP_DAC_OVERRIDE" : "unknown");
+            } else {
+                printf("uid:%u->%u euid:%u->%u %s\n",
+                       e->old_uid, e->new_uid,
+                       e->old_euid, e->new_euid,
+                       e->escalation ? "🔴 ESCALATION" : "");
+            }
             break;
 
         case KB_EVT_FILE_ACCESS:
@@ -528,13 +889,21 @@ static int handle_event(void *ctx, void *data, size_t sz)
 
         case KB_EVT_MEMORY_MMAP:
         case KB_EVT_MEMORY_MPROTECT:
-            prot_str(e->prot, prot);
-            printf("addr=0x%llx len=%llu prot=%s %s%s\n",
-                   (unsigned long long)e->addr,
-                   (unsigned long long)e->length,
-                   prot,
-                   e->rwx ? "🔴 RWX! " : "",
-                   e->anonymous ? "ANON" : "");
+            if (e->addr == 0 && e->rwx) {
+                printf("🔴 CROSS-PROCESS MEMORY INJECTION! TargetPID=%llu\n", (unsigned long long)e->length);
+            } else {
+                prot_str(e->prot, prot);
+                printf("addr=0x%llx len=%llu prot=%s %s%s\n",
+                       (unsigned long long)e->addr,
+                       (unsigned long long)e->length,
+                       prot,
+                       e->rwx ? "🔴 RWX! " : "",
+                       e->anonymous ? "ANON" : "");
+            }
+            break;
+
+        case 9: // KB_EVT_TLS_PLAINTEXT
+            printf("payload=\"%s\" (len=%u)\n", e->filename, e->flags);
             break;
 
         default:
@@ -552,34 +921,46 @@ int main(void)
 
     signal(SIGINT, handle_sigint);
     kb_scoring_init();
+    kb_evidence_init();
+    kb_behavior_init();
 
-    // Matches wire.go's envOr("KBD_SOCKET_PATH", "/var/run/kbd.sock") on
-    // the Go side — both must agree or they'll never connect. Falls back
-    // to KB_BRIDGE_DEFAULT_SOCK (bridge_sock_path's compiled-in default)
-    // if unset, same as before this existed.
     const char *env_sock = getenv("KBD_SOCKET_PATH");
     if (env_sock)
         strncpy(bridge_sock_path, env_sock, sizeof(bridge_sock_path) - 1);
 
-    // Best-effort connect at startup; if kbd's listener isn't up yet
-    // this just falls through and handle_event()'s bridge_ensure_connected()
-    // retries opportunistically on later events. Not a fatal condition —
-    // the sensor should still run (and print) even with no bridge peer.
     bridge_fd = kb_bridge_try_connect(bridge_sock_path);
-    if (bridge_fd < 0)
+    if (bridge_fd < 0) {
         fprintf(stderr, "kbd_sensor: bridge not connected yet (%s) — will retry on events\n",
                 bridge_sock_path);
+    } else {
+        if (read_rules_from_bridge(bridge_fd) < 0) {
+            fprintf(stderr, "kbd_sensor: failed to read rules from control plane, using default compiled rules\n");
+        }
+    }
 
     printf("╔══════════════════════════════════════════════╗\n");
     printf("║   KB Unified Sensor — kbd-sensor             ║\n");
     printf("║   All 6 hooks, single ring buffer            ║\n");
     printf("╚══════════════════════════════════════════════╝\n\n");
 
-    skel = kbd_sensor_bpf__open_and_load();
+    skel = kbd_sensor_bpf__open();
     if (!skel) {
-        fprintf(stderr, "Failed to load BPF skeleton\n");
+        fprintf(stderr, "Failed to open BPF skeleton\n");
         return 1;
     }
+
+    bpf_program__set_autoload(skel->progs.kb_ssl_write, false);
+    bpf_program__set_autoload(skel->progs.kb_go_tls_write, false);
+    bpf_program__set_autoload(skel->progs.kb_lsm_file_open, true);
+
+    err = kbd_sensor_bpf__load(skel);
+    if (err) {
+        fprintf(stderr, "Failed to load BPF skeleton: %d\n", err);
+        kbd_sensor_bpf__destroy(skel);
+        return 1;
+    }
+
+    populate_sensitive_paths(skel);
 
     err = kbd_sensor_bpf__attach(skel);
     if (err) {
@@ -587,9 +968,11 @@ int main(void)
         goto cleanup;
     }
 
+    attach_ssl_uprobes(skel);
+
     rb = ring_buffer__new(
         bpf_map__fd(skel->maps.kb_events),
-        handle_event, NULL, NULL
+        handle_event, skel, NULL
     );
     if (!rb) {
         fprintf(stderr, "Failed to create ring buffer\n");

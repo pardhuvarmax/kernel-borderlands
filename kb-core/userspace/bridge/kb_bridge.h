@@ -47,7 +47,7 @@ int kb_bridge_send_zone_transition(int fd, uint32_t pid, uint64_t start_time_ns,
                                     kb_zone_t from, kb_zone_t to,
                                     double score, uint64_t ts_ns);
 
-#define KB_BRIDGE_DEFAULT_SOCK   "/var/run/kbd.sock"
+#define KB_BRIDGE_DEFAULT_SOCK   "/tmp/kbd.sock"
 #define KB_BRIDGE_RETRY_MIN_MS   100
 #define KB_BRIDGE_RETRY_MAX_MS   5000
 

@@ -87,6 +87,9 @@ $(BUILD)/kb_memory: $(COLLECTORS)/kb_memory.c $(OUTPUT)/kb_memory.skel.h | $(BUI
 SENSOR_SRCS := \
     $(SENSOR)/kbd_sensor.c \
     $(BEHAVIOR)/kb_scoring.c \
+    $(BEHAVIOR)/kb_evidence.c \
+    $(BEHAVIOR)/kb_behavior.c \
+    $(BEHAVIOR)/kb_rules.c \
     $(BRIDGE)/kb_bridge.c
 
 $(BUILD)/kbd_sensor: $(SENSOR_SRCS) $(OUTPUT)/kbd_sensor.skel.h | $(BUILD)

@@ -13,7 +13,7 @@ const (
     WireVersion        uint8  = 3
     WireMsgProcessState   uint8 = 1
     WireMsgZoneTransition uint8 = 2
-    SocketPath                  = "/var/run/kbd.sock"
+    SocketPath                  = "/tmp/kbd.sock"
     DimCount                    = 6
 )
 
