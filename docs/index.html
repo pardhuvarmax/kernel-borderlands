@@ -1267,6 +1267,8 @@
       box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
+      transform-style: preserve-3d;
+      perspective: 1000px;
     }
     .member::before {
       content:'';position:absolute;top:0;left:0;right:0;height:3px;
@@ -1281,14 +1283,46 @@
       pointer-events: none;
       z-index: 0;
     }
+    .member-shine {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(
+        circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+        rgba(255, 255, 255, 0.12) 0%,
+        rgba(255, 255, 255, 0) 60%
+      );
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .member:hover .member-shine {
+      opacity: 1;
+    }
     .member:hover {
-      transform: translateY(-8px);
       border-color: rgba(var(--accent-rgb), 0.3);
-      box-shadow: 0 12px 40px rgba(var(--accent-rgb), 0.1);
+      box-shadow: 0 12px 40px rgba(var(--accent-rgb), 0.15);
       background: rgba(var(--accent-rgb), 0.02);
     }
     .member:hover::before { transform:scaleX(1); }
     .member:hover::after { opacity: 1; }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family:'JetBrains Mono',monospace;
+      font-size:9px;
+      letter-spacing:.1em;
+      margin-bottom: 24px;
+      color: var(--dim);
+      position: relative;
+      z-index: 1;
+    }
+    .card-rarity {
+      color: var(--accent-color, var(--ember));
+      opacity: 0.8;
+      font-weight: bold;
+    }
     .member-initial {
       width:64px;height:64px;
       border:1px dashed var(--border2);
@@ -1327,7 +1361,7 @@
     }
     .member-name {
       font-family:'Bebas Neue',sans-serif;font-size:24px;
-      letter-spacing:.03em;margin-bottom:6px;
+      letter-spacing:.03em;margin-bottom:4px;
       position: relative;
       z-index: 1;
       transition: color 0.3s ease;
@@ -1335,10 +1369,69 @@
     .member:hover .member-name {
       color: var(--accent-color, var(--text));
     }
+    .member-class {
+      font-family:'JetBrains Mono',monospace;
+      font-size:10px;
+      letter-spacing:.12em;
+      color:rgba(255, 255, 255, 0.4);
+      margin-bottom:16px;
+      font-weight: 500;
+      position: relative;
+      z-index: 1;
+    }
     .member-domain {
       font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.6;margin-bottom:24px;
       position: relative;
       z-index: 1;
+    }
+    .member-stats {
+      margin-top: 0;
+      max-height: 0;
+      opacity: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+      z-index: 1;
+    }
+    .member:hover .member-stats {
+      max-height: 220px;
+      opacity: 1;
+      margin-top: 24px;
+      margin-bottom: 8px;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family:'JetBrains Mono',monospace;
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .stat-val {
+      color: var(--text);
+      font-weight: bold;
+    }
+    .stat-bar {
+      width: 100%;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .stat-fill {
+      height: 100%;
+      background: var(--accent-color, var(--ember));
+      width: 0;
+      transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      border-radius: 2px;
+      box-shadow: 0 0 8px var(--accent-color, var(--ember));
+    }
+    .member:hover .stat-fill {
+      width: var(--target-width, 100%);
     }
     .member-owns {
       display:flex;flex-wrap: wrap;gap:8px;
@@ -3011,46 +3104,98 @@
   <div class="team-grid r" style="margin-top:64px">
     <!-- Pardhu -->
     <div class="member" style="--accent-color:#bfff00; --accent-rgb:191,255,0;">
+      <div class="member-shine"></div>
+      <div class="card-header">
+        <span class="card-rarity">LEVEL 5 CLEARANCE</span>
+        <span class="card-id">#KB-01-PV</span>
+      </div>
       <div class="member-initial">PV</div>
       <div class="member-name">Pardhu Varma</div>
+      <div class="member-class">KERNEL SYSTEMS ARCHITECT</div>
       <p class="member-domain">Systems Architecture · Linux Kernel · eBPF · Rust</p>
+      <div class="member-stats">
+        <div class="stat-row"><span class="stat-name">CORE telemetry hooks</span><span class="stat-val">12 / 12</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 100%;"></div></div>
+        <div class="stat-row"><span class="stat-name">Ring 0 LSM blocks</span><span class="stat-val">Enabled</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 100%;"></div></div>
+        <div class="stat-row"><span class="stat-name">Commits contributed</span><span class="stat-val">1,280+</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 90%;"></div></div>
+      </div>
       <div class="member-owns">
         <span class="member-own-tag">kb-core/</span>
         <span class="member-own-tag">kb-checker/</span>
-        <span class="member-own-tag">Ring 0 LSM</span>
       </div>
     </div>
     <!-- Karthik -->
     <div class="member" style="--accent-color:#ff4500; --accent-rgb:255,69,0;">
+      <div class="member-shine"></div>
+      <div class="card-header">
+        <span class="card-rarity">LEVEL 5 CLEARANCE</span>
+        <span class="card-id">#KB-02-KK</span>
+      </div>
       <div class="member-initial">KK</div>
       <div class="member-name">Karthik</div>
+      <div class="member-class">AI SWARM & CONSENSUS ENG</div>
       <p class="member-domain">AI & Agentic Systems · MARL · Offensive Security</p>
+      <div class="member-stats">
+        <div class="stat-row"><span class="stat-name">Active agents swarm</span><span class="stat-val">5 / 5</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 100%;"></div></div>
+        <div class="stat-row"><span class="stat-name">Quorum accuracy</span><span class="stat-val">98.4%</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 98%;"></div></div>
+        <div class="stat-row"><span class="stat-name">Commits contributed</span><span class="stat-val">920+</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 72%;"></div></div>
+      </div>
       <div class="member-owns">
         <span class="member-own-tag">kb-aads/</span>
         <span class="member-own-tag">marl/</span>
-        <span class="member-own-tag">Quorum Consensus</span>
       </div>
     </div>
     <!-- Tejaswini -->
-    <div class="member" style="--accent-color:#bfff00; --accent-rgb:191,255,0;">
+    <div class="member" style="--accent-color:#39ff14; --accent-rgb:57,255,20;">
+      <div class="member-shine"></div>
+      <div class="card-header">
+        <span class="card-rarity">LEVEL 4 CLEARANCE</span>
+        <span class="card-id">#KB-03-KT</span>
+      </div>
       <div class="member-initial">KT</div>
       <div class="member-name">Tejaswini</div>
+      <div class="member-class">DEFENSIVE SECURITY ENGINEER</div>
       <p class="member-domain">Control Plane · Defensive Security · TUI · Go</p>
+      <div class="member-stats">
+        <div class="stat-row"><span class="stat-name">Rules table parsed</span><span class="stat-val">19 dynamic</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 100%;"></div></div>
+        <div class="stat-row"><span class="stat-name">Database integrity</span><span class="stat-val">99.9%</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 99%;"></div></div>
+        <div class="stat-row"><span class="stat-name">Commits contributed</span><span class="stat-val">1,140+</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 82%;"></div></div>
+      </div>
       <div class="member-owns">
         <span class="member-own-tag">kb-control-plane/</span>
         <span class="member-own-tag">kb-tui/</span>
-        <span class="member-own-tag">gRPC IPC listener</span>
       </div>
     </div>
     <!-- Rupa -->
-    <div class="member" style="--accent-color:#ff4500; --accent-rgb:255,69,0;">
+    <div class="member" style="--accent-color:#ffb000; --accent-rgb:255,176,0;">
+      <div class="member-shine"></div>
+      <div class="card-header">
+        <span class="card-rarity">LEVEL 4 CLEARANCE</span>
+        <span class="card-id">#KB-04-KR</span>
+      </div>
       <div class="member-initial">KR</div>
       <div class="member-name">Rupa</div>
+      <div class="member-class">FRONTEND INTERFACE DESIGNER</div>
       <p class="member-domain">Dashboard · Frontend Engineering · UI/UX · CLI</p>
+      <div class="member-stats">
+        <div class="stat-row"><span class="stat-name">Rendering performance</span><span class="stat-val">144 FPS</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 100%;"></div></div>
+        <div class="stat-row"><span class="stat-name">WebSocket latency</span><span class="stat-val">&lt;2ms</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 95%;"></div></div>
+        <div class="stat-row"><span class="stat-name">Commits contributed</span><span class="stat-val">750+</span></div>
+        <div class="stat-bar"><div class="stat-fill" style="--target-width: 60%;"></div></div>
+      </div>
       <div class="member-owns">
         <span class="member-own-tag">kb-dashboard/</span>
         <span class="member-own-tag">WebSockets</span>
-        <span class="member-own-tag">D3 Force Graph</span>
       </div>
     </div>
   </div>
@@ -3220,6 +3365,27 @@
   // Hero parallax
   const ht=document.querySelector('.hero-title');
   window.addEventListener('scroll',()=>{if(ht)ht.style.transform=`translateY(${window.scrollY*.14}px)`;},{passive:true});
+
+  // 3D Card Tilt & Glare
+  document.querySelectorAll('.member').forEach(card => {
+    card.addEventListener('mousemove', e => {
+      const rect = card.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const w = rect.width;
+      const h = rect.height;
+      const rotateX = ((y / h) - 0.5) * -16;
+      const rotateY = ((x / w) - 0.5) * 16;
+      card.style.setProperty('--mouse-x', `${(x / w) * 100}%`);
+      card.style.setProperty('--mouse-y', `${(y / h) * 100}%`);
+      card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.04, 1.04, 1.04)`;
+    });
+    card.addEventListener('mouseleave', () => {
+      card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)';
+      card.style.setProperty('--mouse-x', '50%');
+      card.style.setProperty('--mouse-y', '50%');
+    });
+  });
 </script>
 </body>
 </html>
