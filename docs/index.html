@@ -214,7 +214,7 @@
     /* ── WHAT IS KB ── */
     #about { padding:110px 48px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:start;position:relative;overflow:hidden; }
     #about > *:not(.cine) { position:relative;z-index:1; }
-
+    .about-left {}
     .eyebrow { font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.2em;color:var(--ember);text-transform:uppercase;margin-bottom:18px; }
     .section-title { font-family:'Bebas Neue',sans-serif;font-size:clamp(44px,5.5vw,80px);line-height:.92;letter-spacing:-.01em;margin-bottom:32px; }
     .body-text { font-size:14.5px;line-height:1.78;color:var(--muted);font-weight:300;max-width:520px; }
@@ -1255,196 +1255,33 @@
     #team > *:not(.cine) { position:relative;z-index:1; }
     .team-intro { max-width:600px;font-size:14.5px;color:var(--muted);line-height:1.78;font-weight:300;margin-top:28px; }
     .team-intro strong { color:var(--text);font-weight:500; }
-    .team-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:24px;margin-top:64px;perspective: 2000px; }
+    .team-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);margin-top:64px; }
     .member {
-      background:rgba(20, 20, 20, 0.65);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 16px;
-      padding: 32px 28px;
-      transition: border-color 0.4s ease, box-shadow 0.4s ease, background-color 0.4s ease;
-      position:relative;
-      overflow:hidden;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      height: 490px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      transform-style: preserve-3d;
-      will-change: transform;
+      background:var(--black);padding:44px 36px;transition:background .2s;cursor:none;
+      position:relative;overflow:hidden;
     }
     .member::before {
-      content:'';position:absolute;top:0;left:0;right:0;height:4px;
-      background:var(--accent-color, var(--ember));
-      opacity: 0.3;
-      transition: opacity 0.4s ease;
+      content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
+      background:var(--ember);transform:scaleX(0);transform-origin:left;transition:transform .3s ease;
     }
-    .member:hover::before {
-      opacity: 1;
-    }
-    .member-shine {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: radial-gradient(
-        circle 150px at var(--mouse-x, 50%) var(--mouse-y, 50%),
-        rgba(var(--accent-rgb), 0.15) 0%,
-        rgba(var(--accent-rgb), 0) 100%
-      );
-      opacity: 0;
-      transition: opacity 0.3s ease;
-      pointer-events: none;
-      z-index: 2;
-    }
-    .member:hover .member-shine {
-      opacity: 1;
-    }
-    .member:hover {
-      border-color: rgba(var(--accent-rgb), 0.4);
-      box-shadow: 0 20px 40px rgba(var(--accent-rgb), 0.15), inset 0 0 20px rgba(var(--accent-rgb), 0.03);
-      background: rgba(var(--accent-rgb), 0.015);
-    }
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-family:'JetBrains Mono',monospace;
-      font-size: 9px;
-      letter-spacing: .08em;
-      color: var(--dim);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 12px;
-      margin-bottom: 12px;
-      position: relative;
-      z-index: 1;
-    }
-    .card-rarity {
-      color: var(--accent-color, var(--ember));
-      font-weight: 600;
-    }
-    .card-id {
-      opacity: 0.6;
-    }
+    .member:hover { background:var(--s2); }
+    .member:hover::before { transform:scaleX(1); }
     .member-initial {
-      width: 52px; height: 52px;
-      border: 1px solid rgba(var(--accent-rgb), 0.2);
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-family: 'Bebas Neue', sans-serif; font-size: 22px;
-      color: var(--accent-color, var(--ember));
-      margin-bottom: 14px;
-      background: rgba(var(--accent-rgb), 0.03);
-      position: relative;
-      transition: transform 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
-      z-index: 1;
+      width:52px;height:52px;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;
+      font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--ember);margin-bottom:24px;
+      transition:border-color .2s;
     }
-    .member-initial::after {
-      content: '';
-      position: absolute;
-      top: -4px; left: -4px; right: -4px; bottom: -4px;
-      border: 1px dashed rgba(var(--accent-rgb), 0.4);
-      border-radius: 50%;
-      animation: spin-initial 12s linear infinite;
-      pointer-events: none;
-    }
-    @keyframes spin-initial {
-      100% { transform: rotate(360deg); }
-    }
-    .member:hover .member-initial {
-      transform: scale(1.05) translateZ(20px);
-      border-color: var(--accent-color);
-      box-shadow: 0 0 15px rgba(var(--accent-rgb), 0.3);
-    }
-    .member-name {
-      font-family:'Bebas Neue',sans-serif; font-size: 26px;
-      letter-spacing:.02em; margin-bottom: 2px;
-      color: var(--text);
-      transition: color 0.3s ease;
-      position: relative;
-      z-index: 1;
-    }
-    .member:hover .member-name {
-      color: var(--accent-color);
-    }
-    .member-class {
-      font-family:'JetBrains Mono',monospace;
-      font-size: 9.5px;
-      letter-spacing:.08em;
-      color: var(--dim);
-      margin-bottom: 12px;
-      font-weight: 500;
-      position: relative;
-      z-index: 1;
-    }
-    .member-domain {
-      font-size: 12px; color: var(--muted); font-weight: 300; line-height: 1.5;
-      margin-bottom: 14px;
-      flex-grow: 1;
-      position: relative;
-      z-index: 1;
-    }
-    .member-stats {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      background: rgba(0, 0, 0, 0.15);
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 14px;
-      position: relative;
-      z-index: 1;
-    }
-    .stat-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-family:'JetBrains Mono',monospace;
-      font-size: 9.5px;
-      color: var(--muted);
-    }
-    .stat-val {
-      color: var(--text);
-      font-weight: 600;
-    }
-    .stat-bar {
-      width: 100%;
-      height: 3px;
-      background: rgba(255, 255, 255, 0.05);
-      border-radius: 2px;
-      overflow: hidden;
-      margin-top: 2px;
-    }
-    .stat-fill {
-      height: 100%;
-      background: var(--accent-color, var(--ember));
-      width: 0;
-      transition: width 1.2s cubic-bezier(0.16, 1, 0.3, 1);
-      border-radius: 2px;
-      box-shadow: 0 0 8px var(--accent-color, var(--ember));
-    }
-    .member:hover .stat-fill {
-      width: var(--target-width, 100%);
-    }
-    .member-owns {
-      display:flex;flex-wrap: wrap;gap:8px;
-      position: relative;
-      z-index: 1;
-    }
+    .member:hover .member-initial { border-color:var(--ember); }
+    .member-name { font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:.03em;margin-bottom:6px; }
+    .member-id { font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.12em;color:var(--muted);margin-bottom:18px; }
+    .member-domain { font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.6;margin-bottom:18px; }
+    .member-owns { display:flex;flex-direction:column;gap:6px; }
     .member-own-tag {
-      font-family:'JetBrains Mono',monospace;font-size: 9.5px;letter-spacing:.05em;
-      border:1px solid rgba(255, 255, 255, 0.08);
-      color: var(--muted);
-      padding:4px 10px;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.02);
-      transition: all 0.3s ease;
+      font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+      border:1px solid var(--border2);color:var(--dim);padding:4px 10px;display:inline-block;
+      width:fit-content;transition:color .2s,border-color .2s;
     }
-    .member:hover .member-own-tag {
-      color: var(--text);
-      border-color: rgba(var(--accent-rgb), 0.3);
-      background: rgba(var(--accent-rgb), 0.08);
-    }
+    .member:hover .member-own-tag { color:var(--muted);border-color:var(--border2); }
 
     /* ── COMPAT ── */
     #compat { padding:110px 48px;border-bottom:1px solid var(--border); }
@@ -1633,9 +1470,9 @@
   <div class="hero-sub">
     <div>
       <p class="hero-desc">
-        A kernel-level runtime defense framework for Linux. KB detects and classifies
-        <strong>anomalous process behavior</strong> in userspace and enforces Ring 0 containment — using eBPF instrumentation,
-        a Behavior State Machine, and an optional <strong>multi-agent AI coordination layer (AADS)</strong>.
+        A kernel-level runtime defense framework for Linux. KB detects, classifies, and contains
+        <strong>anomalous process behavior</strong> at Ring 0 — using eBPF instrumentation,
+        a Behavioral Scoring Engine, and an optional <strong>multi-agent AI coordination layer (AADS)</strong>.
       </p>
       <div class="hero-badges">
         <span class="badge">Linux 5.8+</span>
@@ -1656,7 +1493,7 @@
 <div class="ticker-wrap">
   <div class="ticker">
     <div class="ti"><span class="sep"></span>eBPF CO-RE · Compile Once Run Everywhere</div>
-    <div class="ti"><span class="sep"></span>Behavior State Machine · Dynamic Rules Engine</div>
+    <div class="ti"><span class="sep"></span>Behavioral Risk Score · 6 weighted dimensions</div>
     <div class="ti"><span class="sep"></span>Judge · Jury · Executor agent architecture</div>
     <div class="ti"><span class="sep"></span>Seccomp · Namespaces · cgroup v2 enforcement</div>
     <div class="ti"><span class="sep"></span>SHA-256 chained tamper-evident audit log</div>
@@ -1664,7 +1501,7 @@
     <div class="ti"><span class="sep"></span>QLoRA fine-tuning · Phi-3 Mini · Qwen2.5-3B</div>
     <div class="ti"><span class="sep"></span>Under Active Development · Open Source</div>
     <div class="ti"><span class="sep"></span>eBPF CO-RE · Compile Once Run Everywhere</div>
-    <div class="ti"><span class="sep"></span>Behavior State Machine · Dynamic Rules Engine</div>
+    <div class="ti"><span class="sep"></span>Behavioral Risk Score · 6 weighted dimensions</div>
     <div class="ti"><span class="sep"></span>Judge · Jury · Executor agent architecture</div>
     <div class="ti"><span class="sep"></span>Seccomp · Namespaces · cgroup v2 enforcement</div>
     <div class="ti"><span class="sep"></span>SHA-256 chained tamper-evident audit log</div>
@@ -1719,13 +1556,13 @@
     <div class="eyebrow">The Design Insight</div>
     <h2 class="section-title" style="font-size:clamp(36px,4vw,60px)">BEHAVIORAL<br>TRANSITIONS,<br>NOT EVENTS</h2>
     <p class="body-text">
-      An outbound connection preceding a dynamic TLS uprobe plaintext extraction event inside a suspicious process lineage matches an attack sequence. In isolation, the outbound socket connection is merely observed telemetry.
+      An <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">execve</code> following a privilege escalation inside an unexpected process lineage after a burst of <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">mmap</code> calls is an attack. The same <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">execve</code> in isolation is not.
     </p>
     <p class="body-text" style="margin-top:16px">
-      KB traces state transitions chronologically against dynamic rule patterns — enabling BPF LSM directory blocks (<code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">-EACCES</code>) and plaintext uprobe capture when processes navigate from Safe into Suspicious or Borderlands zones.
+      KB evaluates <strong>behavioral transitions over time</strong> across six weighted dimensions — enabling detection of sophisticated multi-stage attacks that appear innocuous at each individual step.
     </p>
     <p class="body-text" style="margin-top:16px">
-      The system simultaneously functions as a <strong>production-grade Ring 0 defensive sandbox</strong> and an <strong>immutable logging engine</strong>, enforcing security policies at the VFS layer while chaining cryptographic audit records.
+      The system simultaneously functions as a <strong>production-grade runtime defense platform</strong> and a <strong>research instrument</strong> for studying post-exploitation process behavior under live attack conditions.
     </p>
   </div>
 </section>
@@ -1755,7 +1592,7 @@
   <div class="stat r d2" data-index="03">
     <div class="stat-idx">03</div>
     <div class="stat-val">6</div>
-    <div class="stat-label">Weighted behavioral dimensions in the advisory scoring engine</div>
+    <div class="stat-label">Weighted behavioral dimensions in the scoring engine</div>
   </div>
   <div class="stat r d3" data-index="04">
     <div class="stat-idx">04</div>
@@ -3094,101 +2931,25 @@
   </div>
 
   <div class="team-grid r" style="margin-top:64px">
-    <!-- Pardhu -->
-    <div class="member" style="--accent-color:#bfff00; --accent-rgb:191,255,0;">
-      <div class="member-shine"></div>
-      <div class="card-header">
-        <span class="card-rarity">LEVEL 5 CLEARANCE</span>
-        <span class="card-id">#KB-01-PV</span>
-      </div>
+    <div class="member">
       <div class="member-initial">PV</div>
       <div class="member-name">Pardhu Varma</div>
-      <div class="member-class">KERNEL SYSTEMS ARCHITECT</div>
       <p class="member-domain">Systems Architecture · Linux Kernel · eBPF · Rust</p>
-      <div class="member-stats">
-        <div class="stat-row"><span class="stat-name">CORE telemetry hooks</span><span class="stat-val">12 / 12</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 100%;"></div></div>
-        <div class="stat-row"><span class="stat-name">Ring 0 LSM blocks</span><span class="stat-val">Enabled</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 100%;"></div></div>
-        <div class="stat-row"><span class="stat-name">Commits contributed</span><span class="stat-val">1,280+</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 90%;"></div></div>
-      </div>
-      <div class="member-owns">
-        <span class="member-own-tag">kb-core/</span>
-        <span class="member-own-tag">kb-checker/</span>
-      </div>
     </div>
-    <!-- Karthik -->
-    <div class="member" style="--accent-color:#ff4500; --accent-rgb:255,69,0;">
-      <div class="member-shine"></div>
-      <div class="card-header">
-        <span class="card-rarity">LEVEL 5 CLEARANCE</span>
-        <span class="card-id">#KB-02-KK</span>
-      </div>
+    <div class="member">
       <div class="member-initial">KK</div>
       <div class="member-name">Karthik</div>
-      <div class="member-class">AI SWARM & CONSENSUS ENG</div>
       <p class="member-domain">AI & Agentic Systems · MARL · Offensive Security</p>
-      <div class="member-stats">
-        <div class="stat-row"><span class="stat-name">Active agents swarm</span><span class="stat-val">5 / 5</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 100%;"></div></div>
-        <div class="stat-row"><span class="stat-name">Quorum accuracy</span><span class="stat-val">98.4%</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 98%;"></div></div>
-        <div class="stat-row"><span class="stat-name">Commits contributed</span><span class="stat-val">920+</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 72%;"></div></div>
-      </div>
-      <div class="member-owns">
-        <span class="member-own-tag">kb-aads/</span>
-        <span class="member-own-tag">marl/</span>
-      </div>
     </div>
-    <!-- Tejaswini -->
-    <div class="member" style="--accent-color:#39ff14; --accent-rgb:57,255,20;">
-      <div class="member-shine"></div>
-      <div class="card-header">
-        <span class="card-rarity">LEVEL 4 CLEARANCE</span>
-        <span class="card-id">#KB-03-KT</span>
-      </div>
+    <div class="member">
       <div class="member-initial">KT</div>
       <div class="member-name">Tejaswini</div>
-      <div class="member-class">DEFENSIVE SECURITY ENGINEER</div>
       <p class="member-domain">Control Plane · Defensive Security · TUI · Go</p>
-      <div class="member-stats">
-        <div class="stat-row"><span class="stat-name">Rules table parsed</span><span class="stat-val">19 dynamic</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 100%;"></div></div>
-        <div class="stat-row"><span class="stat-name">Database integrity</span><span class="stat-val">99.9%</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 99%;"></div></div>
-        <div class="stat-row"><span class="stat-name">Commits contributed</span><span class="stat-val">1,140+</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 82%;"></div></div>
-      </div>
-      <div class="member-owns">
-        <span class="member-own-tag">kb-control-plane/</span>
-        <span class="member-own-tag">kb-tui/</span>
-      </div>
     </div>
-    <!-- Rupa -->
-    <div class="member" style="--accent-color:#ffb000; --accent-rgb:255,176,0;">
-      <div class="member-shine"></div>
-      <div class="card-header">
-        <span class="card-rarity">LEVEL 4 CLEARANCE</span>
-        <span class="card-id">#KB-04-KR</span>
-      </div>
+    <div class="member">
       <div class="member-initial">KR</div>
       <div class="member-name">Rupa</div>
-      <div class="member-class">FRONTEND INTERFACE DESIGNER</div>
       <p class="member-domain">Dashboard · Frontend Engineering · UI/UX · CLI</p>
-      <div class="member-stats">
-        <div class="stat-row"><span class="stat-name">Rendering performance</span><span class="stat-val">144 FPS</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 100%;"></div></div>
-        <div class="stat-row"><span class="stat-name">WebSocket latency</span><span class="stat-val">&lt;2ms</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 95%;"></div></div>
-        <div class="stat-row"><span class="stat-name">Commits contributed</span><span class="stat-val">750+</span></div>
-        <div class="stat-bar"><div class="stat-fill" style="--target-width: 60%;"></div></div>
-      </div>
-      <div class="member-owns">
-        <span class="member-own-tag">kb-dashboard/</span>
-        <span class="member-own-tag">WebSockets</span>
-      </div>
     </div>
   </div>
 </section>
@@ -3357,27 +3118,6 @@
   // Hero parallax
   const ht=document.querySelector('.hero-title');
   window.addEventListener('scroll',()=>{if(ht)ht.style.transform=`translateY(${window.scrollY*.14}px)`;},{passive:true});
-
-  // 3D Card Tilt & Glare
-  document.querySelectorAll('.member').forEach(card => {
-    card.addEventListener('mousemove', e => {
-      const rect = card.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const w = rect.width;
-      const h = rect.height;
-      const rotateX = ((y / h) - 0.5) * -16;
-      const rotateY = ((x / w) - 0.5) * 16;
-      card.style.setProperty('--mouse-x', `${(x / w) * 100}%`);
-      card.style.setProperty('--mouse-y', `${(y / h) * 100}%`);
-      card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.04, 1.04, 1.04)`;
-    });
-    card.addEventListener('mouseleave', () => {
-      card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)';
-      card.style.setProperty('--mouse-x', '50%');
-      card.style.setProperty('--mouse-y', '50%');
-    });
-  });
 </script>
 </body>
 </html>
