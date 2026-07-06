@@ -56,12 +56,19 @@ We recommend implementing this detection out-of-band on the Go Control Plane or 
 
 ```mermaid
 graph TD
-    KBCore[kb-core Sensor] -->|UDS Bridge / Packed Structs| GoIPC[Go Control Plane IPC]
-    GoIPC -->|Ingest Stream| sliding_window[L1 Sliding Window Memory Cache]
-    sliding_window -->|Aggregate deltas/volumes| stats_calc[Statistical Profiler]
-    stats_calc -->|Compute Entropy / CUSUM| anomaly_eval[Anomaly Evaluator]
-    anomaly_eval -->|Threshold Crossed| alert[Raise Threat Level to SUSPICIOUS/BORDERLANDS]
-    anomaly_eval -->|Clear| stats_calc
+    KBCore["kb-core Sensor"]
+    GoIPC["Go Control Plane IPC"]
+    SlidingWindow["L1 Sliding Window Memory Cache"]
+    StatsCalc["Statistical Profiler"]
+    AnomalyEval["Anomaly Evaluator"]
+    Alert["Raise Threat Level<br/>SUSPICIOUS / BORDERLANDS"]
+
+    KBCore -->|"UDS Bridge / Packed Structs"| GoIPC
+    GoIPC -->|"Ingest Stream"| SlidingWindow
+    SlidingWindow -->|"Aggregate deltas & volumes"| StatsCalc
+    StatsCalc -->|"Compute Entropy / CUSUM"| AnomalyEval
+    AnomalyEval -->|"Threshold Crossed"| Alert
+    AnomalyEval -->|"Clear"| StatsCalc
 ```
 
 ### Go Implementation Example (L1 sliding window metrics)
