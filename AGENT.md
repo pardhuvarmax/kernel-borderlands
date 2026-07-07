@@ -30,6 +30,21 @@ Always adhere to these engineering invariants. Any code change violating them is
 - **IPC Interface**: Communication between the native userspace bridge and the Go control plane is over `/run/kb/kbd.sock`.
 - **Privilege Separation**: The UDS socket must reside in `/run/kb/` rather than `/var/run/` to enable the Go control plane daemon to run without root privileges, while remaining writable by the root-level eBPF userspace bridge sensor using `0666` permissions.
 
+### D. eBPF Telemetry Rate Limiting
+- **Process-Level (TGID-based)**: Throttling/rate-limiting must operate at the Per-Process level rather than thread-level to prevent bypasses via worker thread spawning.
+- **Hybrid Storage Model**:
+  - **Primary**: BPF Task Local Storage (`BPF_MAP_TYPE_TASK_STORAGE`) on compatible kernels (Linux 5.11+).
+  - **Fallback**: BPF LRU Hash Map (`BPF_MAP_TYPE_LRU_HASH`) keyed by composite `tgid` + `start_time` on Linux 5.8 to 5.10.
+- **Overload Handling**: Tier 1 critical events (privilege changes, LSM denials) bypass rate-limiting; Tier 2 routine events are throttled and aggregated.
+
+### E. Safety Engine & Lua Absence
+- **No Lua**: The codebase does not execute, parse, or evaluate Lua scripts. No Lua sandbox, AST parser, or REPL console is present.
+- **Safety Engine**: Subsystem `kb-checker` is a Rust-native safety layer checking loaded eBPF bytecode signatures, Go UDS socket health, and Ray cluster worker configurations.
+
+### F. Operator Interfaces Layout
+- **Location**: All operator interface clients must reside within the `kb-op/` directory (`kb-op/kb-dashboard/`, `kb-op/kb-tui/`, `kb-op/kbctl/`, `kb-op/kb-mcp/`).
+- **Separation of Concerns**: Operator clients are thin wrappers routing requests over gRPC to the central control plane daemon. No scoring or active containment logics are duplicated.
+
 ---
 
 ## 3. Standard Verification Workflows

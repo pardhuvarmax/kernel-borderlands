@@ -44,10 +44,6 @@ This document defines standard build, run, test, and style conventions for the K
   ```bash
   ./target/release/kb-checker monitor --all
   ```
-- **Run Self-Diagnostics**:
-  ```bash
-  ./target/release/kb-checker service --all
-  ```
 - **Run Unit Tests**:
   ```bash
   cargo test
@@ -99,6 +95,16 @@ This document defines standard build, run, test, and style conventions for the K
 - **Run MCP Server**:
   ```bash
   cd kb-op/kb-mcp && ./kb-mcp
+  ```
+
+### H. `kbctl` (Command Line Client)
+- **Build CLI Client**:
+  ```bash
+  cd kb-op/kbctl && go build -o kbctl main.go
+  ```
+- **Reload Policies**:
+  ```bash
+  ./kbctl policy reload
   ```
 
 ---
