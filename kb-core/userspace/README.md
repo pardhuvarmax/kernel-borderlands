@@ -18,7 +18,7 @@ The userspace runtime of `kb-core` is written in C for maximum performance and l
 *   **`kb_evidence.c`**: Implements state storage for evidence flags and sequence logs.
 
 ### 3. `bridge/` (IPC Unix Socket Client)
-*   **`kb_bridge.c`**: Implements connection heartbeats and binary serialization to forward process states and zone transitions to the Go Control Plane over `/tmp/kbd.sock`. Handles binary packing and headers.
+*   **`kb_bridge.c`**: Implements connection heartbeats and binary serialization to forward process states and zone transitions to the Go Control Plane over `/run/kb/kbd.sock`. Handles binary packing and headers.
 
 ---
 

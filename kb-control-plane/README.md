@@ -13,7 +13,7 @@ To handle high-throughput system events without adding I/O latency:
 *   **Cold-Start Recovery**: Rebuilds L1 memory state from L2 SQLite database upon daemon restart to preserve context.
 
 ### 2. IPC Wire Protocol (Unix Domain Socket Bridge)
-Communicates with `kbd_sensor` over `/tmp/kbd.sock` (formerly `/var/run/kbd.sock`):
+Communicates with `kbd_sensor` over `/run/kb/kbd.sock` (formerly `/var/run/kbd.sock`):
 *   **Header Magic**: `0x4B42` (Little Endian).
 *   **Wire Version**: `3`.
 *   **Packed Structural Layouts**:

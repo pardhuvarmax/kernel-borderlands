@@ -65,7 +65,7 @@ Three high-value telemetry hooks were added at Ring 0:
 ---
 
 ## 4. Pipeline Validation & Test Run
-We verified the complete pipeline by running `kbd` (pointing to `data/state.db`) and `kbd_sensor` (connected via `/tmp/kbd.sock`) alongside the `test_all_hooks.sh` test suite:
+We verified the complete pipeline by running `kbd` (pointing to `data/state.db`) and `kbd_sensor` (connected via `/run/kb/kbd.sock`) alongside the `test_all_hooks.sh` test suite:
 *   **Bridge Handshake**: Go successfully transmitted `19 dynamic rules` to the C sensor at startup.
 *   **Telemetry Capture**: The eBPF sensor successfully intercepted file opens (`/etc/shadow`, `/etc/passwd`, `/etc/sudoers` flagged `🔴 SENSITIVE`), python socket binds (`0.0.0.0:9999`), and privilege capability probes.
 *   **Durable Audit Logs**: SQLite WAL logs grew to **642 KB** during the test run, verifying active writes. The `audit_log` successfully generated sequentially hashed, cryptographically chained entries pointing back to the `genesis` record.

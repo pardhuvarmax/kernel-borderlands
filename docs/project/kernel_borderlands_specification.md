@@ -21,7 +21,7 @@ Kernel Borderlands (KB) is a multi-tier, zero-overhead threat detection and acti
                                   |    (L1 sync.Map / L2 SQLite WAL)   |
                                   +------------------------------------+
                                     ^                                ^
-             (UDS Bridge /tmp/kbd.sock)                              | (gRPC Port 50051)
+             (UDS Bridge /run/kb/kbd.sock)                              | (gRPC Port 50051)
                                     v                                v
 +---------------------------------------+                  +-------------------+
 |  kb-core: Native Userspace C Sensor   |                  |  kb-tui: Bubble   |
@@ -532,7 +532,7 @@ Where:
 
 ## 6. IPC Unix Socket Bridge Protocol
 
-The communication bridge client (`kb_bridge.c` to `listener.go`) serializes process records and streams them over the local Unix Domain Socket `/tmp/kbd.sock`.
+The communication bridge client (`kb_bridge.c` to `listener.go`) serializes process records and streams them over the local Unix Domain Socket `/run/kb/kbd.sock`.
 
 ### A. Wire Frame Layouts
 ```
@@ -734,7 +734,7 @@ It validates the runtime state of loaded eBPF programs. The engine queries the k
 
 ### B. Control Plane & Swarm Monitoring
 The check daemon runs continuous local check probes to monitor:
-1. **Control Plane Daemon**: Validates health endpoints, memory utilization, and socket availability for `/tmp/kbd.sock`.
+1. **Control Plane Daemon**: Validates health endpoints, memory utilization, and socket availability for `/run/kb/kbd.sock`.
 2. **AADS Subsystem**: Queries the agent swarm's consensus pipeline and local communication ports to ensure patroller, hunter, and healer agents are alive.
 3. **Execution Gateways**: Performs test calls through execution endpoints to verify quarantine and containment services remain responsive.
 
@@ -925,7 +925,7 @@ To ensure system stability, dynamic verification, and verifier safety, all engin
 *   **Implementation Pattern**: Use the `l2Done chan struct{}` completion channel and block `Close()` until the background worker has terminated.
 
 ### D. Local IPC Unix Socket Privilege Isolation
-*   **Convention**: To allow local development and testing to execute without superuser/root privileges, IPC socket endpoints (such as `kbd.sock`) should default to `/tmp/kbd.sock` rather than `/var/run/kbd.sock`. This enables running the Go daemon under a standard user account while keeping `/tmp/kbd.sock` writable by the root-run C sensor.
+*   **Convention**: To allow local development and testing to execute without superuser/root privileges, IPC socket endpoints (such as `kbd.sock`) should default to `/run/kb/kbd.sock` rather than `/var/run/kbd.sock`. This enables running the Go daemon under a standard user account while keeping `/run/kb/kbd.sock` writable by the root-run C sensor.
 
 ### E. Non-Blocking Sudo Wrappers for Integration Scripts
 *   **Constraint**: Automated or runner-triggered testing scripts must never block indefinitely on `sudo` password prompts. Use a timeout-based shell wrapper (`read -t 5` or checks like `sudo -n true`) to fallback gracefully.
@@ -962,7 +962,7 @@ Manages Unix domain socket connections and serialization contracts.
 
 #### 1. Functions & Signatures
 *   `func Listen(path string) (*Listener, error)`
-    -   *Inputs*: `path` Unix domain socket string (e.g. `/tmp/kbd.sock`).
+    -   *Inputs*: `path` Unix domain socket string (e.g. `/run/kb/kbd.sock`).
     -   *Outputs*: `*Listener` handle, `error`.
     -   *Description*: Binds to the Unix domain socket, sets file permissions to `0666` (writeable by all users), and starts the execution thread.
 *   `func SendRulesPayload(conn net.Conn, path string) error`
@@ -978,7 +978,7 @@ This appendix documents every C API function, loop polling, and behavior structu
 
 ### A. Program `sensor` (`userspace/sensor/`)
 *   `int main(int argc, char **argv)`
-    -   *Description*: Daemon entrypoint. Registers termination signals (`SIGINT`, `SIGTERM`), connects to the control plane Unix socket bridge (`/tmp/kbd.sock`), loads the compiled BPF skeleton, attaches uprobes/tracepoints, and enters the ring buffer poll loop.
+    -   *Description*: Daemon entrypoint. Registers termination signals (`SIGINT`, `SIGTERM`), connects to the control plane Unix socket bridge (`/run/kb/kbd.sock`), loads the compiled BPF skeleton, attaches uprobes/tracepoints, and enters the ring buffer poll loop.
 *   `int handle_event(void *ctx, void *data, size_t data_sz)`
     -   *Description*: Ring buffer callback. Receives raw `struct kb_event_t` packets, normalizes metrics, updates process lineages, and evaluates behavior transitions.
 *   `int find_elf_symbol_offset(const char *elf_path, const char *symbol_name)`
