@@ -74,7 +74,7 @@ We use this space for official announcements, roadmap updates, and technical cha
 
 - 📖 **Documentation & Wikis**: Refer to our [Project Wiki](https://github.com/pardhuvarmax/kernel-borderlands/wiki) for deep-dive architecture specs.
 - 🎨 **Project Website**: Check out the official product/landing page locally at `docs/index.html`.
-- 🛠️ **Specification**: Read `docs/project/kernel_borderlands_specification.md` for raw system constraints.
+- 🛠️ **Specification**: Read `docs/specdocs/kernel_borderlands_specification.md` for raw system constraints.
 
 ---
 

@@ -8,7 +8,7 @@ This document serves as the primary operational context and state manual for AI 
 
 - **Test Ingestion Constraint**: Never pass or encode passwords inside test arguments or prompts (specifically in `test_all_hooks.sh`). Test routines must run passwordlessly or prompt with short timeouts that fall back gracefully rather than hanging.
 - **Git Tracking Exclusions**: Do NOT stage or commit the local agent work files under [docs/AGENT_WORK/](file:///home/emergence/Desktop/kernel-borderlands/docs/AGENT_WORK). These files must remain local to the development workspace.
-- **Master Specification**: The authoritative technical reference for all subsystems resides in [docs/project/kernel_borderlands_specification.md](file:///home/emergence/Desktop/kernel-borderlands/docs/project/kernel_borderlands_specification.md). Keep this file's length at or above 1500 lines to preserve implementation guides.
+- **Master Specification**: The authoritative technical reference for all subsystems resides in [docs/specdocs/kernel_borderlands_specification.md](file:///home/emergence/Desktop/kernel-borderlands/docs/specdocs/kernel_borderlands_specification.md). Keep this file's length at or above 1500 lines to preserve implementation guides.
 
 ---
 
