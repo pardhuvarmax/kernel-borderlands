@@ -1,6 +1,6 @@
 # KB Operator Interfaces (`kb-op/`)
 
-This directory houses the administrative interfaces, dashboards, and API servers used by security operators to monitor, audit, and coordinate threat containment actions within Kernel Borderlands.
+This directory houses the administrative interfaces, dashboards, API servers, and command-line clients used by security operators to monitor, audit, and coordinate threat containment actions within Kernel Borderlands.
 
 ---
 
@@ -12,6 +12,7 @@ flowchart TD
         TUI[kb-tui / SSH Console]
         Dash[kb-dashboard / Web UI]
         MCP[kb-mcp / MCP Server]
+        CLI[kbctl / CLI Client]
     end
     
     subgraph Control Plane
@@ -23,6 +24,7 @@ flowchart TD
     TUI -->|gRPC Requests| gRPC
     Dash -->|Websocket Stream| WS
     MCP -->|JSON-RPC Tools| gRPC
+    CLI -->|gRPC Requests| gRPC
     gRPC --> KBD
     WS --> KBD
 ```
@@ -40,6 +42,10 @@ flowchart TD
 ### C. MCP Integration Server (`kb-mcp/`)
 - **Description**: Model Context Protocol (MCP) server written in Go or Rust.
 - **Features**: Exposes standardized tools, resources, and prompt templates (e.g. `kb.get_process`, `kb.list_anomalies`, `kb.quarantine_process`) to external LLM clients, agent swarms, and IDE environments.
+
+### D. Command-Line Client (`kbctl/`)
+- **Description**: Cobra-based CLI client built with Go to interface directly with the control plane gRPC API.
+- **Features**: Supports dynamic policy reloads, manual threat zone overrides, process isolation containment, and SHA-256 audit ledger exports.
 
 ---
 
@@ -82,6 +88,18 @@ go build -o kb-mcp main.go
 
 # Run the server (JSON-RPC over stdio)
 ./kb-mcp
+```
+
+### Building the kbctl Command Line Client
+```bash
+# Navigate to kbctl directory
+cd kb-op/kbctl
+
+# Build the CLI binary
+go build -o kbctl main.go
+
+# Verify connection by triggering a policy reload
+./kbctl policy reload
 ```
 
 ---

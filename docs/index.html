@@ -1696,11 +1696,11 @@
       </div>
       <div class="layer-body">
         <div class="layer-name">Operator Interface</div>
-        <div class="layer-desc">React + TypeScript dashboard for real-time zone distribution, per-process behavioral scores, and swarm topology visualization via D3.js force graph over WebSockets. The <code style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--volt)">kbctl</code> CLI exposes the full gRPC API for scripted management. kb-tui provides SSH-accessible terminal interface via Bubble Tea + Wish.</div>
+        <div class="layer-desc">React + TypeScript dashboard, bubble tea tui, and mcp server for real-time zone distribution, per-process behavioral scores, and swarm topology visualization via D3.js force graph, ssh operator access, and mcp (as a standardized API gateway for AI agents) over WebSockets. The <code style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--volt)">kbctl</code> CLI exposes the full gRPC API for scripted management. kb-tui provides SSH-accessible terminal interface via Bubble Tea + Wish.</div>
         <div class="layer-tags">
           <span class="ltag">React 18 · TypeScript 5</span>
           <span class="ltag">D3.js · Recharts</span>
-          <span class="ltag">WebSockets</span>
+          <span class="ltag">WebSockets · MCP</span>
           <span class="ltag">kbctl CLI</span>
           <span class="ltag">Bubble Tea · Wish</span>
         </div>
@@ -2567,8 +2567,8 @@
     </div>
     <div class="pipe-link"><span class="pipe-tag">WebSocket</span></div>
     <div class="pipe-node">
-      <div class="pipe-node-name">Dashboard</div>
-      <div class="pipe-node-sub">Operator</div>
+      <div class="pipe-node-name">Operator Console</div>
+      <div class="pipe-node-sub">Dashboard + CobraCLI (kbctl) + TUI + MCP</div>
     </div>
   </div>
 
@@ -2606,7 +2606,7 @@
   <div class="r stack-header-row">
     <div>
       <div class="eyebrow">Repository Structure</div>
-      <h2 class="section-title">EIGHT<br>SUBSYSTEMS</h2>
+      <h2 class="section-title">SEVEN<br>SUBSYSTEMS</h2>
     </div>
     <p class="stack-intro-note">Each subsystem owns a complete vertical slice of the stack. No shared mutable state across boundaries. Full contributor workflow in <code style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--volt)">docs/</code>.</p>
   </div>
@@ -2615,7 +2615,7 @@
 
     <div class="subsys">
       <div class="ss-left">
-        <div class="ss-index">01</div>
+        <div class="ss-index">S01</div>
         <div class="ss-dir">kb-core/</div>
       </div>
       <div class="ss-body">
@@ -2641,7 +2641,7 @@
 
     <div class="subsys">
       <div class="ss-left">
-        <div class="ss-index">02</div>
+        <div class="ss-index">S02</div>
         <div class="ss-dir">kb-control-plane/</div>
       </div>
       <div class="ss-body">
@@ -2667,7 +2667,7 @@
 
     <div class="subsys">
       <div class="ss-left">
-        <div class="ss-index">03</div>
+        <div class="ss-index">S03</div>
         <div class="ss-dir">kb-aads/</div>
       </div>
       <div class="ss-body">
@@ -2692,7 +2692,7 @@
 
     <div class="subsys">
       <div class="ss-left">
-        <div class="ss-index">04</div>
+        <div class="ss-index">S04a</div>
         <div class="ss-dir">kb-op/kb-dashboard/</div>
       </div>
       <div class="ss-body">
@@ -2716,9 +2716,35 @@
       </div>
     </div>
 
+     <!-- Surface 02: kbctl -->
+      <div class="subsys">
+        <div class="ss-left">
+          <div class="ss-index">S04b</div>
+          <div class="ss-dir">kb-op/kbctl/</div>
+        </div>
+        <div class="ss-body">
+          <div class="ss-name">kbctl</div>
+          <p class="ss-desc">The full Control Plane gRPC API from the shell. Policy reload, manual zone override, process isolation, audit export. Designed for scripted playbooks, CI pipelines, and rapid incident automation — every operation is a typed protobuf call.</p>
+          <div class="ss-tags">
+            <span class="ss-tag">Go</span>
+            <span class="ss-tag">Cobra</span>
+            <span class="ss-tag">gRPC</span>
+            <span class="ss-tag">protobuf</span>
+          </div>
+        </div>
+        <div class="ss-right">
+          <span class="ss-lang-badge">Go · Cobra</span>
+          <div class="ss-signal">
+            <div class="ss-signal-line" style="animation-delay:1.5s;animation-duration:2.8s"></div>
+            <div class="ss-signal-pulse" style="animation-delay:1.5s;animation-duration:2.8s"></div>
+          </div>
+          <span class="ss-status"><span class="ss-status-dot" style="animation-delay:1.6s"></span>in dev</span>
+        </div>
+      </div>
+
     <div class="subsys">
       <div class="ss-left">
-        <div class="ss-index">05</div>
+        <div class="ss-index">S04c</div>
         <div class="ss-dir">kb-op/kb-tui/</div>
       </div>
       <div class="ss-body">
@@ -2743,7 +2769,7 @@
 
     <div class="subsys">
       <div class="ss-left">
-        <div class="ss-index">06</div>
+        <div class="ss-index">S04d</div>
         <div class="ss-dir">kb-op/kb-mcp/</div>
       </div>
       <div class="ss-body">
@@ -2768,7 +2794,7 @@
 
     <div class="subsys">
       <div class="ss-left">
-        <div class="ss-index">07</div>
+        <div class="ss-index">S05</div>
         <div class="ss-dir">kb-checker/</div>
       </div>
       <div class="ss-body">
@@ -2792,7 +2818,7 @@
 
     <div class="subsys">
       <div class="ss-left">
-        <div class="ss-index">08</div>
+        <div class="ss-index">S06</div>
         <div class="ss-dir">docs/</div>
       </div>
       <div class="ss-body">
@@ -2816,7 +2842,7 @@
 
     <div class="subsys">
       <div class="ss-left">
-        <div class="ss-index">09</div>
+        <div class="ss-index">S07</div>
         <div class="ss-dir">scripts/</div>
       </div>
       <div class="ss-body">
@@ -2864,7 +2890,7 @@
       <!-- Surface 01: Dashboard -->
       <div class="ops-surface">
         <div class="ops-surf-idx">
-          <span class="ops-surf-num">01</span>
+          <span class="ops-surf-num">S04a</span>
           <div class="ops-surf-vline"></div>
         </div>
         <div class="ops-surf-body">
@@ -2889,7 +2915,7 @@
       <!-- Surface 02: kbctl -->
       <div class="ops-surface">
         <div class="ops-surf-idx">
-          <span class="ops-surf-num">02</span>
+          <span class="ops-surf-num">S04b</span>
           <div class="ops-surf-vline"></div>
         </div>
         <div class="ops-surf-body">
@@ -2914,7 +2940,7 @@
       <!-- Surface 03: kb-tui -->
       <div class="ops-surface">
         <div class="ops-surf-idx">
-          <span class="ops-surf-num">03</span>
+          <span class="ops-surf-num">S04c</span>
           <div class="ops-surf-vline"></div>
         </div>
         <div class="ops-surf-body">
@@ -2939,7 +2965,7 @@
       <!-- Surface 04: kb-mcp -->
       <div class="ops-surface">
         <div class="ops-surf-idx">
-          <span class="ops-surf-num">04</span>
+          <span class="ops-surf-num">S04d</span>
           <div class="ops-surf-vline"></div>
         </div>
         <div class="ops-surf-body">
