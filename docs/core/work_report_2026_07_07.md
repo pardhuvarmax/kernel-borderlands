@@ -2,7 +2,7 @@
 
 * **Date**: July 7, 2026
 * **Lead Engineer**: K. Pardhu (Systems & Security Lead)
-* **Role**: Systems Architecture, Linux Kernel Development, & Safety Integrity Coordinator
+* **Role**: Architecture, Linux Kernel-Adjacent Development, & Safety Systems
 
 ---
 
