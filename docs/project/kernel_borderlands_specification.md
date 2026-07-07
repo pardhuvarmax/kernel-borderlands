@@ -825,7 +825,7 @@ go build -o kb-tui cmd/main.go
     cd kb-control-plane
     ./kbd --db data/state.db
     ```
-2.  **Launch eBPF Sensor** (requires root/sudo, uses password `pardhu19k`):
+2.  **Launch eBPF Sensor** (requires root/sudo):
     ```bash
     cd kb-core
     sudo ./build/kbd_sensor
