@@ -73,7 +73,7 @@ We post bi-weekly development progress, design alignment outcomes, sprint summar
 ## 📚 Essential Resources
 
 - 📖 **Documentation & Wikis**: Refer to our [Project Wiki](https://github.com/pardhuvarmax/kernel-borderlands/wiki) for deep-dive architecture specs.
-- 🎨 **Landing Page**: Check out our visual dashboard layout locally at `docs/index.html`.
+- 🎨 **Project Website**: Check out the official product/landing page locally at `docs/index.html`.
 - 🛠️ **Specification**: Read `docs/project/kernel_borderlands_specification.md` for raw system constraints.
 
 ---

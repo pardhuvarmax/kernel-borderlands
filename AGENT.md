@@ -37,5 +37,5 @@ Always adhere to these engineering invariants. Any code change violating them is
 Before declaring any task complete, perform these sanity checks:
 1. Ensure the eBPF hooks build successfully (`cd kb-core && make`).
 2. Run safety/integrity diagnostics (`cd kb-checker && cargo test`).
-3. Verify that changes to the landing page [docs/index.html](file:///home/emergence/Desktop/kernel-borderlands/docs/index.html) do not introduce layout shifts or break compatibility with simple card formats.
+3. Verify that changes to the project website [docs/index.html](file:///home/emergence/Desktop/kernel-borderlands/docs/index.html) do not introduce layout shifts or break compatibility with simple card formats.
 4. Run `git status` to ensure `docs/AGENT_WORK/` remains untracked and that all files are committed cleanly.
