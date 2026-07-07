@@ -26,12 +26,14 @@ No modifications were made to the core eBPF C loader (`kb-core`), the Go control
 
 ### B. Specification Refactoring (`docs/specdocs/`)
 * Isolated platform specs from general markdown files by creating the `docs/specdocs/` folder.
-* Relocated the following specifications:
+* Authored a new specification documents:
+  * [docs/specdocs/operator_interfaces_spec.md](../specdocs/operator_interfaces_spec.md) — Outlines the four operator surfaces (Dashboard, CLI, TUI, MCP) and details the rationale for using four distinct interfaces to provide graceful access degradation.
+  * [docs/specdocs/safety_integrity_design_spec.md](../specdocs/safety_integrity_design_spec.md) — Outlines Safety Design and Rust Engine Audit Features.
+  * [docs/specdocs/ebpf_rate_limiting_design_spec.md](../specdocs/ebpf_rate_limiting_design_spec.md) — Outlines Ring 0 Telemetry Throttling, etc.
+* Relocated the following specifications to `docs/specdocs/`:
   * `kernel_borderlands_specification.md` (Master Specification)
   * `safety_integrity_design_spec.md` (Safety Engine Audits)
   * `ebpf_rate_limiting_design_spec.md` (Ring 0 Telemetry Throttling)
-* Authored a new specification document:
-  * [docs/specdocs/operator_interfaces_spec.md](../specdocs/operator_interfaces_spec.md) — Outlines the four operator surfaces (Dashboard, CLI, TUI, MCP) and details the rationale for using four distinct interfaces to provide graceful access degradation.
 * Created a folder directory catalog index at [docs/specdocs/README.md](../specdocs/README.md).
 
 ### C. Project Website Updates (`docs/index.html`)
@@ -47,7 +49,7 @@ No modifications were made to the core eBPF C loader (`kb-core`), the Go control
   * Aligned links, paths, and maintainer roles in `Home.md`, `Team.md`, `_Sidebar.md.md`, `kb-tui.md`, `kb-dashboard.md`, and `Contributing.md`.
 
 ### E. Permanent Guidelines & Agent Memory
-* Updated the permanent developer guidelines guide at [kernel-borderlands.md](../../.gemini/antigravity-cli/knowledge/kernel-borderlands.md):
+* Updated the permanent developer guidelines guide at kernel-borderlands.md:
   * Corrected IPC Unix Socket target paths to `/run/kb/kbd.sock`.
   * Appended **Section 9** detailing the Per-Process (TGID-based) rate-limiting token bucket and hybrid map configurations.
   * Appended **Section 10** confirming the complete absence of Lua interpreters or REPL features in Kernel Borderlands.
