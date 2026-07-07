@@ -73,6 +73,10 @@ Used as a fallback for older kernels (Linux 5.8 to 5.10).
 - **Pros**: Widely compatible. Bounded memory limits prevent kernel leaks, and stale entries are evicted automatically under memory pressure.
 - **Cons**: Introduces global hash lookup latency on every event, and LRU eviction can trigger state loss during heavy event storms.
 
+### C. Granularity: Per-Process (TGID) vs. Per-Thread (PID) Keying
+- **Decision**: Rate-limiting limits and token buckets are applied at the **Per-Process (TGID)** level.
+- **Rationale**: Since Kernel Borderlands evaluates state transitions and executes security/containment policies (e.g., LSM file blocks, CPU restrictions, or SIGKILL terminations) at the process/application level, the rate limiter keys metrics by TGID. This prevents multi-threaded processes from bypassing thread-level rate limits by spawning additional worker threads, and ensures an event storm in one thread throttles telemetry for the entire application, saving system resources.
+
 ---
 
 ## 5. Kernel-Space Map Layout
