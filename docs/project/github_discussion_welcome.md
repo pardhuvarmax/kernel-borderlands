@@ -47,6 +47,29 @@ Check out our [[Wiki]] and `docs/project/kb-team.md` for team ownership maps. If
 
 ---
 
+## 💻 Developer & Core Team Collaboration
+
+This discussion board is also the primary medium for **core developer coordination, RFDs (Requests for Discussion), and roadmap alignment**. 
+
+### 1. 📂 RFCs & Technical RFDs
+Core team members and contributors post design proposals under the **RFCs (Requests for Comments)** category. Use this to debate:
+- Memory layouts, sync map optimizations, and performance parameters.
+- Protocol buffer wire changes and API definitions.
+- eBPF verifier limitations and kernel compatibility issues.
+
+### 2. 📋 Subsystem Development Channels
+For coordination on specific components, filter discussions by tags:
+- `#kb-core` — for kernel hooks, memory safety, and C sensors.
+- `#kb-control-plane` — for Go-level event ingestion and L1/L2 database flushes.
+- `#kb-op` — for React Dashboards, SSH Wish TUIs, and MCP servers.
+- `#kb-checker` — for Rust diagnostics and runtime verification scripts.
+- `#kb-aads` — for multi-agent coordination, ZeroMQ pipelines, and models.
+
+### 3. 📅 Development Syncs & Release Notes
+We post bi-weekly development progress, design alignment outcomes, sprint summaries, and tag releases here. We encourage community review on all proposed API breaking changes before they are merged.
+
+---
+
 ## 📚 Essential Resources
 
 - 📖 **Documentation & Wikis**: Refer to our [Project Wiki](https://github.com/pardhuvarmax/kernel-borderlands/wiki) for deep-dive architecture specs.
