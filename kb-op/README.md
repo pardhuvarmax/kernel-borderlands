@@ -8,24 +8,24 @@ This directory houses the administrative interfaces, dashboards, API servers, an
 
 ```mermaid
 flowchart TD
-    subgraph kb-op (Operator Subsystem)
-        TUI[kb-tui / SSH Console]
-        Dash[kb-dashboard / Web UI]
-        MCP[kb-mcp / MCP Server]
-        CLI[kbctl / CLI Client]
+    subgraph kb_op ["kb-op (Operator Subsystem)"]
+        TUI["kb-tui / SSH Console"]
+        Dash["kb-dashboard / Web UI"]
+        MCP["kb-mcp / MCP Server"]
+        CLI["kbctl / CLI Client"]
     end
     
-    subgraph Control Plane
-        KBD[Go Control Plane Daemon]
-        gRPC(gRPC / Port 50051)
-        WS(WebSockets)
+    subgraph control_plane ["Control Plane"]
+        KBD["Go Control Plane Daemon"]
+        gRPC_Node["gRPC / Port 50051"]
+        WS["WebSockets"]
     end
     
-    TUI -->|gRPC Requests| gRPC
+    TUI -->|gRPC Requests| gRPC_Node
     Dash -->|Websocket Stream| WS
-    MCP -->|JSON-RPC Tools| gRPC
-    CLI -->|gRPC Requests| gRPC
-    gRPC --> KBD
+    MCP -->|JSON-RPC Tools| gRPC_Node
+    CLI -->|gRPC Requests| gRPC_Node
+    gRPC_Node --> KBD
     WS --> KBD
 ```
 
