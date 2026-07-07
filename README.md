@@ -23,6 +23,7 @@ The project combines kernel observability, behavioral analytics, distributed age
 | `kb-aads/`          | Python             | Autonomous Agent Defense Swarm (AADS), behavioral reasoning, and MARL infrastructure.  |
 | `kb-op/kb-dashboard/` | React / TypeScript | Web dashboard for visualization and monitoring.                                        |
 | `kb-op/kb-tui/`       | Go                 | Terminal-based management interface built with Bubble Tea.                             |
+| `kb-op/kb-mcp/`       | Go / Rust          | Model Context Protocol (MCP) server for AI agent tool integration.                     |
 | `kb-checker/`       | Rust               | Script analysis and safety verification engine.                                        |
 | `docs/`             | Markdown / PDF     | Technical documentation, architecture, installation guides, and project papers.        |
 | `scripts/`          | Bash / Python      | Installation utilities, automation, testing, and attack-lab tooling.                   |

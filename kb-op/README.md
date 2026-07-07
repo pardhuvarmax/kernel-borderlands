@@ -1,6 +1,6 @@
 # KB Operator Interfaces (`kb-op/`)
 
-This directory houses the administrative interfaces and dashboards used by security operators to monitor, audit, and coordinate threat containment actions within Kernel Borderlands.
+This directory houses the administrative interfaces, dashboards, and API servers used by security operators to monitor, audit, and coordinate threat containment actions within Kernel Borderlands.
 
 ---
 
@@ -11,16 +11,18 @@ flowchart TD
     subgraph kb-op (Operator Subsystem)
         TUI[kb-tui / SSH Console]
         Dash[kb-dashboard / Web UI]
+        MCP[kb-mcp / MCP Server]
     end
     
     subgraph Control Plane
-        KBD[kbd Daemon]
+        KBD[Go Control Plane Daemon]
         gRPC(gRPC / Port 50051)
         WS(WebSockets)
     end
     
     TUI -->|gRPC Requests| gRPC
     Dash -->|Websocket Stream| WS
+    MCP -->|JSON-RPC Tools| gRPC
     gRPC --> KBD
     WS --> KBD
 ```
@@ -34,6 +36,10 @@ flowchart TD
 - **Description**: A modern React-based visualization panel compiled with Vite and TypeScript.
 - **Features**: Interactive force-directed process swarm graphs (D3.js), historical threat-level distribution charts (Recharts), and low-latency state synchronization.
 - **Port**: Development runs on port `5173`.
+
+### C. MCP Integration Server (`kb-mcp/`)
+- **Description**: Model Context Protocol (MCP) server written in Go or Rust.
+- **Features**: Exposes standardized tools, resources, and prompt templates (e.g. `kb.get_process`, `kb.list_anomalies`, `kb.quarantine_process`) to external LLM clients, agent swarms, and IDE environments.
 
 ---
 
@@ -64,6 +70,18 @@ npm install
 
 # Run Vite dev server
 npm run dev
+```
+
+### Running the MCP Host Server
+```bash
+# Navigate to MCP directory
+cd kb-op/kb-mcp
+
+# Build the MCP server binary
+go build -o kb-mcp main.go
+
+# Run the server (JSON-RPC over stdio)
+./kb-mcp
 ```
 
 ---

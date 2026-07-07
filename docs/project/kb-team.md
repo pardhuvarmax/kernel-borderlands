@@ -169,6 +169,22 @@ Contributes terminal user experience, CLI tooling, interaction design, interface
 
 ---
 
+### kb-op/kb-mcp
+
+**Primary Maintainer**
+
+**Tejaswini** — **Golang & API Pipelines**
+
+Responsible for the Model Context Protocol (MCP) server implementation, JSON-RPC 2.0 stdio handlers, tool definitions, resource maps, custom prompts, and integration of the MCP server with the Go control plane gRPC API.
+
+**Collaborator**
+
+**Pardhu Varma** — **Systems Integration**
+
+Contributes systems integration, eBPF telemetry resources query mappings, and AADS swarm compatibility.
+
+---
+
 ### scripts
 
 **Primary Maintainer**

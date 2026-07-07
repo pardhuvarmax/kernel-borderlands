@@ -58,7 +58,10 @@ Rust-based safety and integrity enforcement layer for Kernel Borderlands. Operat
 #### 5. `kb-dashboard` (Vite + React Web UI — `kb-op/kb-dashboard/`)
 A React dashboard using Tailwind CSS and Vite. It provides a visual dashboard for security operations teams to view threat zone transitions.
 
-#### 6. `kb-aads` (Autonomous Swarm)
+#### 6. `kb-mcp` (Model Context Protocol Gateway — `kb-op/kb-mcp/`)
+A standardized Model Context Protocol (MCP) server integration, exposing tools, resources, and custom prompts to external AI assistants, swarms, and workspace clients.
+
+#### 7. `kb-aads` (Autonomous Swarm)
 The Decision Support Swarm. Written in Python, it runs multiple independent agent containers (Patroller, Hunter, Healer, Containment) communicating over Kafka queues to execute cluster-wide voting consensus on threat containment.
 
 ---
@@ -146,11 +149,14 @@ kernel-borderlands/
 │   │   │   └── styles/                        # lipgloss style definitions
 │   │   └── tests/                             # TUI mocks and tests
 │   │
-│   └── kb-dashboard/                          # React Web UI
-│       ├── README.md                          # Vite dev server documentation
-│       ├── package.json                       # Frontend NPM dependencies
-│       ├── src/                               # TypeScript React files
-│       └── index.html                         # Dashboard html page
+│   ├── kb-dashboard/                          # React Web UI
+│   │   ├── README.md                          # Vite dev server documentation
+│   │   ├── package.json                       # Frontend NPM dependencies
+│   │   ├── src/                               # TypeScript React files
+│   │   └── index.html                         # Dashboard html page
+│   │
+│   └── kb-mcp/                                # Model Context Protocol Server
+│       └── README.md                          # MCP tools, resources & prompts reference
 │
 ├── kb-checker/                                # Rust Safety & Integrity Checker
 │   ├── README.md                              # Cargo build instruction sets

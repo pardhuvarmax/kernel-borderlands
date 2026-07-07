@@ -91,6 +91,16 @@ This document defines standard build, run, test, and style conventions for the K
   pytest
   ```
 
+### G. `kb-mcp` (Model Context Protocol Host)
+- **Build MCP Server**:
+  ```bash
+  cd kb-op/kb-mcp && go build -o kb-mcp main.go
+  ```
+- **Run MCP Server**:
+  ```bash
+  cd kb-op/kb-mcp && ./kb-mcp
+  ```
+
 ---
 
 ## 2. Codebase Style & Implementation Guidelines
