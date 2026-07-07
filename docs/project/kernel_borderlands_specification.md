@@ -49,11 +49,11 @@ The central control and orchestration daemon. It receives states over the Unix s
 
 #### 3. `kb-tui` (SSH Terminal Console)
 The administrative terminal console. Built on Wish (an SSH host framework), Lipgloss, and Bubble Tea (a terminal UI framework), it serves an interactive process monitoring layout on SSH port 2222.
-*   **Features**: Includes live process color mapping, a F7 Lua REPL playground, and a F8 local script manager.
+*   **Features**: Includes live process color mapping, a terminal alert viewport, and command execution gates.
 
-#### 4. `kb-checker` (Rust Lua/Service Sandbox)
-A Rust safety engine that parses Lua scripts before they are loaded into the control plane runtime.
-*   **Analysis**: Runs AST-based static validation (detecting loops, checking API blocks) and executes the scripts against pre-built test vectors inside a resource-constrained sandbox.
+#### 4. `kb-checker` (Rust Safety & Integrity Layer)
+Rust-based safety and integrity enforcement layer for Kernel Borderlands. Operates independently of the behavioral analytics pipeline to continuously verify the integrity and health of critical KB components.
+*   **Analysis**: It validates the runtime state of eBPF programs, monitors the Control Plane, AADS subsystem, and native services, quarantines or isolates compromised components when necessary, and generates alerts for administrative review to ensure the KB infrastructure remains trusted, resilient, and operational.
 
 #### 5. `kb-dashboard` (Vite + React Web UI)
 A React dashboard using Tailwind CSS and Vite. It provides a visual dashboard for security operations teams to view threat zone transitions.
@@ -141,17 +141,18 @@ kernel-borderlands/
 │   │   └── main.go                            # Wish SSH server and TUI initiator
 │   ├── internal/
 │   │   ├── ui/                                # bubbletea views (process tables, alert streams)
-│   │   └── repl/                              # F7 Lua REPL integration
+│   │   ├── client/                            # gRPC client for Control Plane
+│   │   └── styles/                            # lipgloss style definitions
 │   └── tests/                                 # TUI mocks and tests
 │
-├── kb-checker/                                # Rust Script Sandbox Safety Checker
+├── kb-checker/                                # Rust Safety & Integrity Checker
 │   ├── README.md                              # Cargo build instruction sets
 │   ├── Cargo.toml                             # Rust crate dependencies
 │   ├── src/
 │   │   ├── main.rs                            # Checker CLI entrypoint
-│   │   ├── static_analysis.rs                 # Loop detection and restricted API checkers
-│   │   └── sandbox.rs                         # Isolated execution engine
-│   ├── event_sets/                            # Simulated JSON scenarios for sandboxing
+│   │   ├── integrity.rs                       # component status verification
+│   │   └── service_check.rs                   # process monitor
+│   ├── event_sets/                            # Simulated JSON threat models
 │   └── tests/                                 # Cargo test suites
 │
 ├── kb-dashboard/                              # React Web UI
@@ -724,23 +725,18 @@ The terminal dashboard (`kb-tui`) provides a live monitoring and control termina
     ssh operator@kb-server -p 2222
     ```
 
----
+## 10. Rust Safety & Integrity Engine (`kb-checker/`)
 
-## 10. Rust Lua Safety Check Engine (`kb-checker/`)
+Rust-based safety and integrity enforcement layer for Kernel Borderlands. Operates independently of the behavioral analytics pipeline to continuously verify the integrity and health of critical KB components.
 
-The Lua REPL console in `kb-tui` executes arbitrary scripts. To prevent operators from accidentally executing malformed code (such as infinite loops or unauthorized APIs) that would freeze the control plane, `kb-checker` validates Lua files in Rust before they are loaded.
+### A. Program State Verification
+It validates the runtime state of loaded eBPF programs. The engine queries the kernel's active BPF program list to ensure that the bytecode signatures, map configurations, and hook attachment states exactly match the target security layout defined in policy rules.
 
-### A. Static Analysis Stage
-The Rust parser scans the Lua Abstract Syntax Tree (AST) to check for:
-1.  **Restricted API Checks**: Rejects scripts importing `os.execute`, `io.popen`, or raw debug libraries to enforce container isolation.
-2.  **Static Loop Verification**: Analyzes `while` and `for` nodes. If a loop lacks clear breaks or relies on variable counters that cannot be statically bounded, the check fails with `MALFORMED_LOOP`.
-
-### B. Runtime Sandboxing Stage
-The script is executed inside an isolated, resource-constrained Lua interpreter against simulated test vectors stored in `/event_sets`:
-*   If execution time exceeds **50ms**, the watchdog terminates the VM and logs a `RESOURCE_LIMIT_EXCEEDED` verdict.
-*   If memory usage exceeds **4MB**, the sandbox aborts and throws `MEMORY_LIMIT_EXCEEDED`.
-
----
+### B. Control Plane & Swarm Monitoring
+The check daemon runs continuous local check probes to monitor:
+1. **Control Plane Daemon**: Validates health endpoints, memory utilization, and socket availability for `/tmp/kbd.sock`.
+2. **AADS Subsystem**: Queries the agent swarm's consensus pipeline and local communication ports to ensure patroller, hunter, and healer agents are alive.
+3. **Execution Gateways**: Performs test calls through execution endpoints to verify quarantine and containment services remain responsive.
 
 ## 11. Swarm Integration (AADS Swarm)
 
@@ -841,10 +837,10 @@ go build -o kb-tui cmd/main.go
     # Access TUI via SSH in a separate terminal:
     # ssh operator@localhost -p 2222
     ```
-4.  **Run Rust Safety Check on Lua Script**:
+4.  **Run Safety and Integrity Check Daemon**:
     ```bash
     cd kb-checker
-    ./target/release/kb-checker check /home/emergence/Desktop/kernel-borderlands/scripts/attack-lab/shadow_guard.lua
+    ./target/release/kb-checker monitor --all
     ```
 5.  **Execute Live Integration Hook Simulation**:
     ```bash
@@ -1072,15 +1068,15 @@ Flags:
 ```
 
 ### B. Subsystem `kb-checker` (`kb-checker`)
-The Lua REPL script security validation tool:
+The Safety and Integrity Enforcement Tool:
 ```text
-kb-checker - Lua and Service Safety Validator
+kb-checker - Safety and Integrity Validator
 
 Usage:
   kb-checker [COMMAND] [ARGS]
 
 Commands:
-  check [path]         Static & dynamic sandbox verification of a target Lua script
+  monitor --all        Runs active check loops across eBPF mappings and control socket states
   service --all        Runs self-diagnostic checks across all active KB services
 ```
 
@@ -1098,11 +1094,11 @@ Bubble Tea Elm-architecture structs.
     -   *Fields*:
         -   `table table.Model`: Process table listing active PIDs and scoring.
         -   `viewport viewport.Model`: Alerts scrolling viewport.
-        -   `state State`: Enums representing active view modes (`VIEW_TABLE`, `VIEW_REPL`, `VIEW_SCRIPTS`).
+        -   `state State`: Enums representing active view modes (`VIEW_TABLE`, `VIEW_ALERTS`).
 *   `func (m Model) Init() tea.Cmd`
     -   *Description*: Starts concurrent event list listeners on port 50051.
 *   `func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd)`
-    -   *Description*: Dispatches actions based on keyboard inputs (e.g. F7 to switch state to `VIEW_REPL`).
+    -   *Description*: Dispatches actions based on keyboard inputs (e.g. key bindings to switch view states).
 
 ---
 

@@ -7,8 +7,7 @@ Built with bubbletea + lipgloss + wish.
 - Live process table with zone colors (green/yellow/red)
 - Real-time alert feed
 - Agent swarm status
-- Lua REPL console (F7)
-- Script manager (F8)
+- Interactive query console
 - Keyboard-driven containment actions
 - Served over SSH via wish (port 2222)
 
