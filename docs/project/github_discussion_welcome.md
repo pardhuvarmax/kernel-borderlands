@@ -65,8 +65,8 @@ For coordination on specific components, filter discussions by tags:
 - `#kb-checker` — for Rust diagnostics and runtime verification scripts.
 - `#kb-aads` — for multi-agent coordination, ZeroMQ pipelines, and models.
 
-### 3. 📅 Development Syncs & Release Notes
-We post bi-weekly development progress, design alignment outcomes, sprint summaries, and tag releases here. We encourage community review on all proposed API breaking changes before they are merged.
+### 3. 📢 Announcements & Maintainer Updates
+We use this space for official announcements, roadmap updates, and technical changes directly from the core maintainers. We also post bi-weekly development progress, design alignment outcomes, sprint summaries, and tag releases here. We encourage community review on all proposed API breaking changes before they are merged.
 
 ---
 
