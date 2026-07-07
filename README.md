@@ -21,8 +21,8 @@ The project combines kernel observability, behavioral analytics, distributed age
 | `kb-core/`          | C (eBPF)           | Kernel instrumentation layer and telemetry collection.                                 |
 | `kb-control-plane/` | Go                 | Control plane daemon (`kbd`) responsible for event coordination and system management. |
 | `kb-aads/`          | Python             | Autonomous Agent Defense Swarm (AADS), behavioral reasoning, and MARL infrastructure.  |
-| `kb-dashboard/`     | React / TypeScript | Web dashboard for visualization and monitoring.                                        |
-| `kb-tui/`           | Go                 | Terminal-based management interface built with Bubble Tea.                             |
+| `kb-op/kb-dashboard/` | React / TypeScript | Web dashboard for visualization and monitoring.                                        |
+| `kb-op/kb-tui/`       | Go                 | Terminal-based management interface built with Bubble Tea.                             |
 | `kb-checker/`       | Rust               | Script analysis and safety verification engine.                                        |
 | `docs/`             | Markdown / PDF     | Technical documentation, architecture, installation guides, and project papers.        |
 | `scripts/`          | Bash / Python      | Installation utilities, automation, testing, and attack-lab tooling.                   |
@@ -60,6 +60,6 @@ cd kb-aads
 python main.py
 
 # Dashboard
-cd kb-dashboard
+cd kb-op/kb-dashboard
 npm run dev
 ```

@@ -56,11 +56,11 @@ This document defines standard build, run, test, and style conventions for the K
 ### D. `kb-tui` (SSH Terminal Dashboard)
 - **Build Console Binary**:
   ```bash
-  cd kb-tui && go build -o kb-tui cmd/main.go
+  cd kb-op/kb-tui && go build -o kb-tui cmd/main.go
   ```
 - **Run Console Locally**:
   ```bash
-  go run cmd/main.go
+  cd kb-op/kb-tui && go run cmd/main.go
   ```
 - **SSH into Console (Running on Port 2222)**:
   ```bash
@@ -70,11 +70,11 @@ This document defines standard build, run, test, and style conventions for the K
 ### E. `kb-dashboard` (Vite + React Web App)
 - **Install Dependencies**:
   ```bash
-  cd kb-dashboard && npm install
+  cd kb-op/kb-dashboard && npm install
   ```
 - **Run Dev Server (Port 5173)**:
   ```bash
-  npm run dev
+  cd kb-op/kb-dashboard && npm run dev
   ```
 - **Compile Production Assets**:
   ```bash

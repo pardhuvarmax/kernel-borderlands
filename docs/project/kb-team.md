@@ -58,7 +58,7 @@ All remaining subsystems extend, orchestrate, validate, or provide operational i
                 ┌───────────────┴───────────────┐
                 │                               │
                 ▼                               ▼
-         kb-dashboard                      kb-tui
+         kb-op/kb-dashboard                kb-op/kb-tui
    Dashboard & Visualization       Terminal User Interface
         Lead: Rupa                 Lead: Tejaswini
 
@@ -137,7 +137,7 @@ Contributes defensive security implementation, validation support, and security 
 
 ---
 
-### kb-dashboard
+### kb-op/kb-dashboard
 
 **Primary Maintainer**
 
@@ -153,7 +153,7 @@ Contributes backend integration, frontend implementation, API connectivity, and 
 
 ---
 
-### kb-tui
+### kb-op/kb-tui
 
 **Primary Maintainer**
 

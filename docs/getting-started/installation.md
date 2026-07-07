@@ -109,7 +109,7 @@ go mod download
 # Dashboard
 
 ```bash
-cd kb-dashboard
+cd kb-op/kb-dashboard
 
 npm install
 ```
@@ -153,7 +153,7 @@ python main.py
 ## Dashboard
 
 ```bash
-cd kb-dashboard
+cd kb-op/kb-dashboard
 
 npm run dev
 ```
@@ -185,7 +185,7 @@ go mod tidy
 Update Node packages:
 
 ```bash
-cd kb-dashboard
+cd kb-op/kb-dashboard
 
 npm install
 ```

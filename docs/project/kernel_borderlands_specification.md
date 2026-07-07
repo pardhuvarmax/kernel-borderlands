@@ -47,7 +47,7 @@ The raw telemetry and local validation provider. It loads and compiles eBPF CO-R
 The central control and orchestration daemon. It receives states over the Unix socket bridge, maintains an L1 thread-safe memory registry, serializes historical audits to an L2 SQLite WAL database, parses policy specifications, and implements a gRPC gateway.
 *   **Execution**: Written in Go (compiled statically), exposing endpoints on port 50051.
 
-#### 3. `kb-tui` (SSH Terminal Console)
+#### 3. `kb-tui` (SSH Terminal Console — `kb-op/kb-tui/`)
 The administrative terminal console. Built on Wish (an SSH host framework), Lipgloss, and Bubble Tea (a terminal UI framework), it serves an interactive process monitoring layout on SSH port 2222.
 *   **Features**: Includes live process color mapping, a terminal alert viewport, and command execution gates.
 
@@ -55,7 +55,7 @@ The administrative terminal console. Built on Wish (an SSH host framework), Lipg
 Rust-based safety and integrity enforcement layer for Kernel Borderlands. Operates independently of the behavioral analytics pipeline to continuously verify the integrity and health of critical KB components.
 *   **Analysis**: It validates the runtime state of eBPF programs, monitors the Control Plane, AADS subsystem, and native services, quarantines or isolates compromised components when necessary, and generates alerts for administrative review to ensure the KB infrastructure remains trusted, resilient, and operational.
 
-#### 5. `kb-dashboard` (Vite + React Web UI)
+#### 5. `kb-dashboard` (Vite + React Web UI — `kb-op/kb-dashboard/`)
 A React dashboard using Tailwind CSS and Vite. It provides a visual dashboard for security operations teams to view threat zone transitions.
 
 #### 6. `kb-aads` (Autonomous Swarm)
@@ -134,16 +134,23 @@ kernel-borderlands/
 │   └── proto/
 │       └── kb_ipc.proto                       # gRPC interface definitions for external agents
 │
-├── kb-tui/                                    # Go SSH Bubbletea Console
-│   ├── README.md                              # TUI operations documentation
-│   ├── go.mod                                 # Go TUI dependencies
-│   ├── cmd/
-│   │   └── main.go                            # Wish SSH server and TUI initiator
-│   ├── internal/
-│   │   ├── ui/                                # bubbletea views (process tables, alert streams)
-│   │   ├── client/                            # gRPC client for Control Plane
-│   │   └── styles/                            # lipgloss style definitions
-│   └── tests/                                 # TUI mocks and tests
+├── kb-op/                                     # Operator Interfaces
+│   ├── kb-tui/                                # Go SSH Bubbletea Console
+│   │   ├── README.md                          # TUI operations documentation
+│   │   ├── go.mod                             # Go TUI dependencies
+│   │   ├── cmd/
+│   │   │   └── main.go                        # Wish SSH server and TUI initiator
+│   │   ├── internal/
+│   │   │   ├── ui/                            # bubbletea views (process tables, alert streams)
+│   │   │   ├── client/                        # gRPC client for Control Plane
+│   │   │   └── styles/                        # lipgloss style definitions
+│   │   └── tests/                             # TUI mocks and tests
+│   │
+│   └── kb-dashboard/                          # React Web UI
+│       ├── README.md                          # Vite dev server documentation
+│       ├── package.json                       # Frontend NPM dependencies
+│       ├── src/                               # TypeScript React files
+│       └── index.html                         # Dashboard html page
 │
 ├── kb-checker/                                # Rust Safety & Integrity Checker
 │   ├── README.md                              # Cargo build instruction sets
@@ -154,12 +161,6 @@ kernel-borderlands/
 │   │   └── service_check.rs                   # process monitor
 │   ├── event_sets/                            # Simulated JSON threat models
 │   └── tests/                                 # Cargo test suites
-│
-├── kb-dashboard/                              # React Web UI
-│   ├── README.md                              # Vite dev server documentation
-│   ├── package.json                           # Frontend NPM dependencies
-│   ├── src/                                   # TypeScript React files
-│   └── index.html                             # Dashboard html page
 │
 └── kb-aads/                                   # Python MARL Agent Swarm
     ├── README.md                              # Swarm setup documentation
@@ -710,7 +711,7 @@ If $S_t > H_{\text{threshold}}$, the CUSUM engine raises a threat transition due
 
 ---
 
-## 9. Go SSH Terminal User Interface (`kb-tui/`)
+## 9. Go SSH Terminal User Interface (`kb-op/kb-tui/`)
 
 The terminal dashboard (`kb-tui`) provides a live monitoring and control terminal for operator access.
 
@@ -815,7 +816,7 @@ cd ../kb-checker
 cargo build --release
 
 # 4. Build Bubble Tea SSH TUI Console
-cd ../kb-tui
+cd ../kb-op/kb-tui
 go build -o kb-tui cmd/main.go
 ```
 
@@ -832,7 +833,7 @@ go build -o kb-tui cmd/main.go
     ```
 3.  **Run TUI SSH Terminal Console**:
     ```bash
-    cd kb-tui
+    cd kb-op/kb-tui
     ./kb-tui
     # Access TUI via SSH in a separate terminal:
     # ssh operator@localhost -p 2222
@@ -1082,9 +1083,9 @@ Commands:
 
 ---
 
-## 20. Appendix: Complete API and Structural Reference for kb-tui
+## 20. Appendix: Complete API and Structural Reference for kb-tui (`kb-op/kb-tui/`)
 
-This appendix documents the structural definitions and layouts inside `kb-tui`.
+This appendix documents the structural definitions and layouts inside `kb-op/kb-tui/`.
 
 ### A. Package `ui` (`internal/ui/`)
 Bubble Tea Elm-architecture structs.
