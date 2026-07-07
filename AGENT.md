@@ -27,8 +27,8 @@ Always adhere to these engineering invariants. Any code change violating them is
 - **Sync Barrier on Exit**: The Go control plane uses a synchronization channel barrier (`l2Done chan struct{}`) in the L2 worker to guarantee that all pending logs in the write-behind pipe are fully flushed to SQLite before the connection closes on daemon teardown.
 
 ### C. Socket IPC & Privilege Isolation
-- **IPC Interface**: Communication between the native userspace bridge and the Go control plane is over `/tmp/kbd.sock`.
-- **Privilege Separation**: The UDS socket must reside in `/tmp/` rather than `/var/run/` to enable the Go control plane daemon to run without root privileges, while remaining writable by the root-level eBPF userspace bridge sensor using `0666` permissions.
+- **IPC Interface**: Communication between the native userspace bridge and the Go control plane is over `/run/kb/kbd.sock`.
+- **Privilege Separation**: The UDS socket must reside in `/run/kb/` rather than `/var/run/` to enable the Go control plane daemon to run without root privileges, while remaining writable by the root-level eBPF userspace bridge sensor using `0666` permissions.
 
 ---
 
