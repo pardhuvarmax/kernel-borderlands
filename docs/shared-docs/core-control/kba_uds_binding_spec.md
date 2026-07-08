@@ -58,7 +58,7 @@ func (cp *ControlPlane) Start() error {
 			return err
 		}
 	} else {
-		// Apply safe permissions (0660) to allow kb-devs group members to connect
+		// Apply safe permissions (0660) for service group access
 		if err := os.Chmod(socketPath, 0660); err != nil {
 			log.Printf("[KB] Warning: failed to chmod socket %s: %v", socketPath, err)
 		}

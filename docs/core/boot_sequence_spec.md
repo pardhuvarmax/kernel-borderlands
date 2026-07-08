@@ -10,9 +10,9 @@ The Kernel Borderlands system relies on three primary Unix Domain Sockets (UDS) 
 
 | Socket/File Path | Owner | Group | Permissions | Binding Process | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `/run/kb/kbd.sock` | `root` | `kb-devs` | `0660` | `kbd` (Go Control Plane) | Binary telemetry pipe for eBPF events from `kbd_sensor` to Go. |
-| `/run/kb/kba.sock` | `root` | `kb-devs` | `0660` | `kbd` (Go Control Plane) | gRPC IPC socket for client registrations and enforcer directives. |
-| `/run/kb/kbc.sock` | `root` | `kb-devs` | `0660` | `kb-checker` (Rust) | gRPC IPC socket for health diagnostic reporting to TUIs/CLIs. |
+| `/run/kb/kbd.sock` | `root` | `root` | `0660` | `kbd` (Go Control Plane) | Binary telemetry pipe for eBPF events from `kbd_sensor` to Go. |
+| `/run/kb/kba.sock` | `root` | `root` | `0660` | `kbd` (Go Control Plane) | gRPC IPC socket for client registrations and enforcer directives. |
+| `/run/kb/kbc.sock` | `root` | `root` | `0660` | `kb-checker` (Rust) | gRPC IPC socket for health diagnostic reporting to TUIs/CLIs. |
 | `/run/kb/kb-checker.pid` | `root` | `root` | `0600` | `kb-checker` (Rust) | File lock preventing duplicate active safety daemons. |
 
 ---
