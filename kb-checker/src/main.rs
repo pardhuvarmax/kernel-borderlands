@@ -3,10 +3,12 @@ use std::time::{Duration, SystemTime};
 use clap::{Parser, Subcommand};
 use tokio::time::sleep;
 
-use kb_checker::integrity::verify_ebpf_integrity;
+use kb_checker::integrity::{verify_ebpf_integrity, verify_liveness};
 use kb_checker::service_check::{check_control_plane_health, check_swarm_health};
 use kb_checker::report::trigger_auto_recovery;
 use kb_checker::grpc::{start_grpc_server, CheckerState};
+
+const CONTROL_PLANE_UDS: &str = "/run/kb/kba.sock";
 
 #[derive(Parser)]
 #[command(name = "kb-checker")]
@@ -43,6 +45,8 @@ enum CheckTargets {
     ControlPlane,
     /// Verify AADS Swarm Ray cluster health
     Swarm,
+    /// Active end-to-end BPF hook liveness check
+    Liveness,
 }
 
 fn update_state(state: &Arc<Mutex<CheckerState>>, healthy: bool, err_msg: Option<String>) {
@@ -144,6 +148,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 });
 
+                // Task 4: eBPF Hook Liveness Active Audit (1m sleep interval)
+                let t4_state = Arc::clone(&state);
+                tokio::spawn(async move {
+                    loop {
+                        let err_str = match verify_liveness(CONTROL_PLANE_UDS).await {
+                            Ok(_) => {
+                                update_state(&t4_state, true, None);
+                                None
+                            }
+                            Err(e) => {
+                                let msg = e.to_string();
+                                update_state(&t4_state, false, Some(msg.clone()));
+                                Some(msg)
+                            }
+                        };
+                        if let Some(reason) = err_str {
+                            trigger_auto_recovery(&reason, true).await; // Critical Hook Bypass!
+                        }
+                        sleep(Duration::from_secs(60)).await;
+                    }
+                });
+
                 // Keep daemon alive
                 loop {
                     sleep(Duration::from_secs(3600)).await;
@@ -160,6 +186,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 CheckTargets::Swarm => {
                     check_swarm_health().await?;
+                }
+                CheckTargets::Liveness => {
+                    verify_liveness(CONTROL_PLANE_UDS).await?;
                 }
             }
         }

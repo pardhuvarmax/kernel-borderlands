@@ -1,11 +1,18 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sha2::{Sha256, Digest};
+use tokio::net::UnixStream;
+use tonic::transport::Endpoint;
+use tower::service_fn;
 
 // Low-level BPF syscall functions from libbpf-sys
 use libbpf_sys::{bpf_prog_get_next_id, bpf_prog_get_fd_by_id, bpf_obj_get_info_by_fd};
+
+use crate::kb::kernel_borderlands_client::KernelBorderlandsClient;
+use crate::kb::EventFilter;
 
 const POLICY_FILE_PATH: &str = "/etc/kb/ebpf_policies.json";
 
@@ -109,4 +116,59 @@ pub fn verify_ebpf_integrity() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("[INTEGRITY] eBPF verification successful. All checked signatures match policy.");
     Ok(())
+}
+
+// ── TASK 4: eBPF Hook Liveness Active Audit (Heartbeat Injection) ──
+pub async fn verify_liveness(uds_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("[LIVENESS] Starting end-to-end BPF hook liveness check...");
+    let path = uds_path.to_string();
+    let channel = Endpoint::try_from("http://[::]:50051")?
+        .connect_with_connector(service_fn(move |_| {
+            let path_clone = path.clone();
+            async move {
+                UnixStream::connect(path_clone).await
+            }
+        }))
+        .await?;
+    let mut client = KernelBorderlandsClient::new(channel);
+
+    let filter = EventFilter {
+        event_types: vec![],
+    };
+
+    // 1. Start streaming real-time events from Go control plane
+    let mut response_stream = client.stream_events(filter).await?.into_inner();
+
+    // 2. Spawn a short-lived benign command to trigger sched_process_exec tracepoint
+    let start_time = std::time::Instant::now();
+    let mut child = std::process::Command::new("/bin/true").spawn()?;
+    let child_pid = child.id();
+
+    // 3. Listen to stream and wait up to 3 seconds for the heartbeat process event
+    let mut detected = false;
+    let timeout_dur = Duration::from_secs(3);
+
+    while let Ok(res) = tokio::time::timeout(timeout_dur, response_stream.message()).await {
+        match res {
+            Ok(Some(event)) => {
+                if event.pid == child_pid || event.comm == "true" {
+                    detected = true;
+                    break;
+                }
+            }
+            _ => break, // stream error or closed
+        }
+        if start_time.elapsed() > timeout_dur {
+            break;
+        }
+    }
+
+    let _ = child.kill();
+
+    if detected {
+        println!("[LIVENESS] BPF hook liveness check: SUCCESS (intercepted exec event for PID {})", child_pid);
+        Ok(())
+    } else {
+        Err("BPF hook liveness check failed: Heartbeat process exec event not intercepted in stream.".into())
+    }
 }
