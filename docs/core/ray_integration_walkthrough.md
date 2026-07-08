@@ -17,10 +17,14 @@ This guide serves as a comprehensive onboarding and technical walkthrough for **
 
 ## 1. Why Ray? Architectural Motivation
 
-In high-throughput kernel security monitoring, running complex behavioral threat agents (Hunters, Patrollers, Healers) inside a single Python process is a severe bottleneck:
-*   **GIL Limitations**: Standard Python cannot leverage multi-core CPUs effectively due to the Global Interpreter Lock.
-*   **Single-Host CPU Starvation**: Running behavioral inference models (RLlib policies) on the monitored host risks hogging CPU from core OS services.
-*   **Ray Solution**: Ray decouples agents into **Stateful Actors** running as independent processes. These processes can easily scale horizontally across multiple machines in a Ray cluster. The monitored host only runs the core loader and lightweight sensor, while threat analysis runs out-of-band.
+In high-throughput kernel security monitoring, running complex behavioral threat agents (Hunters, Patrollers, Healers) inside a single Python process is a severe bottleneck. Standard Python architectures fail under high load due to GIL restrictions and heavy serialization overhead. Ray resolves these issues, providing a high-performance framework optimized for low-latency multi-agent systems:
+
+*   **GIL Bypass & Parallel Processing**: Standard Python cannot leverage multi-core CPUs effectively due to the Global Interpreter Lock. Ray spawns independent OS processes for each remote task/actor, bypassing the GIL entirely.
+*   **Sub-Millisecond Shared Memory Speed**: Regular Python IPC chains (such as `multiprocessing` or queue pipelines) rely on `pickle` serialization to transfer objects between processes. This requires serializing data to bytes, copying it across sockets, and deserializing it at the destination, adding $10\text{--}50\text{ms}$ of latency. Ray utilizes an **in-memory object store (Apache Arrow)**. When agents on the same host pass large telemetry tensors or state logs, they share memory directly via **zero-copy serialization**, bringing inter-process communication latency down to the **sub-millisecond level**.
+*   **Decoupled Asynchronous Latency Gating**: If threat detection blocked active system calls to query Python agent decisions, the kernel execution hot-path would be paralyzed. The Kernel Borderlands hybrid architecture decouples these loops:
+    1. **Hot-Path (Microseconds)**: The kernel eBPF hooks and C userspace sensor evaluate telemetry and check rule lists in microseconds.
+    2. **Cognitive Swarm (Sub-Milliseconds)**: Telemetry is fanned out asynchronously to the Ray cluster. The AADS swarm conducts consensus voting out-of-band at Ray's sub-millisecond execution speeds, generating quarantine orders without adding any blocking overhead to system calls.
+*   **CPU Offloading**: Running complex reinforcement learning policies (RLlib models) on the monitored host risks CPU starvation. Ray allows offloading these models to dedicated GPU head nodes in the Ray cluster, keeping the host workload-agnostic.
 
 ---
 
