@@ -77,6 +77,49 @@ sequenceDiagram
 
 ---
 
+### Chronological Boot Timeline
+
+*   **`T+0.00s` — Power-On & UEFI Secure Boot**:
+    *   The CPU powers on and UEFI initializes.
+    *   UEFI validates the digital signature of the bootloader (`shim.efi` / `grubx64.efi`) against keys stored in the hardware NVRAM.
+    *   GRUB executes, measures the boot files into TPM 2.0 PCRs, and boots the signed Linux kernel.
+*   **`T+1.50s` — Initramfs & Drive Mounts**:
+    *   The kernel mounts the initial RAM filesystem (initramfs) to load drivers.
+    *   The root filesystem is mounted read-only initially, then read-write.
+*   **`T+3.00s` — Systemd Initialization (PID 1)**:
+    *   `systemd` takes control, reads unit configurations, and mounts runtime directory partitions (including the in-memory `/run/kb/` tmpfs).
+*   **`T+4.50s` — Phase 1: Go Control Plane (`kbd.service`) Spawns**:
+    *   Systemd starts the Go Control Plane daemon (`kbd`).
+    *   `kbd` creates the `/run/kb/` directory and binds `/run/kb/kbd.sock` (telemetry loop) and `/run/kb/kba.sock` (client gRPC gateway).
+*   **`T+5.00s` — eBPF Hook Deployment**:
+    *   `kbd` compiles and loads `kbd_sensor.bpf.o` into kernel memory.
+    *   LSM file open hooks (`lsm/file_open`) and process event tracepoints (`tp/sched/sched_process_exec`, `tp/sched/sched_process_exit`) attach to their respective kernel probes.
+*   **`T+5.50s` — Readiness Notification**:
+    *   `kbd` verifies its local sockets are listening and sends a `ready` signal (`sd_notify`) back to systemd.
+*   **`T+6.00s` — Phase 2: Safety Watchdog (`kb-checker.service`) Spawns**:
+    *   Having received the readiness notification from `kbd`, systemd spawns `kb-checker`.
+*   **`T+6.10s` — PID Lock & Socket Binding**:
+    *   `kb-checker` attempts to acquire a raw POSIX lock (`flock`) on `/run/kb/kb-checker.pid`.
+    *   It binds the diagnostic reporting socket `/run/kb/kbc.sock`.
+*   **`T+6.20s` — Blocking Boot Audits**:
+    *   **JIT Bytecode Check**: Checker pulls JITed bytecode for `kbd_sensor` from kernel memory, hashes it (SHA-256), and validates it against `/etc/kb/ebpf_policies.json`.
+    *   **Map Check**: Checker dumps `/run/kb/contained_pids_map` and compares it against active containments from Go database (`kbd`).
+    *   **Liveness Check**: Checker subscribes to event stream on `kba.sock`, executes a test process (`/bin/true`), and waits up to **3s** for the process execution event to stream back.
+    *   **Performance Check**: Calculates average runtime latency of hooks to ensure it's under 500ns.
+*   **`T+7.50s` — Startup Decision**:
+    *   *If checks pass*: `kb-checker` starts its scheduled background verification loops (running every 5s/30s/60s).
+    *   *If checks fail*: `kb-checker` executes the **Tampering Containment Protocol**: unloads `kbd_sensor` from kernel memory, sends the failure report and stack trace to `kbd` over `kba.sock`, and exits with code 1.
+*   **`T+8.50s` — Phase 3: Ray Swarm / Workload Activation**:
+    *   *If `kb-checker` succeeded*: Systemd releases the gate and starts the Swarm Node Agent (`kbd-agent.service` / Ray workload manager).
+    *   *If `kb-checker` failed (or crashed)*: Systemd dependency rules (`Requires=kb-checker.service`) prevent `kbd-agent.service` from ever starting. The AADS compute subsystem remains offline.
+*   **`T+9.50s` — Node Registration**:
+    *   The active Ray Agent establishes a connection to `/run/kb/kba.sock` and registers its GPU/CPU capacities with the Go Control Plane.
+*   **`T+10.00s` — Full Operational State**:
+    *   The system is fully booted. Sockets are open, safety monitoring is active in the background, and the node is safely running AADS Swarm ML workloads.
+
+
+---
+
 ## 3. Production Systemd Service Unit Files
 
 These unit files define the exact dependencies required to establish the boot sequence:
