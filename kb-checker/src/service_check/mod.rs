@@ -21,15 +21,27 @@ pub async fn connect_uds_grpc() -> Result<Channel, tonic::transport::Error> {
 
 // TASK 2: Control Plane Availability Audit (gRPC Health Check)
 pub async fn check_control_plane_health() -> Result<(), Box<dyn std::error::Error>> {
-    println!("[HEALTH] Performing gRPC availability audit over UDS...");
-    let channel = connect_uds_grpc().await?;
+    check_control_plane_health_at(DEFAULT_UDS_PATH).await
+}
+
+pub async fn check_control_plane_health_at(uds_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("[HEALTH] Performing gRPC availability audit over UDS: {}...", uds_path);
+    let path = uds_path.to_string();
+    let channel = Endpoint::try_from("http://[::]:50051")?
+        .connect_with_connector(service_fn(move |_| {
+            let path_clone = path.clone();
+            async move {
+                UnixStream::connect(path_clone).await
+            }
+        }))
+        .await?;
     let mut client = HealthClient::new(channel);
 
     let request = HealthCheckRequest {
         service: "kb.KernelBorderlands".to_string(),
     };
 
-    // Execute with a strict 100ms deadline
+    // Enforce a strict 100ms deadline
     let response = tokio::time::timeout(
         Duration::from_millis(100),
         client.check(request)
@@ -46,7 +58,11 @@ pub async fn check_control_plane_health() -> Result<(), Box<dyn std::error::Erro
 
 // TASK 3: AADS Swarm Status Verification (Ray Cluster API)
 pub async fn check_swarm_health() -> Result<(), Box<dyn std::error::Error>> {
-    println!("[SWARM] Querying AADS Swarm Ray cluster status...");
+    check_swarm_health_at(RAY_API_URL).await
+}
+
+pub async fn check_swarm_health_at(api_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("[SWARM] Querying AADS Swarm Ray cluster status at {}...", api_url);
     let client = Client::builder()
         .timeout(Duration::from_secs(3))
         .build()?;
@@ -54,7 +70,7 @@ pub async fn check_swarm_health() -> Result<(), Box<dyn std::error::Error>> {
     let mut attempts = 0;
     loop {
         attempts += 1;
-        match client.get(RAY_API_URL).send().await {
+        match client.get(api_url).send().await {
             Ok(response) => {
                 if response.status().is_success() {
                     println!("[SWARM] Ray cluster REST API check: ONLINE (attempt {})", attempts);
