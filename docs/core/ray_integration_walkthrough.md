@@ -9,8 +9,9 @@ This guide serves as a comprehensive onboarding and technical walkthrough for **
 2. [Migrating local Agents to Ray Actors](#2-migrating-local-agents-to-ray-actors)
 3. [Distributed Message Passing Pattern](#3-distributed-message-passing-pattern)
 4. [Ray Swarm Orchestrator Design](#4-ray-swarm-orchestrator-design)
-5. [Complete Refactoring Blueprint](#5-complete-refactoring-blueprint)
-6. [Cluster Launch & Diagnostic Operations](#6-cluster-launch--diagnostic-operations)
+5. [Judge, Jury, and Executor (JJE) Ray Integration](#5-judge-jury-and-executor-jje-ray-integration)
+6. [Complete Refactoring Blueprint](#6-complete-refactoring-blueprint)
+7. [Cluster Launch & Diagnostic Operations](#7-cluster-launch--diagnostic-operations)
 
 ---
 
@@ -63,7 +64,42 @@ The updated `SwarmOrchestrator` will:
 
 ---
 
-## 5. Complete Refactoring Blueprint
+## 5. Judge, Jury, and Executor (JJE) Ray Integration
+
+The threat resolution pipeline in AADS relies on the **Judge, Jury, and Executor (JJE)** consensus model. When migrating to Ray, these specialized roles leverage Ray's distributed task and actor scheduling:
+
+```mermaid
+flowchart TD
+    Patroller[Patroller Agent\nRay Actor] -->|Detects anomaly| Judge[Judge Agent\nRay Actor]
+    Judge -->|Spawns voting task| Jury[Jury Pool\nMultiple Ray Actor instances]
+    Jury -->|Consensus outcome| Executor[Executor Agent\nRay Actor]
+    Executor -->|SubmitAgentDecision gRPC| GoDaemon[Go Control Plane]
+```
+
+### A. Judge Agent Integration
+* **Role**: Evaluates threat alerts from Patrollers and queries the control plane for historical events.
+* **Ray Pattern**: The Judge runs as a persistent, centralized Ray Actor. When a threat event exceeds standard risk thresholds, the Judge dynamically launches a Jury consensus round.
+
+### B. Jury Agent Pool (Consensus Quorum)
+* **Role**: Multiple agents verify the event's features and cast votes to prevent false positives.
+* **Ray Pattern**: Instead of maintaining a fixed set of local threads, the Judge dynamically spins up a pool of **Jury Ray Actors** across the cluster:
+  ```python
+  # Dynamic instantiation of multiple Jury actors across different cluster nodes
+  jury_pool = [JuryAgent.remote(id=f"jury-{i}") for i in range(5)]
+  
+  # Trigger concurrent evaluations and gather votes
+  vote_refs = [jury.evaluate_and_vote.remote(telemetry_payload) for jury in jury_pool]
+  votes = ray.get(vote_refs) # Gathers votes asynchronously
+  ```
+  This distributed execution ensures that if a single physical cluster node goes down or gets compromised, the Jury quorum cannot be hijacked or blocked.
+
+### C. Executor Agent
+* **Role**: Enforces the consensus outcome (e.g. quarantining the threat).
+* **Ray Pattern**: The Executor is a dedicated Ray Actor that acts as the gateway back to the Go Control Plane. It receives the consensus decisions from the Judge, serializes the `AgentDecision` gRPC wire packet, and pushes it over the local Unix domain socket `/run/kb/kbd-grpc.sock`.
+
+---
+
+## 6. Complete Refactoring Blueprint
 
 Here is the exact code architecture for the new files:
 
@@ -207,7 +243,7 @@ class RaySwarmOrchestrator:
 
 ---
 
-## 6. Cluster Launch & Diagnostic Operations
+## 7. Cluster Launch & Diagnostic Operations
 
 Follow these terminal steps to start and inspect the distributed Ray cluster:
 
