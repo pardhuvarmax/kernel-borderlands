@@ -8,7 +8,7 @@ This document details the authoritative design architecture, command-line interf
 
 ```mermaid
 flowchart TD
-    subgraph kb-checker Daemon (Rust Binary Application)
+    subgraph kb_checker_daemon ["kb-checker Daemon (Rust Binary Application)"]
         Manager[Validation Manager]
         Task1[eBPF Signature Loop\nlibbpf-sys / 1m interval]
         Task2[gRPC Health Check Loop\nUDS: /run/kb/kba.sock / 5s interval]
