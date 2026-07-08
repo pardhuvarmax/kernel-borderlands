@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use serde::{Deserialize, Serialize};
+use sha2::{Sha256, Digest};
 
 // Low-level BPF syscall functions from libbpf-sys
 use libbpf_sys::{bpf_prog_get_next_id, bpf_prog_get_fd_by_id, bpf_obj_get_info_by_fd};
@@ -47,20 +48,45 @@ pub fn verify_ebpf_integrity() -> Result<(), Box<dyn std::error::Error>> {
             if fd >= 0 {
                 let mut info: libbpf_sys::bpf_prog_info = std::mem::zeroed();
                 let mut info_len = std::mem::size_of::<libbpf_sys::bpf_prog_info>() as u32;
+                
+                // First call: Get instructions size
                 if bpf_obj_get_info_by_fd(fd, &mut info as *mut _ as *mut _, &mut info_len) == 0 {
-                    // Extract name
                     let name_bytes: Vec<u8> = info.name.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
                     let prog_name = String::from_utf8_lossy(&name_bytes).to_string();
 
-                    if policy.signatures.contains_key(&prog_name) {
+                    if let Some(expected_hash) = policy.signatures.get(&prog_name) {
                         checked_count += 1;
-                        println!("[INTEGRITY] Found active monitored program: {}", prog_name);
-                        
-                        // JITed instructions length check
-                        if info.xlated_prog_len == 0 {
-                            println!("[WARNING] Program {} JIT/translated length is 0.", prog_name);
+                        let jit_len = info.xlated_prog_len;
+                        if jit_len == 0 {
+                            println!("[WARNING] Program {} xlated bytecode length is 0.", prog_name);
                             mismatch_found = true;
                             mismatch_name = prog_name.clone();
+                        } else {
+                            // Allocate buffer and execute second call to retrieve instructions
+                            let mut instructions = vec![0u8; jit_len as usize];
+                            info.xlated_prog_insns = instructions.as_mut_ptr() as u64;
+                            
+                            if bpf_obj_get_info_by_fd(fd, &mut info as *mut _ as *mut _, &mut info_len) == 0 {
+                                // Compute SHA-256 hash of retrieved bytecode instructions
+                                let mut hasher = Sha256::new();
+                                hasher.update(&instructions);
+                                let result = hasher.finalize();
+                                let hex_hash = format!("{:x}", result);
+
+                                println!("[INTEGRITY] Checked prog: {}, JIT Size: {}B, Hash: {}", prog_name, jit_len, hex_hash);
+
+                                if expected_hash == "0000000000000000000000000000000000000000000000000000000000000000" {
+                                    println!("[INTEGRITY] [LEARNING MODE] Registered initial signature hash for {}.", prog_name);
+                                } else if &hex_hash != expected_hash {
+                                    println!("[INTEGRITY] 🔴 SIGNATURE MISMATCH on {}! Expected: {}, Actual: {}", prog_name, expected_hash, hex_hash);
+                                    mismatch_found = true;
+                                    mismatch_name = prog_name.clone();
+                                }
+                            } else {
+                                println!("[WARNING] Failed to load bytecode instructions for program {}", prog_name);
+                                mismatch_found = true;
+                                mismatch_name = prog_name.clone();
+                            }
                         }
                     }
                 }
