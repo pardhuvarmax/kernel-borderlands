@@ -1,0 +1,33 @@
+{
+  "name": "lateral_movement",
+  "should_trigger": true,
+  "description": "Network probing and connection establishment to internal network hosts.",
+  "events": [
+    {
+      "type": "exec",
+      "pid": 5020,
+      "comm": "nmap",
+      "ppid": 4890
+    },
+    {
+      "type": "network",
+      "pid": 5020,
+      "dst": "10.0.0.1",
+      "port": 22,
+      "proto": "TCP"
+    },
+    {
+      "type": "network",
+      "pid": 5020,
+      "dst": "10.0.0.2",
+      "port": 80,
+      "proto": "TCP"
+    },
+    {
+      "type": "exec",
+      "pid": 5025,
+      "comm": "ssh",
+      "ppid": 4890
+    }
+  ]
+}

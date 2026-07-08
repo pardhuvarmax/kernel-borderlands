@@ -1,0 +1,22 @@
+{
+  "name": "normal_nginx",
+  "should_trigger": false,
+  "description": "Benign nginx traffic handling loop (baseline signature).",
+  "events": [
+    {
+      "type": "network",
+      "pid": 1102,
+      "dst": "0.0.0.0",
+      "port": 80,
+      "proto": "TCP_BIND"
+    },
+    {
+      "type": "file",
+      "pid": 1102,
+      "comm": "nginx",
+      "filename": "/var/log/nginx/access.log",
+      "flags": "O_WRONLY|O_APPEND",
+      "sensitive": false
+    }
+  ]
+}

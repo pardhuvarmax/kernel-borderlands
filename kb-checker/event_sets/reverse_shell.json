@@ -1,0 +1,26 @@
+{
+  "name": "reverse_shell",
+  "should_trigger": true,
+  "description": "Standard interactive shell redirected over a network socket connection.",
+  "events": [
+    {
+      "type": "exec",
+      "pid": 5010,
+      "comm": "bash",
+      "ppid": 5009
+    },
+    {
+      "type": "network",
+      "pid": 5010,
+      "dst": "192.168.1.200",
+      "port": 4444,
+      "proto": "TCP"
+    },
+    {
+      "type": "exec",
+      "pid": 5012,
+      "comm": "sh",
+      "ppid": 5010
+    }
+  ]
+}

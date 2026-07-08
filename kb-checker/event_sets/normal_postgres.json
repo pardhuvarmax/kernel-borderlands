@@ -1,0 +1,22 @@
+{
+  "name": "normal_postgres",
+  "should_trigger": false,
+  "description": "Benign postgres traffic handling loop (baseline signature).",
+  "events": [
+    {
+      "type": "network",
+      "pid": 1215,
+      "dst": "127.0.0.1",
+      "port": 5432,
+      "proto": "TCP_BIND"
+    },
+    {
+      "type": "file",
+      "pid": 1215,
+      "comm": "postgres",
+      "filename": "/var/lib/postgresql/data/base/16384/1259",
+      "flags": "O_RDWR",
+      "sensitive": false
+    }
+  ]
+}

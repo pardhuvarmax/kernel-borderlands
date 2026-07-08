@@ -1,0 +1,21 @@
+{
+  "name": "privilege_escalation",
+  "should_trigger": true,
+  "description": "Exploitation of setuid or setcap configurations to elevate process privileges.",
+  "events": [
+    {
+      "type": "exec",
+      "pid": 5001,
+      "comm": "pkexec",
+      "ppid": 4890
+    },
+    {
+      "type": "privilege",
+      "pid": 5001,
+      "old_uid": 1001,
+      "new_uid": 0,
+      "cap_effective": "0x0000003fffffffff",
+      "escalation": true
+    }
+  ]
+}
