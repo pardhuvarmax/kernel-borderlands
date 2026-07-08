@@ -139,3 +139,42 @@ WantedBy=multi-user.target
 ### Graceful Termination
 * **Scenario**: A system administrator stops the watchdog daemon (`systemctl stop kb-checker`).
 * **Behavior**: `kb-checker` catches the `SIGTERM` signal, terminates the active auditing loops, closes the gRPC server, and cleans up `/run/kb/kbc.sock` and `/run/kb/kb-checker.pid`.
+
+---
+
+## 5. Tampering Containment & Workload Gating
+
+To secure the platform against early-boot compromises, the boot sequence enforces a strict division between the **Control Plane** (communication gateway), the **Core Subsystem** (eBPF telemetry), and the **AADS Subsystem** (Ray agent workloads). 
+
+```mermaid
+graph TD
+    A[Tampering Detected during Boot] --> B{Tampered Element?}
+    B -->|eBPF Bytecode or Hook Liveness| C[Halting Core Subsystem]
+    C --> C1[Unload kbd_sensor from Kernel]
+    C --> C2[Send integrity violation state & stack trace to kbd Control Plane]
+    C2 --> C3[kbd forwards alert to Operator Console]
+    C3 --> C4[System enters Quarantine: Only Control Plane active]
+    
+    B -->|kb-checker kbc fails to start| D[Halting AADS Subsystem]
+    D --> D1[Systemd blocks kbd-agent / Ray Agent startup]
+    D1 --> D2[Workload execution denied]
+    D2 --> D3[System enters Quarantine: Only Control Plane active]
+```
+
+### Scenario A: eBPF Program Integrity Violation (Liveness / Signature Tampering)
+If `kb-checker` detects an eBPF integrity violation (signature hash mismatch in memory or liveness heartbeat bypass) during the initial Phase 2 checks:
+1. **Emergency Halting of Core Subsystem**: `kb-checker` immediately triggers a command to unload and remove the `kbd_sensor` bytecode from kernel memory (using `kb-core-loader --unload`). This ensures that compromised or hijacked sensors are prevented from running or providing spoofed telemetry.
+2. **Detailed Diagnostic Reporting**: The checker compiles a diagnostic dump, including:
+   * The program name that failed validation.
+   * Expected vs. actual SHA-256 bytecode signature hashes.
+   * A call stack trace of the validation failure event.
+3. **Control Plane Communication**: This report is dispatched over the UDS `/run/kb/kba.sock` to the Go Control Plane (`kbd`). 
+4. **Operator Propagation**: The Go Control Plane remains active, logs the critical error, and broadcasts the `INTEGRITY_VIOLATION_CONTAIN` status to the central Operator Console.
+5. **System State**: The node remains online exclusively for diagnostic query, but the core sensor monitoring is terminated to prevent false security signals.
+
+### Scenario B: `kb-checker` (kbc) Daemon Failure
+If the safety watchdog daemon `kb-checker` crashes, is killed, or fails to initialize successfully:
+1. **AADS Subsystem Halt**: Because the Ray Swarm agent (`kbd-agent.service`) has a strict systemd dependency chaining of `Requires=kb-checker.service` and `After=kb-checker.service`, the Ray agent is completely blocked from starting.
+2. **Workload Denial**: No ML agent distributed workloads are allowed to execute on the node.
+3. **System State**: The node is quarantined from the Ray Swarm cluster. The Go Control Plane (`kbd.service`) stays active, allowing administrators to query the system state remotely over `kba.sock` to diagnose the watchdog crash.
+
