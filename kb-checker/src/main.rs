@@ -1,3 +1,6 @@
+use std::fs::{self, File};
+use std::io::Write;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use clap::{Parser, Subcommand};
@@ -9,6 +12,7 @@ use kb_checker::report::trigger_auto_recovery;
 use kb_checker::grpc::{start_grpc_server, CheckerState};
 
 const CONTROL_PLANE_UDS: &str = "/run/kb/kba.sock";
+const PID_PATH: &str = "/run/kb/kb-checker.pid";
 
 #[derive(Parser)]
 #[command(name = "kb-checker")]
@@ -66,6 +70,40 @@ fn update_state(state: &Arc<Mutex<CheckerState>>, healthy: bool, err_msg: Option
     }
 }
 
+// POSIX Lock implementation using libc
+fn acquire_pid_lock(pid_path: &str) -> Result<File, Box<dyn std::error::Error>> {
+    if let Some(parent) = Path::new(pid_path).parent() {
+        fs::create_dir_all(parent)?;
+    }
+    
+    let file = File::create(pid_path)?;
+    let fd = std::os::unix::io::AsRawFd::as_raw_fd(&file);
+    
+    unsafe {
+        // LOCK_EX (exclusive lock), LOCK_NB (non-blocking)
+        if libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) != 0 {
+            return Err("Another instance of kb-checker is already running (failed to acquire flock).".into());
+        }
+    }
+    
+    let pid = std::process::id();
+    let mut writer = &file;
+    writeln!(writer, "{}", pid)?;
+    Ok(file)
+}
+
+fn cleanup_pid_and_socket(pid_path: &str, socket_path: Option<&str>) {
+    println!("[DAEMON] Cleaning up runtime resources...");
+    if Path::new(pid_path).exists() {
+        let _ = fs::remove_file(pid_path);
+    }
+    if let Some(sock) = socket_path {
+        if Path::new(sock).exists() {
+            let _ = fs::remove_file(sock);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -74,13 +112,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Monitor { all, grpc_socket } => {
             if all {
+                // Acquire PID file lock for single-instance protection
+                let _pid_file = match acquire_pid_lock(PID_PATH) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        eprintln!("[DAEMON] Error: {}", e);
+                        std::process::exit(1);
+                    }
+                };
+
                 println!("[DAEMON] Starting kb-checker Safety Daemon validation loops...");
 
                 // Start optional gRPC server if socket path is provided
-                if let Some(socket_path) = grpc_socket {
+                if let Some(ref socket_path) = grpc_socket {
                     let server_state = Arc::clone(&state);
+                    let socket_path_clone = socket_path.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = start_grpc_server(&socket_path, server_state).await {
+                        if let Err(e) = start_grpc_server(&socket_path_clone, server_state).await {
                             eprintln!("[GRPC] Server error: {:?}", e);
                         }
                     });
@@ -218,10 +266,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 });
 
-                // Keep daemon alive
-                loop {
-                    sleep(Duration::from_secs(3600)).await;
+                // Set up signal handlers for graceful cleanup on termination
+                let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+                let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+
+                tokio::select! {
+                    _ = sigint.recv() => {
+                        println!("\n[DAEMON] Received SIGINT (Ctrl+C). Initiating graceful shutdown...");
+                    }
+                    _ = sigterm.recv() => {
+                        println!("\n[DAEMON] Received SIGTERM. Initiating graceful shutdown...");
+                    }
                 }
+
+                cleanup_pid_and_socket(PID_PATH, grpc_socket.as_deref());
+                println!("[DAEMON] Graceful shutdown complete.");
             }
         }
         Commands::Check { target } => {
