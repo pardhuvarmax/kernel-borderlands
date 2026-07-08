@@ -206,14 +206,27 @@ graph TD
 
 ### Scenario A: eBPF Program Integrity Violation (Liveness / Signature Tampering)
 If `kb-checker` detects an eBPF integrity violation (signature hash mismatch in memory or liveness heartbeat bypass) during the initial Phase 2 checks:
-1. **Emergency Halting of Core Subsystem**: `kb-checker` immediately triggers a command to unload and remove the `kbd_sensor` bytecode from kernel memory (using `kb-core-loader --unload`). This ensures that compromised or hijacked sensors are prevented from running or providing spoofed telemetry.
-2. **Detailed Diagnostic Reporting**: The checker compiles a diagnostic dump, including:
+1. **Emergency Halting of Core Subsystem**: `kb-checker` immediately triggers a command to stop the `kb-sensor.service` (unloading the `kbd_sensor` bytecode from kernel memory).
+2. **Watchdog Containment Fallback Hierarchy**: If `systemctl stop kb-sensor` fails (e.g. because the process is locked up or systemd is unresponsive), the watchdog initiates a three-stage hard lockdown:
+   * **Layer 1: Force Kill Userspace (`SIGKILL`)**: The checker directly terminates the sensor process group using `pkill -9 kbd_sensor` (or sending `SIGKILL` directly via `/proc/`).
+   * **Layer 2: Kernel-Level Hook Detachment (`bpftool`)**: If the process is killed but the eBPF program hooks remain pinned or active in kernel space, the checker runs `bpftool link detach` for all active Kernel Borderlands hooks and deletes pinned socket handles in `/sys/fs/bpf/`.
+   * **Layer 3: Network Quarantine (IP Firewall Lockdown)**: If the kernel remains compromised and the hooks cannot be detached, the checker completely isolates the host by blocking all external network and internet traffic:
+     ```bash
+     # Drop all external traffic, preserving only local loopback (lo)
+     iptables -P INPUT DROP
+     iptables -P OUTPUT DROP
+     iptables -P FORWARD DROP
+     iptables -A INPUT -i lo -j ACCEPT
+     iptables -A OUTPUT -o lo -j ACCEPT
+     ```
+     This completely isolates the node from the network and the Ray Swarm, preventing data exfiltration or lateral attacks, while keeping the local Control Plane alive for console debugging.
+3. **Detailed Diagnostic Reporting**: The checker compiles a diagnostic dump, including:
    * The program name that failed validation.
    * Expected vs. actual SHA-256 bytecode signature hashes.
    * A call stack trace of the validation failure event.
-3. **Control Plane Communication**: This report is dispatched over the UDS `/run/kb/kba.sock` to the Go Control Plane (`kbd`). 
-4. **Operator Propagation**: The Go Control Plane remains active, logs the critical error, and broadcasts the `INTEGRITY_VIOLATION_CONTAIN` status to the central Operator Console.
-5. **System State**: The node remains online exclusively for diagnostic query, but the core sensor monitoring is terminated to prevent false security signals.
+4. **Control Plane Communication**: This report is dispatched over the UDS `/run/kb/kba.sock` to the Go Control Plane (`kbd`). 
+5. **Operator Propagation**: The Go Control Plane remains active, logs the critical error, and broadcasts the `INTEGRITY_VIOLATION_CONTAIN` status to the central Operator Console.
+6. **System State**: The node remains online exclusively for diagnostic query, but the core sensor monitoring is terminated to prevent false security signals.
 
 ### Scenario B: `kb-checker` (kbc) Daemon Failure
 If the safety watchdog daemon `kb-checker` crashes, is killed, or fails to initialize successfully:
