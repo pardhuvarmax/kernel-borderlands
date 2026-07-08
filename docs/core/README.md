@@ -14,4 +14,7 @@ This directory houses core platform enhancement records, development cycle achie
 * **Filename**: `work_report_2026_07_07.md`
 * **Purpose**: Details the operator interface folder restructuring under `kb-op/`, specification file moves to `docs/specdocs/`, off-tree GitHub wiki repository synchronization, website index modifications, and permanent developer guidelines updates.
 * **Lead Engineer**: K. Pardhu (Systems & Security Lead)
-
+### 3. [Ray Cluster Integration Walkthrough](ray_integration_walkthrough.md)
+* **Filename**: `ray_integration_walkthrough.md`
+* **Purpose**: Technical walkthrough and development worksheet for AADS swarm transition to Ray. Details transforming python agents to remote Ray Actors, remote actor message passing, orchestrator launch flows, and REST API diagnostics.
+* **Lead Engineer**: Karthik (AADS Swarm Lead)
