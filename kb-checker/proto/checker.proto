@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package checker;
+
+message StatusRequest {}
+
+message StatusResponse {
+    bool healthy = 1;
+    string last_checked = 2;
+    repeated string errors = 3;
+}
+
+service CheckerStatus {
+    rpc GetStatus(StatusRequest) returns (StatusResponse);
+}
