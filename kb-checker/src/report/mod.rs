@@ -9,15 +9,25 @@ pub async fn trigger_auto_recovery(reason: &str, is_integrity_violation: bool) {
     println!("[RECOVERY] 🔴 CRITICAL: Safety validation failed! Reason: {}", reason);
     println!("[RECOVERY] Executing clean reload of eBPF programs...");
 
-    // 1. Reload bytecode using C loader helper
-    let status = Command::new("/usr/sbin/kb-core-loader")
-        .arg("--reload")
+    // 1. Manage the eBPF sensor service via Systemd depending on threat severity
+    let (cmd_arg, msg_action) = if is_integrity_violation {
+        // Critical Tampering: halt the core subsystem by stopping the sensor service
+        ("stop", "unload")
+    } else {
+        // Warning: attempt auto-recovery by restarting the service
+        ("restart", "reload")
+    };
+
+    println!("[RECOVERY] Invoking systemctl {} kb-sensor...", cmd_arg);
+    let status = Command::new("systemctl")
+        .arg(cmd_arg)
+        .arg("kb-sensor")
         .status();
 
     match status {
-        Ok(s) if s.success() => println!("[RECOVERY] clean BPF reload triggered successfully."),
-        Ok(s) => println!("[RECOVERY] clean BPF reload failed with exit status: {}", s),
-        Err(e) => println!("[RECOVERY] Failed to invoke loader: {:?}", e),
+        Ok(s) if s.success() => println!("[RECOVERY] Sensor {} triggered successfully.", msg_action),
+        Ok(s) => println!("[RECOVERY] Sensor {} failed with exit status: {}", msg_action, s),
+        Err(e) => println!("[RECOVERY] Failed to execute systemctl: {:?}", e),
     }
 
     // 2. Send Alert decision alert to Go Control Plane
