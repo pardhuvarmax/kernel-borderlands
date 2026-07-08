@@ -9,25 +9,25 @@ This document details the authoritative design architecture, command-line interf
 ```mermaid
 flowchart TD
     subgraph kb_checker_daemon ["kb-checker Daemon (Rust Binary Application)"]
-        Manager[Validation Manager]
-        Task1[eBPF Signature Loop\nlibbpf-sys / 1m interval]
-        Task2[gRPC Health Check Loop\nUDS: /run/kb/kba.sock / 5s interval]
-        Task3[Ray Cluster REST Loop\nHTTP: localhost:8265 / 30s interval]
-        Server[Diagnostic gRPC Server\nUDS: /run/kb/kbc.sock]
+        Manager["Validation Manager"]
+        Task1["eBPF Signature Loop\nlibbpf-sys / 1m interval"]
+        Task2["gRPC Health Check Loop\nUDS: /run/kb/kba.sock / 5s interval"]
+        Task3["Ray Cluster REST Loop\nHTTP: localhost:8265 / 30s interval"]
+        Server["Diagnostic gRPC Server\nUDS: /run/kb/kbc.sock"]
     end
     
-    subgraph Kernel Space
-        BPF[Active JITed eBPF Programs]
+    subgraph Kernel_Space ["Kernel Space"]
+        BPF["Active JITed eBPF Programs"]
     end
     
-    subgraph Control Plane
-        KBD[kbd Daemon]
-        UDS{/run/kb/kba.sock}
-        Policy[/etc/kb/ebpf_policies.json]
+    subgraph Control_Plane ["Control Plane"]
+        KBD["kbd Daemon"]
+        UDS["/run/kb/kba.sock"]
+        Policy["/etc/kb/ebpf_policies.json"]
     end
     
-    subgraph Swarm
-        Ray[Ray Cluster Manager REST API]
+    subgraph Swarm ["Swarm"]
+        Ray["Ray Cluster Manager REST API"]
     end
     
     Task1 -->|bpf syscalls| BPF
@@ -35,7 +35,7 @@ flowchart TD
     Task2 -->|gRPC Health Check| UDS
     Task3 -->|HTTP GET /api/jobs| Ray
     
-    Manager -->|Integrity Failure| Recovery[Reload Clean Bytecode & Push Alert via gRPC]
+    Manager -->|Integrity Failure| Recovery["Reload Clean Bytecode & Push Alert via gRPC"]
 ```
 
 ### A. eBPF Hook Integrity Verification
