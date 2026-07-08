@@ -24,9 +24,9 @@ enum Commands {
         #[arg(long, default_value_t = true)]
         all: bool,
 
-        /// Optional: Port to run the diagnostic gRPC server on (e.g., 50052)
+        /// Optional: Path to run the diagnostic gRPC server on Unix Domain Socket
         #[arg(long)]
-        grpc_port: Option<u16>,
+        grpc_socket: Option<String>,
     },
     /// Run one-off integrity checks
     Check {
@@ -64,16 +64,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(Mutex::new(CheckerState::default()));
 
     match cli.command {
-        Commands::Monitor { all, grpc_port } => {
+        Commands::Monitor { all, grpc_socket } => {
             if all {
                 println!("[DAEMON] Starting kb-checker Safety Daemon validation loops...");
 
-                // Start optional gRPC server if port is provided
-                if let Some(port) = grpc_port {
+                // Start optional gRPC server if socket path is provided
+                if let Some(socket_path) = grpc_socket {
                     let server_state = Arc::clone(&state);
                     tokio::spawn(async move {
-                        let addr = format!("0.0.0.0:{}", port).parse().unwrap();
-                        if let Err(e) = start_grpc_server(addr, server_state).await {
+                        if let Err(e) = start_grpc_server(&socket_path, server_state).await {
                             eprintln!("[GRPC] Server error: {:?}", e);
                         }
                     });

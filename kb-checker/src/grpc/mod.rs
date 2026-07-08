@@ -1,5 +1,7 @@
 use std::sync::{Arc, Mutex};
 use tonic::{Request, Response, Status};
+use tokio::net::UnixListener;
+use tokio_stream::wrappers::UnixListenerStream;
 
 use crate::checker::checker_status_server::{CheckerStatus, CheckerStatusServer};
 use crate::checker::{StatusRequest, StatusResponse};
@@ -48,12 +50,27 @@ impl CheckerStatus for CheckerStatusService {
 }
 
 pub async fn start_grpc_server(
-    addr: std::net::SocketAddr,
+    uds_path: &str,
     state: Arc<Mutex<CheckerState>>,
-) -> Result<(), tonic::transport::Error> {
-    println!("[GRPC] Starting Checker gRPC Status Server on {}...", addr);
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Clean up existing socket file if it exists
+    if std::path::Path::new(uds_path).exists() {
+        let _ = std::fs::remove_file(uds_path);
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = std::path::Path::new(uds_path).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    println!("[GRPC] Starting Checker gRPC Status Server on UDS: {}...", uds_path);
+    let uds = UnixListener::bind(uds_path)?;
+    let uds_stream = UnixListenerStream::new(uds);
+
     tonic::transport::Server::builder()
         .add_service(CheckerStatusServer::new(CheckerStatusService::new(state)))
-        .serve(addr)
-        .await
+        .serve_with_incoming(uds_stream)
+        .await?;
+
+    Ok(())
 }
