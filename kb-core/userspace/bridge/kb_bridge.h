@@ -19,6 +19,36 @@
 #include <stddef.h>
 #include "../../include/kb_scoring.h"
 
+#define KB_WIRE_MAGIC    0x4B42  // "KB"
+#define KB_WIRE_VERSION  3       // v3: added start_time_ns to ZoneTransition
+
+#define KB_WIRE_MSG_PROCESS_STATE    1
+#define KB_WIRE_MSG_ZONE_TRANSITION  2
+#define KB_WIRE_MSG_PROCESS_EXIT     4
+#define KB_WIRE_MSG_CONTAINMENT_CMD  5
+
+#pragma pack(push, 1)
+struct kb_wire_header {
+    uint16_t magic;
+    uint8_t  version;
+    uint8_t  msg_type;
+};
+
+struct kb_wire_containment_cmd {
+    struct kb_wire_header hdr;
+    uint32_t pid;
+    uint32_t level; // 0=None, 1=Cgroup, 2=Seccomp, 3=Namespace, 4=Terminate
+    char reason[64];
+};
+
+struct kb_wire_process_exit {
+    struct kb_wire_header hdr;
+    uint32_t pid;
+    uint64_t exit_time_ns;
+    uint32_t exit_code;
+};
+#pragma pack(pop)
+
 // ---- connection lifecycle ----
 
 // Connect to a Unix domain socket at sock_path (e.g. "/var/run/kbd.sock").
@@ -46,6 +76,8 @@ int kb_bridge_send_state(int fd, const kb_process_state_t *s);
 int kb_bridge_send_zone_transition(int fd, uint32_t pid, uint64_t start_time_ns,
                                     kb_zone_t from, kb_zone_t to,
                                     double score, uint64_t ts_ns);
+
+int kb_bridge_send_process_exit(int fd, uint32_t pid, uint64_t exit_time_ns, uint32_t exit_code);
 
 #define KB_BRIDGE_DEFAULT_SOCK   "/run/kb/kbd.sock"
 #define KB_BRIDGE_RETRY_MIN_MS   100

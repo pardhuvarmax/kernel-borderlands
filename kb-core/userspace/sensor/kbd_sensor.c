@@ -21,6 +21,7 @@
 #include "../../include/kb_behavior.h"
 #include "../../include/kb_rules.h"
 #include "../bridge/kb_bridge.h"
+#include <fcntl.h>
 
 // Timestamp source for sends not triggered by a live kb_unified_event
 static uint64_t now_ns(void)
@@ -123,11 +124,22 @@ static struct kb_delta_entry delta_buf[KB_ENTROPY_MAX_MAP_ITER];
 static int   bridge_fd = -1;
 static char  bridge_sock_path[108] = KB_BRIDGE_DEFAULT_SOCK;
 
+static void make_fd_nonblocking(int fd)
+{
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags != -1) {
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+}
+
 static void bridge_ensure_connected(void)
 {
     if (bridge_fd >= 0)
         return;
     bridge_fd = kb_bridge_try_connect(bridge_sock_path);
+    if (bridge_fd >= 0) {
+        make_fd_nonblocking(bridge_fd);
+    }
 }
 
 static void bridge_dispatch(kb_scoring_result_t r, uint64_t ts_ns)
@@ -430,6 +442,51 @@ static int read_rules_from_bridge(int fd)
     kb_rules_load_wire((const struct kb_wire_attack_rule *)(buf + 8), rule_count);
     free(buf);
     return 0;
+}
+
+static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
+{
+    uint32_t length = 0;
+    ssize_t n = recv(fd, &length, 4, MSG_PEEK | MSG_DONTWAIT);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+        close(fd);
+        bridge_fd = -1;
+        return;
+    }
+    if (n == 0) {
+        close(fd);
+        bridge_fd = -1;
+        return;
+    }
+    if (n < 4) return;
+
+    if (length != sizeof(struct kb_wire_containment_cmd)) {
+        char garbage[256];
+        recv(fd, garbage, sizeof(garbage), MSG_DONTWAIT);
+        return;
+    }
+
+    char pkt_buf[80];
+    ssize_t peek_sz = recv(fd, pkt_buf, 4 + length, MSG_PEEK | MSG_DONTWAIT);
+    if (peek_sz < 4 + length) {
+        return;
+    }
+
+    recv(fd, pkt_buf, 4 + length, MSG_DONTWAIT);
+
+    struct kb_wire_containment_cmd *cmd = (struct kb_wire_containment_cmd *)(pkt_buf + 4);
+    if (cmd->hdr.magic != KB_WIRE_MAGIC || cmd->hdr.version != KB_WIRE_VERSION || cmd->hdr.msg_type != KB_WIRE_MSG_CONTAINMENT_CMD) {
+        return;
+    }
+
+    uint32_t pid = cmd->pid;
+    uint32_t level = cmd->level;
+    int map_fd = bpf_map__fd(skel->maps.contained_pids_map);
+    if (map_fd >= 0) {
+        bpf_map_update_elem(map_fd, &pid, &level, BPF_ANY);
+        printf("[SENSOR] Applied containment level %u to PID %u (Reason: %s)\n", level, pid, cmd->reason);
+    }
 }
 
 static kb_zone_t map_state_to_zone(kb_behavior_state_t state)
@@ -848,7 +905,11 @@ static int handle_event(void *ctx, void *data, size_t sz)
             break;
 
         case KB_EVT_PROCESS_EXIT:
-            printf("\n");
+            bridge_ensure_connected();
+            if (bridge_fd >= 0) {
+                kb_bridge_send_process_exit(bridge_fd, e->pid, e->ts_ns, e->syscall_nr);
+            }
+            printf("exit_code=%d\n", e->syscall_nr);
             break;
 
         case KB_EVT_SYSCALL:
@@ -940,6 +1001,7 @@ int main(void)
         if (read_rules_from_bridge(bridge_fd) < 0) {
             fprintf(stderr, "kbd_sensor: failed to read rules from control plane, using default compiled rules\n");
         }
+        make_fd_nonblocking(bridge_fd);
     }
 
     printf("╔══════════════════════════════════════════════╗\n");
@@ -991,6 +1053,10 @@ int main(void)
         err = ring_buffer__poll(rb, 100);
         if (err == -EINTR) { err = 0; break; }
         if (err < 0) break;
+
+        if (bridge_fd >= 0) {
+            handle_incoming_containment_cmd(bridge_fd, skel);
+        }
 
         if (++poll_count >= KB_ENTROPY_SCAN_EVERY_N_POLLS) {
             poll_count = 0;

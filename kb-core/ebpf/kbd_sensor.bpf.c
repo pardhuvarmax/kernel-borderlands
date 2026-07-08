@@ -119,6 +119,13 @@ struct {
     __type(value, __u32);
 } kb_sensitive_paths SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key,   __u32);   // PID
+    __type(value, __u32);   // Containment Level
+} contained_pids_map SEC(".maps");
+
 static __always_inline struct kb_unified_event *kb_reserve_event(void)
 {
     struct kb_unified_event *e =
@@ -163,9 +170,11 @@ SEC("tp/sched/sched_process_exit")
 int kb_handle_exit(struct trace_event_raw_sched_process_template *ctx)
 {
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_PROCESS_EXIT);
+    e->syscall_nr = BPF_CORE_READ(task, exit_code);
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
@@ -513,9 +522,23 @@ static __always_inline int is_sensitive_kernel_path(char *buf)
 SEC("lsm/file_open")
 int BPF_PROG(kb_lsm_file_open, struct file *file, int mask)
 {
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u32 *level = bpf_map_lookup_elem(&contained_pids_map, &pid);
+
     char path_buf[64] = {};
     int len = bpf_d_path(&file->f_path, path_buf, sizeof(path_buf));
     if (len < 0) return 0;
+
+    if (level) {
+        if (*level >= 3) {
+            return -13; // Block ALL file open requests (full sandbox quarantine)
+        }
+        if (*level == 2) {
+            if (is_sensitive_kernel_path(path_buf)) {
+                return -13; // Block sensitive paths first
+            }
+        }
+    }
 
     if (is_sensitive_kernel_path(path_buf)) {
         return -13; // Block by returning -EACCES

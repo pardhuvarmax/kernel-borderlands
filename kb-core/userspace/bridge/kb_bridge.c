@@ -17,19 +17,9 @@
 #include <sys/un.h>
 #include <stdlib.h>
 
-#define KB_WIRE_MAGIC    0x4B42  // "KB"
-#define KB_WIRE_VERSION  3  // v3: added start_time_ns to ZoneTransition (PID-reuse guard)
 
-#define KB_WIRE_MSG_PROCESS_STATE    1
-#define KB_WIRE_MSG_ZONE_TRANSITION  2
 
 #pragma pack(push, 1)
-struct kb_wire_header {
-    uint16_t magic;
-    uint8_t  version;
-    uint8_t  msg_type;
-};
-
 struct kb_wire_process_state {
     struct kb_wire_header hdr;
     uint32_t pid;
@@ -207,6 +197,20 @@ int kb_bridge_send_zone_transition(int fd, uint32_t pid, uint64_t start_time_ns,
     w.to_zone        = (uint32_t)to;
     w.score          = score;
     w.ts_ns          = ts_ns;
+
+    return send_framed(fd, &w, sizeof(w));
+}
+
+int kb_bridge_send_process_exit(int fd, uint32_t pid, uint64_t exit_time_ns, uint32_t exit_code)
+{
+    struct kb_wire_process_exit w = {0};
+    w.hdr.magic    = KB_WIRE_MAGIC;
+    w.hdr.version  = KB_WIRE_VERSION;
+    w.hdr.msg_type = KB_WIRE_MSG_PROCESS_EXIT;
+
+    w.pid          = pid;
+    w.exit_time_ns = exit_time_ns;
+    w.exit_code    = exit_code;
 
     return send_framed(fd, &w, sizeof(w));
 }
