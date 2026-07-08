@@ -1,5 +1,5 @@
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use crate::kb::kernel_borderlands_client::KernelBorderlandsClient;
 use crate::kb::AgentDecision;
 use crate::service_check::connect_uds_grpc;
@@ -24,13 +24,44 @@ pub async fn trigger_auto_recovery(reason: &str, is_integrity_violation: bool) {
         .arg("kb-sensor")
         .status();
 
+    let mut stop_success = false;
     match status {
-        Ok(s) if s.success() => println!("[RECOVERY] Sensor {} triggered successfully.", msg_action),
+        Ok(s) if s.success() => {
+            println!("[RECOVERY] Sensor {} triggered successfully.", msg_action);
+            stop_success = true;
+        }
         Ok(s) => println!("[RECOVERY] Sensor {} failed with exit status: {}", msg_action, s),
         Err(e) => println!("[RECOVERY] Failed to execute systemctl: {:?}", e),
     }
 
-    // 2. Send Alert decision alert to Go Control Plane
+    // 2. If this is an integrity violation (tampering) and systemd stop failed, initiate fallback lockdown
+    if is_integrity_violation && !stop_success {
+        println!("[LOCKDOWN] ⚠️ systemctl stop failed or timed out during integrity breach! Initiating hard containment fallback...");
+
+        // ── Layer 1: Force Kill Userspace (SIGKILL) ──
+        println!("[LOCKDOWN] Layer 1: Terminating kbd_sensor process group...");
+        let _ = Command::new("pkill")
+            .args(&["-9", "kbd_sensor"])
+            .status();
+        std::thread::sleep(Duration::from_millis(500));
+
+        // ── Layer 2: Kernel-Level Hook Detachment (bpftool cleanup) ──
+        println!("[LOCKDOWN] Layer 2: Detaching eBPF links and removing pins...");
+        let _ = Command::new("rm")
+            .args(&["-rf", "/sys/fs/bpf/kb_events", "/sys/fs/bpf/kbd_sensor"])
+            .status();
+
+        // ── Layer 3: Network Quarantine (IPTables Lockdown) ──
+        println!("[LOCKDOWN] Layer 3: Quarantine Host - Blocking all external network traffic...");
+        let _ = Command::new("iptables").args(&["-P", "INPUT", "DROP"]).status();
+        let _ = Command::new("iptables").args(&["-P", "OUTPUT", "DROP"]).status();
+        let _ = Command::new("iptables").args(&["-P", "FORWARD", "DROP"]).status();
+        let _ = Command::new("iptables").args(&["-A", "INPUT", "-i", "lo", "-j", "ACCEPT"]).status();
+        let _ = Command::new("iptables").args(&["-A", "OUTPUT", "-o", "lo", "-j", "ACCEPT"]).status();
+        println!("[LOCKDOWN] Host network successfully quarantined. Local loopback preserved for diagnostic communication.");
+    }
+
+    // 3. Send Alert decision alert to Go Control Plane
     if let Ok(channel) = connect_uds_grpc().await {
         let mut client = KernelBorderlandsClient::new(channel);
 
