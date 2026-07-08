@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         };
                         if let Some(reason) = err_str {
-                            trigger_auto_recovery(&reason).await;
+                            trigger_auto_recovery(&reason, true).await;
                         }
                         sleep(Duration::from_secs(60)).await;
                     }
@@ -116,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         };
                         if let Some(reason) = err_str {
-                            trigger_auto_recovery(&reason).await;
+                            trigger_auto_recovery(&reason, false).await;
                         }
                         sleep(Duration::from_secs(5)).await;
                     }
@@ -138,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         };
                         if let Some(reason) = err_str {
-                            trigger_auto_recovery(&reason).await;
+                            trigger_auto_recovery(&reason, false).await;
                         }
                         sleep(Duration::from_secs(30)).await;
                     }
