@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 use clap::{Parser, Subcommand};
 use tokio::time::sleep;
 
-use kb_checker::integrity::{verify_ebpf_integrity, verify_liveness, verify_map_integrity};
+use kb_checker::integrity::{verify_ebpf_integrity, verify_liveness, verify_map_integrity, verify_ebpf_performance};
 use kb_checker::service_check::{check_control_plane_health, check_swarm_health};
 use kb_checker::report::trigger_auto_recovery;
 use kb_checker::grpc::{start_grpc_server, CheckerState};
@@ -49,6 +49,8 @@ enum CheckTargets {
     Liveness,
     /// Verify and self-heal eBPF containment map elements
     Map,
+    /// Audit eBPF hook execution latencies
+    Performance,
 }
 
 fn update_state(state: &Arc<Mutex<CheckerState>>, healthy: bool, err_msg: Option<String>) {
@@ -194,6 +196,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 });
 
+                // Task 6: eBPF Hook Performance Latency Audit (1m sleep interval)
+                let t6_state = Arc::clone(&state);
+                tokio::spawn(async move {
+                    loop {
+                        let err_str = match verify_ebpf_performance() {
+                            Ok(_) => {
+                                update_state(&t6_state, true, None);
+                                None
+                            }
+                            Err(e) => {
+                                let msg = e.to_string();
+                                update_state(&t6_state, false, Some(msg.clone()));
+                                Some(msg)
+                            }
+                        };
+                        if let Some(reason) = err_str {
+                            trigger_auto_recovery(&reason, false).await; // Latency Warning Alert
+                        }
+                        sleep(Duration::from_secs(60)).await;
+                    }
+                });
+
                 // Keep daemon alive
                 loop {
                     sleep(Duration::from_secs(3600)).await;
@@ -216,6 +240,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 CheckTargets::Map => {
                     verify_map_integrity(CONTROL_PLANE_UDS).await?;
+                }
+                CheckTargets::Performance => {
+                    verify_ebpf_performance()?;
                 }
             }
         }

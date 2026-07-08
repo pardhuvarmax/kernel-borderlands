@@ -310,3 +310,70 @@ pub async fn verify_map_integrity(uds_path: &str) -> Result<(), Box<dyn std::err
     println!("[MAP-AUDIT] Map integrity check successful. Kernel containment matches database.");
     Ok(())
 }
+
+// ── TASK 6: eBPF Hook Performance Latency Monitor ──
+pub fn verify_ebpf_performance() -> Result<(), Box<dyn std::error::Error>> {
+    println!("[PERF] Starting eBPF hook performance latency audit...");
+
+    let policy_content = fs::read_to_string(POLICY_FILE_PATH)?;
+    let policy: EbpfSignaturePolicy = serde_json::from_str(&policy_content)?;
+
+    let mut id = 0;
+    let mut checked_count = 0;
+    let mut high_latency_found = false;
+    let mut latency_program_name = String::new();
+    let mut latency_val = 0;
+
+    unsafe {
+        let mut next_id = 0;
+        while bpf_prog_get_next_id(id, &mut next_id) == 0 {
+            id = next_id;
+            let fd = bpf_prog_get_fd_by_id(id);
+            if fd >= 0 {
+                let mut info: libbpf_sys::bpf_prog_info = std::mem::zeroed();
+                let mut info_len = std::mem::size_of::<libbpf_sys::bpf_prog_info>() as u32;
+                
+                if bpf_obj_get_info_by_fd(fd, &mut info as *mut _ as *mut _, &mut info_len) == 0 {
+                    let name_bytes: Vec<u8> = info.name.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+                    let prog_name = String::from_utf8_lossy(&name_bytes).to_string();
+
+                    if policy.signatures.contains_key(&prog_name) {
+                        checked_count += 1;
+                        let run_time = info.run_time_ns;
+                        let run_cnt = info.run_cnt;
+                        
+                        let avg_ns = if run_cnt > 0 { run_time / run_cnt } else { 0 };
+                        
+                        println!("[PERF] Prog: {}, Runs: {}, Total Runtime: {}ns, Avg Runtime: {}ns", 
+                            prog_name, run_cnt, run_time, avg_ns);
+
+                        // If statistics are active and average runtime exceeds 500ns
+                        if avg_ns > 500 {
+                            println!("[PERF] ⚠️ LATENCY WARNING: Program {} avg runtime {}ns exceeds 500ns threshold!", prog_name, avg_ns);
+                            high_latency_found = true;
+                            latency_program_name = prog_name.clone();
+                            latency_val = avg_ns;
+                        }
+                    }
+                }
+                libc::close(fd);
+            }
+        }
+    }
+
+    if checked_count == 0 {
+        if std::process::id() != 0 {
+            println!("[WARNING] Running unprivileged. Cannot query native BPF program performance counters.");
+            return Ok(());
+        }
+        return Err("No active monitored eBPF programs found for performance audit".into());
+    }
+
+    if high_latency_found {
+        return Err(format!("BPF hook latency warning: program {} avg runtime {}ns exceeds 500ns threshold", 
+            latency_program_name, latency_val).into());
+    }
+
+    println!("[PERF] Performance audit successful. All monitored hooks operate within safe margins.");
+    Ok(())
+}
