@@ -26,9 +26,9 @@ This directory houses the authoritative technical specifications, design documen
   - **`kb-tui`**: Secure Wish SSH console (port 2222) for headless environments.
   - **`kb-mcp`**: JSON-RPC stdio protocol server for AI tool integration.
 
-### 5. [Control Plane & Operators Collaboration Spec](control_plane_collaboration_roadmap.md)
+### 5. [Control Plane & Operators Collaboration Spec & Worksheet](control_plane_collaboration_roadmap.md)
 * **Filename**: `control_plane_collaboration_roadmap.md`
-* **Purpose**: Outlines the collaborative milestones for Go-to-C containment IPC feedback loops, gRPC health checking protocol registration for Rust diagnostics, sched process exit frame life cycles, and SSH Wish hardening.
+* **Purpose**: Merged master specification and developer implementation worksheet. Maps out struct alignments, code updates, UDS communication flows, and test procedures for Task 1 (Go-to-C feedback loop), Task 2 (gRPC health check server), Task 3 (process exit tracepoints), and Task 4 (TUI Wish SSH hardening).
 
 ---
 
