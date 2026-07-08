@@ -1,6 +1,6 @@
 # Safety & Integrity Monitor Loops Design Specification
 
-This document details the aligned design architecture for the Rust-based safety and integrity enforcement daemon (`kb-checker`) in Kernel Borderlands.
+This document details the authoritative design architecture, command-line interface, scheduling parameters, and recovery procedures for the Rust-based safety and integrity enforcement daemon (`kb-checker`) in Kernel Borderlands.
 
 ---
 
@@ -8,49 +8,76 @@ This document details the aligned design architecture for the Rust-based safety 
 
 ```mermaid
 flowchart TD
-    subgraph kb-checker Daemon
-        Engine[Integrity Engine]
-        Loop1[eBPF Verification Loop]
-        Loop2[Control Plane UDS Loop]
-        Loop3[AADS Ray Cluster Loop]
+    subgraph kb-checker Daemon (Rust Binary Application)
+        Manager[Validation Manager]
+        Task1[eBPF Signature Loop\nlibbpf-rs / 1m interval]
+        Task2[gRPC Health Check Loop\nUDS: /run/kb/kbd-grpc.sock / 5s interval]
+        Task3[Ray Cluster REST Loop\nHTTP: localhost:8265 / 30s interval]
     end
     
     subgraph Kernel Space
-        BPF[Active eBPF Programs]
+        BPF[Active JITed eBPF Programs]
     end
     
     subgraph Control Plane
         KBD[kbd Daemon]
-        UDS{/run/kb/kbd.sock}
+        UDS{/run/kb/kbd-grpc.sock}
+        Policy[/etc/kb/ebpf_policies.json]
     end
     
     subgraph Swarm
-        Ray[Ray Cluster Manager]
+        Ray[Ray Cluster Manager REST API]
     end
     
-    Loop1 -->|bpf syscalls| BPF
-    Loop2 -->|gRPC Ping| UDS
-    Loop3 -->|API Query| Ray
+    Task1 -->|bpf syscalls| BPF
+    Task1 -.->|Read clean hashes| Policy
+    Task2 -->|gRPC Health Check| UDS
+    Task3 -->|HTTP GET /api/jobs| Ray
     
-    Engine -->|Failure| Contain[Quarantine & Reload]
+    Manager -->|Integrity Failure| Recovery[Reload Clean Bytecode & Push Alert via gRPC]
 ```
 
 ### A. eBPF Hook Integrity Verification
-- **Mechanism**: The daemon uses native `bpf` system calls (`BPF_PROG_GET_NEXT_ID`, `BPF_OBJ_GET_INFO_BY_FD`) via `libbpf-rs` to inspect active kernel program descriptors.
-- **Validation**: Program bytecodes are hashed and compared directly against verified signature policies to detect unauthorized hook modifications or hijack attempts.
+*   **Mechanism**: The daemon uses native `bpf` system calls (`BPF_PROG_GET_NEXT_ID`, `BPF_OBJ_GET_INFO_BY_FD`) via `libbpf-rs` and `libbpf-sys` to inspect active kernel program descriptors.
+*   **Validation**: Program bytecodes are hashed and compared directly against verified signature policies loaded from `/etc/kb/ebpf_policies.json` to detect unauthorized hook modifications or hijack attempts.
+*   **Interval**: Executed asynchronously on a **1-minute sleep interval** to prevent system lockups during high load.
 
 ### B. Control Plane Availability Verification
-- **Mechanism**: Initiates periodic gRPC ping handshakes over `/run/kb/kbd.sock`.
-- **Latency Target**: Must complete connection and sign-response checks within a strict **100ms timeout**. Any connection refusal or timeout is flagged as a Control Plane hang.
+*   **Mechanism**: Initiates periodic gRPC ping handshakes.
+*   **Transport Socket**: Communicates over a secure local Unix Domain Socket at `/run/kb/kbd-grpc.sock`.
+*   **Latency Target**: Must complete connection and sign-response checks within a strict **100ms timeout**. Any connection refusal or timeout is flagged as a Control Plane hang.
+*   **Interval**: Executed asynchronously on a **5-second sleep interval**.
 
 ### C. AADS Swarm Status Verification
-- **Mechanism**: The checker queries the local Ray cluster manager node daemon API to verify active container execution states, cluster allocation metrics, and agent life states.
+*   **Mechanism**: Queries the Ray cluster manager REST API node endpoint at `http://localhost:8265/api/jobs`.
+*   **Validation**: Verifies active worker node execution states, job queue allocations, and consensus cluster health.
+*   **Interval**: Executed asynchronously on a **30-second sleep interval**.
 
 ---
 
-## 2. Containment and Auto-Recovery Protocol
+## 2. Command-Line Interface (CLI) Specification
+
+`kb-checker` is built as an executable command-line utility with structured subcommands for daemon initialization and on-demand diagnostic checks:
+
+```bash
+# Start the background validation loops daemon
+kb-checker monitor --all
+
+# Run one-off integrity checks
+kb-checker check ebpf
+kb-checker check control-plane
+kb-checker check swarm
+```
+
+---
+
+## 3. Containment and Auto-Recovery Protocol
 
 If any integrity verification loop fails:
-1. **Quarantine State Triggered**: The checker daemon communicates an emergency isolation state payload to the Control Plane gRPC gateway.
-2. **Audit Logging**: An immutable, SHA-256 chained tamper-evident audit record is appended immediately to the L2 SQLite ledger.
-3. **Skeleton Auto-Reload**: The checker invokes the native `kb-core` loader skeleton entry points to reload verified clean eBPF programs, restoring telemetry integrity.
+1.  **Quarantine State Triggered**: The checker daemon communicates an emergency isolation state payload to the Control Plane gRPC gateway over the UDS connection.
+2.  **Audit Logging**: An immutable, SHA-256 chained tamper-evident audit record is appended immediately to the L2 SQLite ledger by the Go Control Plane.
+3.  **Skeleton Auto-Reload**: The checker executes the native C loader utility:
+    ```bash
+    /usr/sbin/kb-core-loader --reload
+    ```
+    This reloads verified clean eBPF program bytecodes, restoring system integrity without requiring a full host reboot.
