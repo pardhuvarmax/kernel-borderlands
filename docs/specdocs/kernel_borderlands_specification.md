@@ -62,7 +62,7 @@ A React dashboard using Tailwind CSS and Vite. It provides a visual dashboard fo
 A standardized Model Context Protocol (MCP) server integration, exposing tools, resources, and custom prompts to external AI assistants, swarms, and workspace clients.
 
 #### 7. `kb-aads` (Autonomous Swarm)
-The Decision Support Swarm. Written in Python, it runs multiple independent agent containers (Patroller, Hunter, Healer, Containment) communicating over Kafka queues to execute cluster-wide voting consensus on threat containment.
+The Decision Support Swarm. Written in Python, it runs multiple independent agent containers (Patroller, Hunter, Healer, Containment) communicating over ZeroMQ and Ray Actor channels to execute cluster-wide voting consensus on threat containment.
 
 ---
 
@@ -171,12 +171,12 @@ kernel-borderlands/
 └── kb-aads/                                   # Python MARL Agent Swarm
     ├── README.md                              # Swarm setup documentation
     ├── main.py                                # Swarm daemon entrypoint
-    ├── comms/                                 # Kafka consensus pipelines
+    ├── comms/                                 # ZeroMQ & Ray consensus pipelines
     ├── consensus/                             # Swarm voting and quorum engines
     ├── swarm/                                 # Swarm runtime managers
     ├── agents/                                # Agent files (Patroller, Hunter, Healer, Containment)
     ├── marl/                                  # Multi-agent reinforcement learning training configs
-    └── docker-compose.kafka.yml               # Dev Kafka brokers deployment configuration
+    └── docker-compose.yml                     # Local dev environment configuration
 ```
 
 ---
@@ -760,7 +760,7 @@ service KernelBorderlands {
 }
 ```
 
-The Python AADS swarm communicates over Kafka consensus pipelines, coordinating threat assessments across multiple nodes:
+The Python AADS swarm communicates over ZeroMQ and Ray Actor consensus pipelines, coordinating threat assessments across multiple nodes:
 
 ```mermaid
 sequenceDiagram
@@ -785,7 +785,7 @@ sequenceDiagram
 *   **Patroller Agent**: Continuously polls baseline statistics from `StreamEvents` to build normal behavior thresholds.
 *   **Hunter Agent**: Monitors `StreamAlerts`. When an anomaly is detected, it queries historical SQLite data to verify.
 *   **Healer Agent**: Analyzes event sequences to detect false-positives (e.g. valid backup actions matching suspicious execution sequences).
-*   **Consensus Engine**: Swarms execute a local voting protocol over Kafka topics. If a quorum of agents votes `COMPROMISED`, the Executor Agent triggers `EnforceContainment` with a `TERMINATE` payload.
+*   **Consensus Engine**: Swarms execute a local voting protocol over ZeroMQ topics. If a quorum of agents votes `COMPROMISED`, the Executor Agent triggers `EnforceContainment` with a `TERMINATE` payload.
 
 ---
 
@@ -1113,12 +1113,11 @@ Bubble Tea Elm-architecture structs.
 
 This appendix documents the internal agent implementations inside `kb-aads`.
 
-### A. Subsystem `consensus` (`consensus/`)
 *   `class ConsensusEngine`
-    -   *Description*: Implements Python Kafka-based quorum voting protocols.
+    -   *Description*: Implements Python ZeroMQ-based quorum voting protocols.
     -   *Methods*:
-        -   `def submit_alert(self, alert_event)`: Publishes telemetry anomalies to topic `kb-alerts`.
-        -   `def process_votes(self)`: Listens on topic `kb-votes` to process agent consensus. If quorum matches, it instantiates executor commands.
+        -   `def submit_alert(self, alert_event)`: Publishes telemetry anomalies to the `kb-alerts` ZeroMQ channel.
+        -   `def process_votes(self)`: Listens on the `kb-votes` ZeroMQ channel to process agent consensus. If quorum matches, it instantiates executor commands.
 
 ---
 

@@ -8,7 +8,7 @@ and coordinates threat response.
 - `swarm/`     — Swarm orchestration and management
 - `consensus/` — Quorum and voting system
 - `marl/`      — Multi-agent reinforcement learning
-- `comms/`     — Kafka/ZeroMQ communication layer
+- `comms/`     — ZeroMQ/Ray communication layer
 - `tests/`     — Tests
 
 ## Agent Roles

@@ -93,8 +93,7 @@ PyTorch 2.x
 
 **Agent Communication**
 ```
-Apache Kafka (event bus)
-ZeroMQ (agent-to-agent messaging)
+ZeroMQ / Ray Actors (event bus & messaging)
 Protocol Buffers (message serialization)
 ```
 
@@ -139,11 +138,8 @@ Label studio or custom labeling tool
 ## 3. Event Bus & Infrastructure
 
 ```
-Apache Kafka 3.x
-ZooKeeper (Kafka dependency)
-OR Kafka KRaft mode (no ZooKeeper)
+ZeroMQ (agent-to-agent messaging bus)
 Redis (shared state / pheromone trails)
-PostgreSQL 15+
 SQLite 3.x
 Docker + Docker Compose (local dev)
 ```
@@ -252,13 +248,13 @@ Unix socket (local) or TCP (distributed)
 
 **AADS Internal**
 ```
-Kafka topics:
+ZeroMQ pub/sub topics:
   - role-changes
   - agent-updates
   - consensus-events
   - health-checks
   - anomaly-alerts
-ZeroMQ (direct agent messaging)
+Ray Actor Remote Methods (direct agent messaging)
 ```
 
 **Dashboard ↔ Backend**

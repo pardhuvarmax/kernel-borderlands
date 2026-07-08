@@ -3,11 +3,11 @@
 Inter-agent and KB↔AADS communication infrastructure.
 
 ## Protocols
-- Kafka    — Event bus (role-changes, agent-updates, consensus-events)
-- ZeroMQ   — Direct agent-to-agent messaging
+- ZeroMQ   — Event bus & direct agent-to-agent messaging (pub/sub topics)
+- Ray IPC  — High-performance actor remote methods and shared-memory channels
 - gRPC     — KB Control Plane ↔ AADS
 
-## Kafka Topics
+## ZeroMQ Pub/Sub Channels
 - `kb-events`        — Raw events from KB control plane
 - `role-changes`     — Agent role transitions
 - `agent-updates`    — Agent state updates
