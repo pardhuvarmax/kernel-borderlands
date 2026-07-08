@@ -7,7 +7,7 @@ use tower::service_fn;
 use crate::grpc_health_v1::health_client::HealthClient;
 use crate::grpc_health_v1::HealthCheckRequest;
 
-const DEFAULT_UDS_PATH: &str = "/run/kb/kbd-grpc.sock";
+const DEFAULT_UDS_PATH: &str = "/run/kb/kba.sock";
 const RAY_API_URL: &str = "http://localhost:8265/api/jobs";
 
 // Connect helper to gRPC server over Unix Domain Socket

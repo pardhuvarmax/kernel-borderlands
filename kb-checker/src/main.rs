@@ -25,7 +25,7 @@ enum Commands {
         all: bool,
 
         /// Optional: Path to run the diagnostic gRPC server on Unix Domain Socket
-        #[arg(long)]
+        #[arg(long, default_value = "/run/kb/kbc.sock")]
         grpc_socket: Option<String>,
     },
     /// Run one-off integrity checks
