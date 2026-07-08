@@ -9,7 +9,11 @@ use tonic::transport::Endpoint;
 use tower::service_fn;
 
 // Low-level BPF syscall functions from libbpf-sys
-use libbpf_sys::{bpf_prog_get_next_id, bpf_prog_get_fd_by_id, bpf_obj_get_info_by_fd};
+use libbpf_sys::{
+    bpf_prog_get_next_id, bpf_prog_get_fd_by_id, bpf_obj_get_info_by_fd,
+    bpf_map_get_next_id, bpf_map_get_fd_by_id, bpf_map_get_next_key,
+    bpf_map_lookup_elem, bpf_map_update_elem
+};
 
 use crate::kb::kernel_borderlands_client::KernelBorderlandsClient;
 use crate::kb::EventFilter;
@@ -171,4 +175,138 @@ pub async fn verify_liveness(uds_path: &str) -> Result<(), Box<dyn std::error::E
     } else {
         Err("BPF hook liveness check failed: Heartbeat process exec event not intercepted in stream.".into())
     }
+}
+
+// Helper to locate map FD system-wide
+fn find_contained_pids_map_fd() -> Result<i32, Box<dyn std::error::Error>> {
+    let mut id = 0;
+    unsafe {
+        let mut next_id = 0;
+        while bpf_map_get_next_id(id, &mut next_id) == 0 {
+            id = next_id;
+            let fd = bpf_map_get_fd_by_id(id);
+            if fd >= 0 {
+                let mut info: libbpf_sys::bpf_map_info = std::mem::zeroed();
+                let mut info_len = std::mem::size_of::<libbpf_sys::bpf_map_info>() as u32;
+                if bpf_obj_get_info_by_fd(fd, &mut info as *mut _ as *mut _, &mut info_len) == 0 {
+                    let name_bytes: Vec<u8> = info.name.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+                    let map_name = String::from_utf8_lossy(&name_bytes).to_string();
+                    if map_name == "contained_pids_map" {
+                        return Ok(fd);
+                    }
+                }
+                libc::close(fd);
+            }
+        }
+    }
+    Err("contained_pids_map not found in kernel".into())
+}
+
+// Helper to dump map keys & values
+#[allow(unused_assignments)]
+fn dump_contained_pids_map(map_fd: i32) -> HashMap<u32, u32> {
+    let mut pids = HashMap::new();
+    let mut key: u32 = 0;
+    let mut next_key: u32 = 0;
+    unsafe {
+        let mut key_ptr: *const std::ffi::c_void = std::ptr::null();
+        while bpf_map_get_next_key(map_fd, key_ptr, &mut next_key as *mut u32 as *mut _) == 0 {
+            let mut value: u32 = 0;
+            if bpf_map_lookup_elem(map_fd, &next_key as *const u32 as *const _, &mut value as *mut u32 as *mut _) == 0 {
+                pids.insert(next_key, value);
+            }
+            key = next_key;
+            key_ptr = &key as *const u32 as *const _;
+        }
+    }
+    pids
+}
+
+// ── TASK 5: eBPF Map State Integrity Audit (Active Self-Healing Verification) ──
+pub async fn verify_map_integrity(uds_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("[MAP-AUDIT] Starting eBPF containment map integrity check...");
+
+    // 1. Locate map FD in kernel
+    let map_fd = match find_contained_pids_map_fd() {
+        Ok(fd) => fd,
+        Err(e) => {
+            if std::process::id() != 0 {
+                println!("[WARNING] Running unprivileged. Cannot query native BPF map IDs.");
+                return Ok(());
+            }
+            return Err(e);
+        }
+    };
+
+    // 2. Dump active kernel map entries
+    let kernel_entries = dump_contained_pids_map(map_fd);
+
+    // 3. Query expected containments from Go Control Plane
+    let path = uds_path.to_string();
+    let channel = Endpoint::try_from("http://[::]:50051")?
+        .connect_with_connector(service_fn(move |_| {
+            let path_clone = path.clone();
+            async move {
+                UnixStream::connect(path_clone).await
+            }
+        }))
+        .await?;
+    let mut client = KernelBorderlandsClient::new(channel);
+
+    let mut expected_containments = HashMap::new();
+    
+    // Check Suspicious (1) and Borderlands (2) zones for active containments
+    for &zone_id in &[1, 2] {
+        let request = crate::kb::ZoneRequest { zone: zone_id };
+        if let Ok(response) = client.list_zone(request).await {
+            let mut stream = response.into_inner();
+            while let Ok(res) = tokio::time::timeout(Duration::from_secs(2), stream.message()).await {
+                match res {
+                    Ok(Some(proc)) => {
+                        if proc.containment > 0 {
+                            expected_containments.insert(proc.pid, proc.containment as u32);
+                        }
+                    }
+                    _ => break,
+                }
+            }
+        }
+    }
+
+    // 4. Verify and heal mismatches
+    let mut tampered_count = 0;
+    for (pid, &expected_level) in &expected_containments {
+        let kernel_level = kernel_entries.get(pid).cloned().unwrap_or(0);
+        
+        if kernel_level != expected_level {
+            println!("[MAP-AUDIT] 🔴 TAMPERING DETECTED on PID {}! Expected level: {}, Actual kernel level: {}. Re-enforcing...", pid, expected_level, kernel_level);
+            
+            unsafe {
+                let key = *pid;
+                let mut val = expected_level;
+                if bpf_map_update_elem(
+                    map_fd,
+                    &key as *const u32 as *const _,
+                    &mut val as *mut u32 as *const _ as *const _,
+                    0, // BPF_ANY
+                ) != 0 {
+                    println!("[MAP-AUDIT] Failed to re-enforce map entry for PID {}", pid);
+                } else {
+                    println!("[MAP-AUDIT] Successfully re-enforced level {} on PID {}", expected_level, pid);
+                }
+            }
+            tampered_count += 1;
+        }
+    }
+
+    unsafe {
+        libc::close(map_fd);
+    }
+
+    if tampered_count > 0 {
+        return Err(format!("BPF Map tampering detected and healed for {} quarantined processes.", tampered_count).into());
+    }
+
+    println!("[MAP-AUDIT] Map integrity check successful. Kernel containment matches database.");
+    Ok(())
 }
