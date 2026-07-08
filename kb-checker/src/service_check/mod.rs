@@ -51,11 +51,25 @@ pub async fn check_swarm_health() -> Result<(), Box<dyn std::error::Error>> {
         .timeout(Duration::from_secs(3))
         .build()?;
 
-    let response = client.get(RAY_API_URL).send().await?;
-    if response.status().is_success() {
-        println!("[SWARM] Ray cluster REST API check: ONLINE");
-        Ok(())
-    } else {
-        Err(format!("Ray cluster API returned status: {}", response.status()).into())
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match client.get(RAY_API_URL).send().await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    println!("[SWARM] Ray cluster REST API check: ONLINE (attempt {})", attempts);
+                    return Ok(());
+                } else if attempts >= 3 {
+                    return Err(format!("Ray cluster API returned status: {} after 3 attempts", response.status()).into());
+                }
+            }
+            Err(e) => {
+                if attempts >= 3 {
+                    return Err(format!("Ray cluster connection failed after 3 attempts: {:?}", e).into());
+                }
+            }
+        }
+        println!("[SWARM] [RETRY] Ray check failed. Retrying in 2 seconds (attempt {} of 3)...", attempts);
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }
