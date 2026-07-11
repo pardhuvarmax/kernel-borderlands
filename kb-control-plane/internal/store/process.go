@@ -233,3 +233,13 @@ func (s *Store) Restore() error {
 	log.Printf("[Store] L1 restored from L2: %d processes", count)
 	return nil
 }
+
+// ListAll returns all processes currently tracked in L1 memory.
+func (s *Store) ListAll() []*CachedState {
+	var out []*CachedState
+	s.l1.Range(func(_, v any) bool {
+		out = append(out, v.(*CachedState))
+		return true
+	})
+	return out
+}

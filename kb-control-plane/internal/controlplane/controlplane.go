@@ -79,6 +79,13 @@ func (cp *ControlPlane) Start() error {
 		cp.grpc.Serve(lis)
 	}()
 
+	// Start HTTP API & SSE server on :8080 for web dashboard
+	go func() {
+		if err := cp.StartHTTPServer(":8080"); err != nil {
+			log.Printf("[KB] HTTP server failed: %v", err)
+		}
+	}()
+
 	log.Println("[KB] Control plane ready")
 	return nil
 }
@@ -116,6 +123,7 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 			"composite":     fmt.Sprintf("%.2f", msg.CompositeScore),
 			"dim_syscall":   fmt.Sprintf("%.2f", msg.DimScore[ipc.DimCount-5]),
 			"dim_privilege": fmt.Sprintf("%.2f", msg.DimScore[2]),
+			"uid":           fmt.Sprintf("%d", msg.UID),
 		},
 	})
 }
