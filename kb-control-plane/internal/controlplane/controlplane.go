@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
@@ -32,6 +33,10 @@ type ControlPlane struct {
 
 	alertMu   sync.Mutex
 	alertSubs []chan *pb.Alert
+
+	// Live metrics tracking
+	metricMu        sync.Mutex
+	eventTimestamps []time.Time
 }
 
 func New(dbPath, policyPath string) (*ControlPlane, error) {
@@ -98,6 +103,7 @@ func (cp *ControlPlane) Stop() {
 // ── MessageHandler (called by IPC listener) ──
 
 func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
+	cp.recordEventTime()
 	cp.commCache.Store(msg.PID, msg.Comm)
 
 	if err := cp.store.UpsertProcessState(msg); err != nil {
@@ -129,6 +135,7 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 }
 
 func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
+	cp.recordEventTime()
 	comm := ""
 	if v, ok := cp.commCache.Load(msg.PID); ok {
 		comm = v.(string)
@@ -211,4 +218,37 @@ func (cp *ControlPlane) fanOutAlert(a *pb.Alert) {
 		default:
 		}
 	}
+}
+
+func (cp *ControlPlane) recordEventTime() {
+	cp.metricMu.Lock()
+	defer cp.metricMu.Unlock()
+	cp.eventTimestamps = append(cp.eventTimestamps, time.Now())
+	
+	// Keep last 10 seconds
+	cutoff := time.Now().Add(-10 * time.Second)
+	idx := 0
+	for i, t := range cp.eventTimestamps {
+		if t.After(cutoff) {
+			idx = i
+			break
+		}
+	}
+	if idx > 0 {
+		cp.eventTimestamps = cp.eventTimestamps[idx:]
+	}
+}
+
+func (cp *ControlPlane) GetEventsPerSecond() float64 {
+	cp.metricMu.Lock()
+	defer cp.metricMu.Unlock()
+	
+	cutoff := time.Now().Add(-10 * time.Second)
+	count := 0
+	for _, t := range cp.eventTimestamps {
+		if t.After(cutoff) {
+			count++
+		}
+	}
+	return float64(count) / 10.0
 }
