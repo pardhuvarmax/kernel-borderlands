@@ -188,6 +188,169 @@ export default function App() {
     return () => clearInterval(id);
   }, [simulated, addLog, addAlert]);
 
+  // Live API Connection Loop
+  useEffect(() => {
+    if (simulated) return;
+
+    let active = true;
+    let eventSource: EventSource | null = null;
+
+    addLog('[CONSOLE] Connecting to live API endpoint at http://localhost:8080...', 'info');
+
+    // Helper to fetch initial state
+    const fetchInitialState = async () => {
+      try {
+        // Fetch active processes
+        const resProcs = await fetch('http://localhost:8080/api/processes');
+        if (!resProcs.ok) throw new Error('Failed to fetch processes');
+        const procsData = await resProcs.json();
+        if (active) {
+          setProcesses(procsData.map((p: any) => ({
+            pid: p.pid,
+            ppid: p.ppid,
+            comm: p.comm,
+            uid: p.uid,
+            score: p.score,
+            zone: p.zone as Zone,
+            startedAt: ts()
+          })));
+          addLog(`[CONSOLE] Synced ${procsData.length} live processes from kbd.`, 'success');
+        }
+
+        // Fetch recent alerts
+        const resAlerts = await fetch('http://localhost:8080/api/alerts');
+        if (!resAlerts.ok) throw new Error('Failed to fetch alerts');
+        const alertsData = await resAlerts.json();
+        if (active) {
+          alertsData.forEach((a: any) => {
+            addAlert({
+              id: a.alertId,
+              type: a.alertType,
+              pid: a.pid,
+              comm: a.comm,
+              severity: a.severity as Sev,
+              ts: a.timestamp,
+              evidence: a.evidence
+            });
+          });
+          addLog(`[CONSOLE] Synced ${alertsData.length} alerts from L2 store.`, 'success');
+        }
+
+        // Fetch recent logs
+        const resLogs = await fetch('http://localhost:8080/api/logs');
+        if (!resLogs.ok) throw new Error('Failed to fetch logs');
+        const logsData = await resLogs.json();
+        if (active) {
+          const formatted = logsData.map((l: any) => ({
+            text: `[${l.time}] [${l.action}] ${l.subject} (${l.actor}) ${l.reason ? '— ' + l.reason : ''}`,
+            cls: l.action.includes('TERMINATE') || l.action.includes('CRITICAL') ? 'err' : l.action.includes('NONE') ? 'success' : 'info'
+          })).reverse();
+          setLog(prev => [...prev.slice(-40), ...formatted]);
+        }
+      } catch (err: any) {
+        if (active) {
+          addLog(`[CONSOLE] Connection error: ${err.message}`, 'err');
+        }
+      }
+    };
+
+    fetchInitialState();
+
+    // Setup SSE connection
+    try {
+      eventSource = new EventSource('http://localhost:8080/api/events');
+
+      eventSource.addEventListener('connected', () => {
+        addLog('[CONSOLE] SSE Connection established.', 'success');
+      });
+
+      eventSource.addEventListener('telemetry', (e) => {
+        if (!active) return;
+        try {
+          const payload = JSON.parse(e.data);
+          const { type, data } = payload;
+
+          if (type === 'event') {
+            if (data.eventType === 'process_state') {
+              setProcesses(prev => {
+                const idx = prev.findIndex(p => p.pid === data.pid);
+                const zoneVal = data.metadata?.zone || 'SAFE';
+                const uidVal = data.metadata?.uid ? parseInt(data.metadata.uid) : data.uid || 0;
+                const updatedProcess: Process = {
+                  pid: data.pid,
+                  ppid: data.ppid,
+                  comm: data.comm,
+                  uid: uidVal,
+                  score: data.score,
+                  zone: zoneVal as Zone,
+                  startedAt: ts()
+                };
+
+                if (idx >= 0) {
+                  const next = [...prev];
+                  next[idx] = { ...next[idx], ...updatedProcess };
+                  return next;
+                } else {
+                  return [...prev, updatedProcess];
+                }
+              });
+            } else if (data.eventType === 'zone_transition') {
+              const fromZone = data.metadata?.from_zone || 'SAFE';
+              const toZone = data.metadata?.to_zone || 'SAFE';
+              addLog(`[SENSOR] Zone transition: PID ${data.pid} (${data.comm}) ${fromZone} ➔ ${toZone}`, 'warn');
+              setProcesses(prev => prev.map(p => p.pid === data.pid ? { ...p, zone: toZone as Zone, score: data.score } : p));
+            }
+          } else if (type === 'alert') {
+            addAlert({
+              id: data.alertId,
+              type: data.alertType,
+              pid: data.pid,
+              comm: data.comm,
+              severity: data.severity as Sev,
+              ts: data.timestamp,
+              evidence: data.evidence
+            });
+            addLog(`[ALERT] BORDERLANDS ENTRY: PID ${data.pid} (${data.comm})`, 'err');
+          }
+        } catch (err) {
+          // ignore parsing issues
+        }
+      });
+
+      eventSource.onerror = () => {
+        if (active) {
+          addLog('[CONSOLE] SSE Connection lost. Retrying...', 'warn');
+        }
+      };
+
+    } catch (err: any) {
+      addLog(`[CONSOLE] SSE initialization failed: ${err.message}`, 'err');
+    }
+
+    // Chart update ticker for live mode
+    const chartTicker = setInterval(() => {
+      if (!active) return;
+      setProcesses(cur => {
+        const cnts = cur.reduce((a, p) => {
+          if (p.zone === 'SAFE') a.safe++;
+          else if (p.zone === 'SUSPICIOUS') a.sus++;
+          else a.bl++;
+          return a;
+        }, { safe: 0, sus: 0, bl: 0 });
+        setChart(prev => [...prev.slice(1), {
+          t: ts(), safe: cnts.safe, sus: cnts.sus, bl: cnts.bl
+        }]);
+        return cur;
+      });
+    }, 4000);
+
+    return () => {
+      active = false;
+      if (eventSource) eventSource.close();
+      clearInterval(chartTicker);
+    };
+  }, [simulated, addLog, addAlert]);
+
   // Filtered processes
   const filtered = useMemo(() => processes.filter(p => {
     const q = search.toLowerCase();
@@ -207,16 +370,50 @@ export default function App() {
 
   // Operator: isolate
   const isolate = (pid: number, comm: string) => {
-    setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'QUARANTINED', score: 1.0 } : p));
-    const id = `al-${pid}-${Date.now()}`;
-    addAlert({ id, type: 'MANUAL_QUARANTINE', pid, comm, severity: 'CRITICAL', ts: ts(), evidence: ['manual_operator_action', 'containment_level_4'] });
-    addLog(`[OPERATOR] Manual quarantine — PID ${pid} (${comm})`, 'err');
+    if (simulated) {
+      setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'QUARANTINED', score: 1.0 } : p));
+      const id = `al-${pid}-${Date.now()}`;
+      addAlert({ id, type: 'MANUAL_QUARANTINE', pid, comm, severity: 'CRITICAL', ts: ts(), evidence: ['manual_operator_action', 'containment_level_4'] });
+      addLog(`[OPERATOR] Manual quarantine — PID ${pid} (${comm})`, 'err');
+    } else {
+      fetch('http://localhost:8080/api/isolate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid })
+      }).then(res => {
+        if (res.ok) {
+          setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'QUARANTINED', score: 1.0 } : p));
+          addLog(`[OPERATOR] manual isolate request sent for PID ${pid} (${comm})`, 'success');
+        } else {
+          addLog(`[OPERATOR] manual isolate failed for PID ${pid}`, 'err');
+        }
+      }).catch(err => {
+        addLog(`[OPERATOR] isolation error: ${err.message}`, 'err');
+      });
+    }
   };
 
   // Operator: restore
   const restore = (pid: number, comm: string) => {
-    setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'SAFE', score: 0.04, quorumPending: false } : p));
-    addLog(`[OPERATOR] Restored PID ${pid} (${comm}) → SAFE`, 'success');
+    if (simulated) {
+      setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'SAFE', score: 0.04, quorumPending: false } : p));
+      addLog(`[OPERATOR] Restored PID ${pid} (${comm}) → SAFE`, 'success');
+    } else {
+      fetch('http://localhost:8080/api/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid })
+      }).then(res => {
+        if (res.ok) {
+          setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'SAFE', score: 0.04, quorumPending: false } : p));
+          addLog(`[OPERATOR] manual restore request sent for PID ${pid} (${comm})`, 'success');
+        } else {
+          addLog(`[OPERATOR] manual restore failed for PID ${pid}`, 'err');
+        }
+      }).catch(err => {
+        addLog(`[OPERATOR] restore error: ${err.message}`, 'err');
+      });
+    }
   };
 
   // Nav items
@@ -320,7 +517,7 @@ export default function App() {
       {/* ── Main ─────────────────────────────────────────────────── */}
       <main className="main">
 
-        {/* Stat cards */}
+        {/* Persistent stat cards — visible in all views */}
         <div className="stat-row">
           <div className="stat-card">
             <div className="stat-icon blue"><Cpu size={16} /></div>
@@ -356,208 +553,323 @@ export default function App() {
           </div>
         </div>
 
-        {/* Content grid */}
-        <div className="content-grid">
+        {/* ══ VIEW: Processes ══════════════════════════════════════════ */}
+        {activeNav === 'Processes' && (
+          <div className="content-grid">
+            <div className="col-left">
 
-          {/* ── Left column ─────────────────────────── */}
-          <div className="col-left">
-
-            {/* Zone Trend Chart */}
-            <div className="panel" style={{ flexShrink: 0 }}>
-              <div className="panel-head">
-                <div className="panel-title">
-                  <span className="panel-title-dot" />
-                  Zone Distribution — Real-time
-                </div>
-                <div className="panel-actions">
+              {/* Zone Trend Chart */}
+              <div className="panel" style={{ flexShrink: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title">
+                    <span className="panel-title-dot" />
+                    Zone Distribution — Real-time
+                  </div>
                   <span className="panel-tag">last 10 ticks</span>
                 </div>
+                <div className="chart-wrap">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chart} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="gSafe" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="var(--safe)"  stopOpacity={0.25} />
+                          <stop offset="100%" stopColor="var(--safe)" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="gSus" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="var(--warn)"  stopOpacity={0.25} />
+                          <stop offset="100%" stopColor="var(--warn)" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="gBl" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="var(--danger)"  stopOpacity={0.3} />
+                          <stop offset="100%" stopColor="var(--danger)" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
+                      <XAxis dataKey="t" tick={{ fill: 'var(--tx-dim)', fontSize: 9 }} />
+                      <YAxis tick={{ fill: 'var(--tx-dim)', fontSize: 9 }} allowDecimals={false} />
+                      <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} labelStyle={{ color: 'var(--tx-secondary)' }} itemStyle={{ color: 'var(--tx-primary)' }} />
+                      <Area type="monotone" dataKey="safe" name="Safe"        stroke="var(--safe)"  fill="url(#gSafe)" strokeWidth={1.5} />
+                      <Area type="monotone" dataKey="sus"  name="Suspicious"  stroke="var(--warn)"  fill="url(#gSus)"  strokeWidth={1.5} />
+                      <Area type="monotone" dataKey="bl"   name="Borderlands" stroke="var(--danger)" fill="url(#gBl)"  strokeWidth={1.5} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
-              <div className="chart-wrap">
+
+              {/* Process Table */}
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot green" />Tracked Processes</div>
+                  <span className="panel-tag">{filtered.length} / {processes.length} shown</span>
+                </div>
+                <div className="filter-bar">
+                  <div className="input-wrap">
+                    <Search size={12} className="input-icon" />
+                    <input className="search-input" placeholder="Search PID or name…" value={search} onChange={e => setSearch(e.target.value)} />
+                  </div>
+                  <select className="zone-filter" value={zoneFilter} onChange={e => setZoneFilter(e.target.value)}>
+                    <option value="ALL">All Zones</option>
+                    <option value="SAFE">Safe</option>
+                    <option value="SUSPICIOUS">Suspicious</option>
+                    <option value="BORDERLANDS">Borderlands</option>
+                    <option value="QUARANTINED">Quarantined</option>
+                  </select>
+                </div>
+                <div className="table-scroll">
+                  <table className="proc-table">
+                    <thead><tr><th>Process</th><th>PID</th><th>PPID</th><th>UID</th><th>Zone</th><th>Risk Index</th><th>Action</th></tr></thead>
+                    <tbody>
+                      {filtered.map(p => {
+                        const fill = scoreColor(p.score);
+                        return (
+                          <tr key={p.pid}>
+                            <td><span className="proc-comm">{p.comm}</span></td>
+                            <td><span className="proc-pid">{p.pid}</span></td>
+                            <td><span className="proc-pid">{p.ppid}</span></td>
+                            <td><span className="proc-pid">{p.uid}</span></td>
+                            <td><span className={`zone-badge ${zoneClass(p.zone)}`}>{p.zone}</span></td>
+                            <td>
+                              <div className="score-bar-wrap">
+                                <div className="score-bar-bg"><div className="score-bar-fill" style={{ width: `${p.score * 100}%`, background: fill }} /></div>
+                                <span className="score-val" style={{ color: fill }}>{p.score.toFixed(2)}</span>
+                              </div>
+                            </td>
+                            <td>
+                              {p.zone === 'QUARANTINED'
+                                ? <button className="act-btn restore" onClick={() => restore(p.pid, p.comm)}><Unlock size={10} />Restore</button>
+                                : <button className="act-btn isolate" onClick={() => isolate(p.pid, p.comm)}><Lock size={10} />Isolate</button>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {filtered.length === 0 && <tr><td colSpan={7}><div className="empty-state">No processes match filter</div></td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="col-right">
+              {/* Right sidebar always: services + alert feed + terminal */}
+              <div className="panel" style={{ flexShrink: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot green" />Service Health</div>
+                  <span className="panel-tag">6 services</span>
+                </div>
+                <div className="health-list">
+                  {HEALTH_SERVICES.map(s => (
+                    <div key={s.name} className="health-item">
+                      <div className="health-left">
+                        <div className="health-name">{s.name}</div>
+                        <div className="health-desc">{s.desc}</div>
+                      </div>
+                      <span className={`health-badge ${s.status}`}>{s.status === 'ok' ? 'ACTIVE' : 'DOWN'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot red" />Threat Feed</div>
+                  <span className="panel-tag">{alerts.length} events</span>
+                </div>
+                <div className="alert-feed">
+                  {alerts.length === 0 && <div className="empty-state"><Shield size={24} style={{ color: 'var(--tx-dim)' }} />No active threats</div>}
+                  {alerts.map(a => (
+                    <div key={a.id} className={`alert-item ${a.severity.toLowerCase()}`}>
+                      <div className="alert-top">
+                        <span className={`alert-type ${a.severity.toLowerCase()}`}>{a.type}</span>
+                        <span className="alert-ts">{a.ts}</span>
+                      </div>
+                      <div className="alert-body">PID <strong>{a.pid}</strong> (<strong>{a.comm}</strong>) — {a.severity}</div>
+                      <div className="alert-tags">{a.evidence.map((e, i) => <span key={i} className="alert-tag">{e}</span>)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="panel" style={{ flexShrink: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot" />Audit Console</div>
+                  <span className="panel-tag">live journal</span>
+                </div>
+                <div className="terminal" ref={termRef} style={{ maxHeight: 170 }}>
+                  {log.map((l, i) => <div key={i} className={`t-line ${l.cls}`}>{l.text}</div>)}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══ VIEW: Alerts ════════════════════════════════════════════ */}
+        {activeNav === 'Alerts' && (
+          <div className="content-grid">
+            <div className="col-left">
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot red" />All Threat Alerts</div>
+                  <span className="panel-tag">{alerts.length} total</span>
+                </div>
+                <div className="table-scroll">
+                  <table className="proc-table">
+                    <thead><tr><th>Severity</th><th>Type</th><th>PID</th><th>Comm</th><th>Time</th><th>Evidence</th></tr></thead>
+                    <tbody>
+                      {alerts.length === 0 && <tr><td colSpan={6}><div className="empty-state"><Shield size={22} style={{ color: 'var(--tx-dim)' }} />No alerts yet</div></td></tr>}
+                      {alerts.map(a => (
+                        <tr key={a.id}>
+                          <td><span className={`zone-badge ${a.severity === 'CRITICAL' ? 'quarantined' : a.severity === 'WARNING' ? 'suspicious' : 'safe'}`}>{a.severity}</span></td>
+                          <td><span className="proc-comm" style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{a.type}</span></td>
+                          <td><span className="proc-pid">{a.pid}</span></td>
+                          <td><span className="proc-comm">{a.comm}</span></td>
+                          <td><span className="proc-pid">{a.ts}</span></td>
+                          <td><div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{a.evidence.map((e, i) => <span key={i} className="alert-tag">{e}</span>)}</div></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div className="col-right">
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot red" />Threat Feed</div>
+                  <span className="panel-tag">live</span>
+                </div>
+                <div className="alert-feed">
+                  {alerts.length === 0 && <div className="empty-state"><Shield size={24} style={{ color: 'var(--tx-dim)' }} />No active threats</div>}
+                  {alerts.map(a => (
+                    <div key={a.id} className={`alert-item ${a.severity.toLowerCase()}`}>
+                      <div className="alert-top">
+                        <span className={`alert-type ${a.severity.toLowerCase()}`}>{a.type}</span>
+                        <span className="alert-ts">{a.ts}</span>
+                      </div>
+                      <div className="alert-body">PID <strong>{a.pid}</strong> (<strong>{a.comm}</strong>) — {a.severity}</div>
+                      <div className="alert-tags">{a.evidence.map((e, i) => <span key={i} className="alert-tag">{e}</span>)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══ VIEW: Services ══════════════════════════════════════════ */}
+        {activeNav === 'Services' && (
+          <div className="content-grid">
+            <div className="col-left">
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot green" />System Services</div>
+                  <span className="panel-tag">kb-op subsystem</span>
+                </div>
+                <div className="table-scroll">
+                  <table className="proc-table">
+                    <thead><tr><th>Service</th><th>Description</th><th>Socket / Endpoint</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {[
+                        { name: 'kb-core (eBPF Sensor)',      desc: 'Ring 0 syscall hooks via CO-RE',       sock: 'kernel ring buffer',         st: 'ok'  },
+                        { name: 'kbd (Go Control Plane)',      desc: 'Central event router & gRPC host',     sock: '/run/kb/kba.sock',           st: 'ok'  },
+                        { name: 'kb-checker (Rust Watchdog)', desc: 'Hard-stop containment daemon',         sock: '/run/kb/kbc.sock',           st: 'ok'  },
+                        { name: 'AADS Agent Swarm',           desc: 'ZeroMQ pub/sub + Ray Actor IPC',       sock: 'ipc:///run/kb/aads.ipc',     st: 'ok'  },
+                        { name: 'gRPC Health Service',        desc: 'Standard grpc_health_v1 probe',        sock: 'kba.sock — 100ms timeout',   st: 'ok'  },
+                        { name: 'SQLite L2 Store',            desc: 'WAL journal — persistent alert log',   sock: '/var/lib/kb/alerts.db',      st: 'ok'  },
+                        { name: 'kbctl CLI',                  desc: 'Operator shell interface',             sock: 'stdout / /run/kb/kbd.sock',  st: 'ok'  },
+                      ].map(s => (
+                        <tr key={s.name}>
+                          <td><span className="proc-comm">{s.name}</span></td>
+                          <td style={{ color: 'var(--tx-secondary)' }}>{s.desc}</td>
+                          <td><span className="proc-pid">{s.sock}</span></td>
+                          <td><span className={`health-badge ${s.st}`}>{s.st === 'ok' ? 'ACTIVE' : 'DOWN'}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div className="col-right">
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot" />Audit Console</div>
+                  <span className="panel-tag">health probes</span>
+                </div>
+                <div className="terminal" ref={termRef} style={{ flex: 1 }}>
+                  {log.map((l, i) => <div key={i} className={`t-line ${l.cls}`}>{l.text}</div>)}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══ VIEW: Telemetry ═════════════════════════════════════════ */}
+        {activeNav === 'Telemetry' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
+            <div className="panel" style={{ flex: 1 }}>
+              <div className="panel-head">
+                <div className="panel-title"><span className="panel-title-dot" />Zone Distribution — Extended</div>
+                <span className="panel-tag">rolling window</span>
+              </div>
+              <div style={{ height: 340, padding: '12px 8px 16px' }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chart} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
+                  <AreaChart data={chart} margin={{ top: 8, right: 16, left: -16, bottom: 0 }}>
                     <defs>
-                      <linearGradient id="gSafe" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="var(--safe)"   stopOpacity={0.25} />
+                      <linearGradient id="gSafe2" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--safe)"  stopOpacity={0.3} />
                         <stop offset="100%" stopColor="var(--safe)" stopOpacity={0} />
                       </linearGradient>
-                      <linearGradient id="gSus" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="var(--warn)"   stopOpacity={0.25} />
+                      <linearGradient id="gSus2" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--warn)"  stopOpacity={0.3} />
                         <stop offset="100%" stopColor="var(--warn)" stopOpacity={0} />
                       </linearGradient>
-                      <linearGradient id="gBl" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="var(--danger)"   stopOpacity={0.3} />
+                      <linearGradient id="gBl2" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--danger)"  stopOpacity={0.35} />
                         <stop offset="100%" stopColor="var(--danger)" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
-                    <XAxis dataKey="t" tick={{ fill: 'var(--tx-dim)', fontSize: 9 }} />
-                    <YAxis tick={{ fill: 'var(--tx-dim)', fontSize: 9 }} allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }}
-                      labelStyle={{ color: 'var(--tx-secondary)' }}
-                      itemStyle={{ color: 'var(--tx-primary)' }}
-                    />
-                    <Area type="monotone" dataKey="safe" name="Safe"        stroke="var(--safe)"   fill="url(#gSafe)" strokeWidth={1.5} />
-                    <Area type="monotone" dataKey="sus"  name="Suspicious"  stroke="var(--warn)"   fill="url(#gSus)"  strokeWidth={1.5} />
-                    <Area type="monotone" dataKey="bl"   name="Borderlands" stroke="var(--danger)"  fill="url(#gBl)"   strokeWidth={1.5} />
+                    <CartesianGrid stroke="rgba(255,255,255,0.05)" strokeDasharray="4 4" />
+                    <XAxis dataKey="t" tick={{ fill: 'var(--tx-dim)', fontSize: 10 }} />
+                    <YAxis tick={{ fill: 'var(--tx-dim)', fontSize: 10 }} allowDecimals={false} />
+                    <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} labelStyle={{ color: 'var(--tx-secondary)' }} itemStyle={{ color: 'var(--tx-primary)' }} />
+                    <Area type="monotone" dataKey="safe" name="Safe"        stroke="var(--safe)"  fill="url(#gSafe2)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="sus"  name="Suspicious"  stroke="var(--warn)"  fill="url(#gSus2)"  strokeWidth={2} />
+                    <Area type="monotone" dataKey="bl"   name="Borderlands" stroke="var(--danger)" fill="url(#gBl2)"  strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+              {[
+                { label: 'eBPF Intercept Latency',  val: '430 ns', sub: 'avg over last 1000 events', color: 'var(--safe)' },
+                { label: 'gRPC Health Probe RTT',   val: '< 100ms', sub: 'kba.sock timeout threshold', color: 'var(--accent)' },
+                { label: 'AADS Consensus Latency',  val: '< 1ms',  sub: 'shared memory Arrow IPC',   color: 'var(--warn)' },
+              ].map(m => (
+                <div key={m.label} className="panel">
+                  <div style={{ padding: '20px 20px 16px' }}>
+                    <div style={{ fontSize: 11, color: 'var(--tx-secondary)', marginBottom: 8 }}>{m.label}</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, fontFamily: 'var(--font-mono)', color: m.color, lineHeight: 1 }}>{m.val}</div>
+                    <div style={{ fontSize: 10, color: 'var(--tx-dim)', marginTop: 6 }}>{m.sub}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-            {/* Process Table */}
+        {/* ══ VIEW: Console ═══════════════════════════════════════════ */}
+        {activeNav === 'Console' && (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
             <div className="panel" style={{ flex: 1, minHeight: 0 }}>
               <div className="panel-head">
-                <div className="panel-title">
-                  <span className="panel-title-dot green" />
-                  Tracked Processes
-                </div>
-                <div className="panel-actions">
-                  <span className="panel-tag">{filtered.length} / {processes.length} shown</span>
-                </div>
+                <div className="panel-title"><span className="panel-title-dot" />Audit Console — Full Feed</div>
+                <span className="panel-tag">{log.length} lines</span>
               </div>
-
-              <div className="filter-bar">
-                <div className="input-wrap">
-                  <Search size={12} className="input-icon" />
-                  <input
-                    className="search-input"
-                    placeholder="Search PID or name…"
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                  />
-                </div>
-                <select
-                  className="zone-filter"
-                  value={zoneFilter}
-                  onChange={e => setZoneFilter(e.target.value)}
-                >
-                  <option value="ALL">All Zones</option>
-                  <option value="SAFE">Safe</option>
-                  <option value="SUSPICIOUS">Suspicious</option>
-                  <option value="BORDERLANDS">Borderlands</option>
-                  <option value="QUARANTINED">Quarantined</option>
-                </select>
-              </div>
-
-              <div className="table-scroll">
-                <table className="proc-table">
-                  <thead>
-                    <tr>
-                      <th>Process</th>
-                      <th>PID</th>
-                      <th>PPID</th>
-                      <th>UID</th>
-                      <th>Zone</th>
-                      <th>Risk Index</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map(p => {
-                      const sc = p.score;
-                      const fill = scoreColor(sc);
-                      return (
-                        <tr key={p.pid}>
-                          <td><span className="proc-comm">{p.comm}</span></td>
-                          <td><span className="proc-pid">{p.pid}</span></td>
-                          <td><span className="proc-pid">{p.ppid}</span></td>
-                          <td><span className="proc-pid">{p.uid}</span></td>
-                          <td><span className={`zone-badge ${zoneClass(p.zone)}`}>{p.zone}</span></td>
-                          <td>
-                            <div className="score-bar-wrap">
-                              <div className="score-bar-bg">
-                                <div className="score-bar-fill" style={{ width: `${sc * 100}%`, background: fill }} />
-                              </div>
-                              <span className="score-val" style={{ color: fill }}>{sc.toFixed(2)}</span>
-                            </div>
-                          </td>
-                          <td>
-                            {p.zone === 'QUARANTINED'
-                              ? <button className="act-btn restore" onClick={() => restore(p.pid, p.comm)}><Unlock size={10} />Restore</button>
-                              : <button className="act-btn isolate" onClick={() => isolate(p.pid, p.comm)}><Lock size={10} />Isolate</button>
-                            }
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {filtered.length === 0 && (
-                      <tr><td colSpan={7}><div className="empty-state">No processes match filter</div></td></tr>
-                    )}
-                  </tbody>
-                </table>
+              <div className="terminal" ref={termRef} style={{ flex: 1, maxHeight: 'none', height: '100%' }}>
+                {log.map((l, i) => <div key={i} className={`t-line ${l.cls}`}>{l.text}</div>)}
               </div>
             </div>
           </div>
+        )}
 
-          {/* ── Right column ─────────────────────────── */}
-          <div className="col-right">
-
-            {/* Services health */}
-            <div className="panel" style={{ flexShrink: 0 }}>
-              <div className="panel-head">
-                <div className="panel-title"><span className="panel-title-dot green" />Service Health</div>
-                <span className="panel-tag">6 services</span>
-              </div>
-              <div className="health-list">
-                {HEALTH_SERVICES.map(s => (
-                  <div key={s.name} className="health-item">
-                    <div className="health-left">
-                      <div className="health-name">{s.name}</div>
-                      <div className="health-desc">{s.desc}</div>
-                    </div>
-                    <span className={`health-badge ${s.status}`}>{s.status === 'ok' ? 'ACTIVE' : 'DOWN'}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Alert Feed */}
-            <div className="panel" style={{ flex: 1, minHeight: 0 }}>
-              <div className="panel-head">
-                <div className="panel-title"><span className="panel-title-dot red" />Threat Feed</div>
-                <span className="panel-tag">{alerts.length} events</span>
-              </div>
-              <div className="alert-feed">
-                {alerts.length === 0 && (
-                  <div className="empty-state">
-                    <Shield size={24} style={{ color: 'var(--tx-dim)' }} />
-                    No active threats detected
-                  </div>
-                )}
-                {alerts.map(a => (
-                  <div key={a.id} className={`alert-item ${a.severity.toLowerCase()}`}>
-                    <div className="alert-top">
-                      <span className={`alert-type ${a.severity.toLowerCase()}`}>{a.type}</span>
-                      <span className="alert-ts">{a.ts}</span>
-                    </div>
-                    <div className="alert-body">
-                      PID <strong>{a.pid}</strong> (<strong>{a.comm}</strong>) — {a.severity}
-                    </div>
-                    <div className="alert-tags">
-                      {a.evidence.map((e, i) => <span key={i} className="alert-tag">{e}</span>)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Audit Console */}
-            <div className="panel" style={{ flexShrink: 0 }}>
-              <div className="panel-head">
-                <div className="panel-title"><span className="panel-title-dot" />Audit Console</div>
-                <span className="panel-tag">systemd journal</span>
-              </div>
-              <div className="terminal" ref={termRef} style={{ maxHeight: 180 }}>
-                {log.map((l, i) => (
-                  <div key={i} className={`t-line ${l.cls}`}>{l.text}</div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-        </div>
       </main>
     </div>
   );
