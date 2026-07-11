@@ -23,6 +23,7 @@ type ControlPlane struct {
 	enforcer *enforcement.Enforcer
 	policy   *policy.Engine
 	grpc     *grpc.Server
+	listener *ipc.Listener // created once in New(), used in Start()
 
 	// comm cache — pid → comm (populated by ProcessState messages)
 	commCache sync.Map
@@ -58,17 +59,35 @@ func New(dbPath, policyPath string) (*ControlPlane, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ControlPlane{
-		store:    s,
-		audit:    audit.New(s.DB()),
-		enforcer: enforcement.New(),
-		policy:   p,
-	}, nil
+
+	// Build cp first (handler must exist before NewListener so it can be
+	// passed as the MessageHandler), then wire the enforcer to the listener.
+	cp := &ControlPlane{
+		store:  s,
+		audit:  audit.New(s.DB()),
+		policy: p,
+	}
+
+	// NewListener records the socket path and stores cp as the MessageHandler.
+	// The UDS socket is NOT bound here — binding happens inside Listen(), which
+	// is called by Start(). This keeps New() safe to call in test environments
+	// where /run/kb/ may not exist.
+	listener, err := ipc.NewListener(cp)
+	if err != nil {
+		return nil, fmt.Errorf("ipc listener: %w", err)
+	}
+	cp.listener = listener
+
+	// Enforcer routes containment commands to the C sensor via the listener.
+	cp.enforcer = enforcement.NewEnforcer(listener)
+
+	return cp, nil
 }
 
 func (cp *ControlPlane) Start() error {
+	// Use the listener constructed in New() — do NOT call NewListener again.
 	go func() {
-		if err := ipc.NewListener(cp).Listen(); err != nil {
+		if err := cp.listener.Listen(); err != nil {
 			log.Fatalf("[KB] IPC: %v", err)
 		}
 	}()
@@ -98,6 +117,10 @@ func (cp *ControlPlane) Start() error {
 func (cp *ControlPlane) Stop() {
 	cp.grpc.GracefulStop()
 	cp.store.Close()
+	// Signal the IPC accept loop to stop.
+	if cp.listener != nil {
+		close(cp.listener.Done)
+	}
 }
 
 // ── MessageHandler (called by IPC listener) ──
@@ -173,12 +196,12 @@ func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
 		cp.fanOutAlert(alert)
 
 		if cp.policy.AutoTerminate(comm) {
-			cp.enforcer.Apply(msg.PID, pb.ContainmentLevel_TERMINATE)
+			cp.enforcer.Contain(msg.PID, uint32(pb.ContainmentLevel_TERMINATE), "policy:auto_terminate=true")
 			cp.audit.Log("AUTO_TERMINATE",
 				fmt.Sprintf("pid=%d comm=%s", msg.PID, comm),
 				"SYSTEM_AUTO", "policy:auto_terminate=true")
 		} else {
-			cp.enforcer.Apply(msg.PID, pb.ContainmentLevel_CGROUP)
+			cp.enforcer.Contain(msg.PID, uint32(pb.ContainmentLevel_CGROUP), "zone=BORDERLANDS")
 			cp.audit.Log("CGROUP_THROTTLE",
 				fmt.Sprintf("pid=%d comm=%s", msg.PID, comm),
 				"SYSTEM_AUTO", "zone=BORDERLANDS")

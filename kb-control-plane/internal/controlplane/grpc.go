@@ -49,7 +49,7 @@ func (cp *ControlPlane) ListZone(
 func (cp *ControlPlane) SetContainment(
 	ctx context.Context, req *pb.ContainmentRequest,
 ) (*pb.ContainmentResponse, error) {
-	cp.enforcer.Apply(req.Pid, req.Level)
+	cp.enforcer.Contain(req.Pid, uint32(req.Level), req.Reason)
 	cp.audit.Log(
 		fmt.Sprintf("SET_CONTAINMENT_%s", req.Level),
 		fmt.Sprintf("pid=%d", req.Pid),
@@ -134,15 +134,16 @@ func (cp *ControlPlane) SubmitAgentDecision(
 			d.Pid, d.AgentId, d.Confidence, d.AuthorizedBy),
 		d.AgentId, "",
 	)
+	agentReason := fmt.Sprintf("agent=%s action=%s confidence=%.2f", d.AgentId, d.Action, d.Confidence)
 	switch d.Action {
 	case "TERMINATE":
-		cp.enforcer.Apply(d.Pid, pb.ContainmentLevel_TERMINATE)
+		cp.enforcer.Contain(d.Pid, uint32(pb.ContainmentLevel_TERMINATE), agentReason)
 	case "NAMESPACE":
-		cp.enforcer.Apply(d.Pid, pb.ContainmentLevel_NAMESPACE)
+		cp.enforcer.Contain(d.Pid, uint32(pb.ContainmentLevel_NAMESPACE), agentReason)
 	case "SECCOMP":
-		cp.enforcer.Apply(d.Pid, pb.ContainmentLevel_SECCOMP)
+		cp.enforcer.Contain(d.Pid, uint32(pb.ContainmentLevel_SECCOMP), agentReason)
 	case "CGROUP":
-		cp.enforcer.Apply(d.Pid, pb.ContainmentLevel_CGROUP)
+		cp.enforcer.Contain(d.Pid, uint32(pb.ContainmentLevel_CGROUP), agentReason)
 	}
 	return &pb.DecisionAck{Success: true, Message: "executed"}, nil
 }

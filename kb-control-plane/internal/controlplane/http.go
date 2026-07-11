@@ -352,7 +352,7 @@ func (s *HTTPServer) handleIsolate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Trigger containment
-	s.cp.enforcer.Apply(req.Pid, pb.ContainmentLevel_TERMINATE)
+	s.cp.enforcer.Contain(req.Pid, uint32(pb.ContainmentLevel_TERMINATE), "Manual isolation from dashboard")
 	s.cp.audit.Log(
 		"SET_CONTAINMENT_TERMINATE",
 		fmt.Sprintf("pid=%d", req.Pid),
@@ -379,7 +379,7 @@ func (s *HTTPServer) handleRestore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clear containment
-	s.cp.enforcer.Apply(req.Pid, pb.ContainmentLevel_NONE)
+	s.cp.enforcer.Contain(req.Pid, uint32(pb.ContainmentLevel_NONE), "Manual restore from dashboard")
 	s.cp.audit.Log(
 		"SET_CONTAINMENT_NONE",
 		fmt.Sprintf("pid=%d", req.Pid),
