@@ -1015,8 +1015,8 @@ int main(void)
         return 1;
     }
 
-    bpf_program__set_autoload(skel->progs.kb_ssl_write, false);
-    bpf_program__set_autoload(skel->progs.kb_go_tls_write, false);
+    bpf_program__set_autoload(skel->progs.kb_ssl_write, true);
+    bpf_program__set_autoload(skel->progs.kb_go_tls_write, true);
     bpf_program__set_autoload(skel->progs.kb_lsm_file_open, true);
 
     err = kbd_sensor_bpf__load(skel);
