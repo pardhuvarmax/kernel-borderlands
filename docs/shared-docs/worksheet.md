@@ -7,7 +7,7 @@ This specification serves as the master architectural reference and step-by-step
 ## 📂 Master Index
 
 1. [Architectural Context & Design Paradigms](#1-architectural-context--design-paradigms)
-2. [Task 1: Go-to-C IPC Feedback & Containment Map](#2-task-1-go-to-c-ipc-feedback--containment-map)
+2. [Task 1: Go-to-C IPC Feedback & Containment Map](#2-task-1-go-to-c-ipc-feedback--containment-map) [COMPLETED]
 3. [Task 2: Standard gRPC Health Checking Protocol](#3-task-2-standard-grpc-health-checking-protocol)
 4. [Task 3: Process Exit Lifecycle (sched_process_exit)](#4-task-3-process-exit-lifecycle)
 5. [Task 4: SSH Wish Hardening & MCP Metrics](#5-task-4-ssh-wish-hardening--mcp-metrics)
@@ -48,107 +48,12 @@ Using a BPF map (`contained_pids_map`) for containment is significantly more res
 *   **Low Execution Overhead**: A BPF map lookup takes only a few nanoseconds, introducing negligible performance impact to hot path syscalls.
 
 ### A. C Subsystem Changes (`kb-core/`) — *Pardhu Varma*
-1.  **Define C Struct in `include/kb_common.h`**:
-    The struct must match Go byte alignment exactly:
-    ```c
-    #define MSG_TYPE_CONTAINMENT_CMD 3
 
-    struct __attribute__((packed)) kb_wire_containment_cmd {
-        uint32_t pid;
-        uint32_t level; // 0=None, 1=Cgroup, 2=Seccomp, 3=Namespace, 4=Terminate
-        char reason[64];
-    };
-    ```
-2.  **Define BPF Map in `ebpf/kbd_sensor.bpf.c`**:
-    Declare a hash map to hold quarantined PIDs:
-    ```c
-    struct {
-        __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 1024);
-        __type(key, uint32_t);   // PID
-        __type(value, uint32_t); // Containment Level
-    } contained_pids_map SEC(".maps");
-    ```
-3.  **Implement Map Inspection in eBPF Syscall Hooks**:
-    Update the LSM hooks to reject operations for blocked PIDs:
-    ```c
-    SEC("lsm/file_open")
-    int BPF_PROG(kb_file_open, struct file *file, int mask) {
-        uint32_t pid = bpf_get_current_pid_tgid() >> 32;
-        uint32_t *level = bpf_map_lookup_elem(&contained_pids_map, &pid);
-        if (level && *level >= 2) { // SECCOMP (2) or higher
-            return -EACCES; // Reject file open requests
-        }
-        return 0;
-    }
-    ```
-4.  **Implement Socket Listener in C Userspace (`userspace/sensor/kbd_sensor.c`)**:
-    Update the select/poll loop to check for write-backs from the Go UDS socket:
-    ```c
-    void handle_incoming_containment_cmd(int sock_fd) {
-        struct kb_wire_containment_cmd cmd;
-        ssize_t bytes_read = recv(sock_fd, &cmd, sizeof(cmd), 0);
-        if (bytes_read == sizeof(cmd)) {
-            uint32_t pid = cmd.pid;
-            uint32_t level = cmd.level;
-            bpf_map_update_elem(bpf_map__fd(skel->maps.contained_pids_map), &pid, &level, BPF_ANY);
-            printf("[SENSOR] Containment payload parsed: PID %d set to level %d (Reason: %s)\n", pid, level, cmd.reason);
-        }
-    }
-    ```
+- **TASK-1 COMPLETED**
 
 ### B. Go Subsystem Changes (`kb-control-plane/`) — *Tejaswini*
-1.  **Define Go Struct in `internal/ipc/types.go`**:
-    Ensure the struct has the exact same field sizes as C:
-    ```go
-    type ContainmentCmdMsg struct {
-        PID    uint32
-        Level  uint32
-        Reason [64]byte
-    }
-    ```
-2.  **Add Socket Write Method in `internal/ipc/listener.go`**:
-    Implement a safe write loop over all connected C client sensors:
-    ```go
-    type Listener struct {
-        path  string
-        ln    net.Listener
-        mu    sync.Mutex
-        conns map[net.Conn]bool
-        Done  chan struct{}
-    }
 
-    func (l *Listener) SendContainmentCmd(pid uint32, level uint32, reason string) error {
-        l.mu.Lock()
-        defer l.mu.Unlock()
-
-        var reasonBytes [64]byte
-        copy(reasonBytes[:], []byte(reason))
-        payload := ContainmentCmdMsg{PID: pid, Level: level, Reason: reasonBytes}
-
-        // Header construction: Magic (0x4B42), Version (3), MsgType (3)
-        var header [4]byte
-        binary.LittleEndian.PutUint16(header[0:2], 0x4B42)
-        header[2] = 3
-        header[3] = 3
-
-        for conn := range l.conns {
-            // Write length prefix (uint32) first, followed by header and payload struct
-            length := uint32(len(header) + 72) // 4 + 72
-            if err := binary.Write(conn, binary.LittleEndian, length); err != nil {
-                log.Printf("[IPC] Failed to write length prefix: %v", err)
-                continue
-            }
-            conn.Write(header[:])
-            if err := binary.Write(conn, binary.LittleEndian, payload); err != nil {
-                log.Printf("[IPC] Failed to write payload: %v", err)
-            }
-        }
-        return nil
-    }
-    ```
-3.  **Update Go Enforcer (`internal/enforcement/enforce.go`)**:
-    Update the `Enforcer` implementation to route `SECCOMP` and `NAMESPACE` containment requests to this UDS write helper instead of leaving them as stubs.
+- **TASK-1 COMPLETED**
 
 ---
 
