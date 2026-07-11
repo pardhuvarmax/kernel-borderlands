@@ -1,572 +1,564 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import {
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
 } from 'recharts';
-import { 
-  AlertTriangle, Terminal, RefreshCw, Cpu, Activity, Database, Lock, Unlock
+import {
+  Shield, AlertTriangle, Activity, Lock, Unlock,
+  Search, RefreshCw, Cpu, Layers, Terminal, Bell, Settings,
+  Server, Wifi, WifiOff
 } from 'lucide-react';
-import './App.css';
 
-// Types
+// ── Types ────────────────────────────────────────────────────────────────────
+type Zone = 'SAFE' | 'SUSPICIOUS' | 'BORDERLANDS' | 'QUARANTINED';
+type Sev  = 'INFO' | 'WARNING' | 'CRITICAL';
+
 interface Process {
-  pid: number;
-  ppid: number;
-  comm: string;
-  uid: number;
-  score: number;
-  zone: 'SAFE' | 'SUSPICIOUS' | 'BORDERLANDS' | 'QUARANTINED';
-  isAADSQuorum?: boolean;
+  pid: number; ppid: number; comm: string;
+  uid: number; score: number; zone: Zone;
+  startedAt: string; quorumPending?: boolean;
 }
 
-interface Alert {
-  alertId: string;
-  alertType: string;
-  pid: number;
-  comm: string;
-  severity: 'INFO' | 'WARNING' | 'CRITICAL';
-  timestamp: string;
-  evidence: string[];
+interface KBAlert {
+  id: string; type: string; pid: number; comm: string;
+  severity: Sev; ts: string; evidence: string[];
 }
 
-interface ChartPoint {
-  time: string;
-  safe: number;
-  suspicious: number;
-  borderlands: number;
-}
+interface ChartPoint { t: string; safe: number; sus: number; bl: number; }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const ts = () =>
+  new Date().toLocaleTimeString('en-US', { hour12: false });
+
+const scoreColor = (s: number) =>
+  s < 0.3 ? 'var(--safe)' : s < 0.65 ? 'var(--warn)' : 'var(--danger)';
+
+const zoneClass = (z: Zone) =>
+  ({ SAFE: 'safe', SUSPICIOUS: 'suspicious', BORDERLANDS: 'borderlands', QUARANTINED: 'quarantined' }[z]);
+
+// ── Static seed data ──────────────────────────────────────────────────────────
+const SEED: Process[] = [
+  { pid: 1,    ppid: 0,   comm: 'systemd',    uid: 0,    score: 0.02, zone: 'SAFE',        startedAt: '00:00:01' },
+  { pid: 450,  ppid: 1,   comm: 'sshd',       uid: 0,    score: 0.10, zone: 'SAFE',        startedAt: '00:00:04' },
+  { pid: 812,  ppid: 1,   comm: 'postgres',   uid: 70,   score: 0.07, zone: 'SAFE',        startedAt: '00:00:05' },
+  { pid: 915,  ppid: 1,   comm: 'nginx',      uid: 33,   score: 0.09, zone: 'SAFE',        startedAt: '00:00:06' },
+  { pid: 1205, ppid: 1,   comm: 'kbd',        uid: 0,    score: 0.01, zone: 'SAFE',        startedAt: '00:00:07' },
+  { pid: 1210, ppid: 1,   comm: 'kb-checker', uid: 0,    score: 0.01, zone: 'SAFE',        startedAt: '00:00:07' },
+  { pid: 3102, ppid: 450, comm: 'bash',       uid: 1000, score: 0.22, zone: 'SAFE',        startedAt: '11:40:12' },
+];
+
+const HEALTH_SERVICES = [
+  { name: 'kb-core (eBPF Sensor)',     desc: 'Ring 0 syscall hooks',          status: 'ok'  },
+  { name: 'kbd (Go Control Plane)',    desc: '/run/kb/kba.sock',              status: 'ok'  },
+  { name: 'kb-checker (Rust Watchdog)',desc: 'Hard fallback containment',     status: 'ok'  },
+  { name: 'AADS Agent Swarm',          desc: 'ZeroMQ + Ray consensus',        status: 'ok'  },
+  { name: 'gRPC Health Service',       desc: 'Standard grpc_health_v1',       status: 'ok'  },
+  { name: 'SQLite L2 Store',           desc: 'WAL journal mode',              status: 'ok'  },
+];
+
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [isSimulated, setIsSimulated] = useState<boolean>(true);
-  const [processes, setProcesses] = useState<Process[]>([]);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [logLines, setLogLines] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedZone, setSelectedZone] = useState<string>('ALL');
-  const [chartData, setChartData] = useState<ChartPoint[]>([]);
-  
-  const terminalEndRef = useRef<HTMLDivElement>(null);
+  const [simulated, setSimulated]   = useState(true);
+  const [processes,  setProcesses]  = useState<Process[]>(SEED);
+  const [alerts,     setAlerts]     = useState<KBAlert[]>([]);
+  const [log,        setLog]        = useState<{ text: string; cls: string }[]>([]);
+  const [chart,      setChart]      = useState<ChartPoint[]>([]);
+  const [search,     setSearch]     = useState('');
+  const [zoneFilter, setZoneFilter] = useState<string>('ALL');
+  const [activeNav,  setActiveNav]  = useState('Processes');
 
-  // Initialize process states
-  useEffect(() => {
-    const initialProcesses: Process[] = [
-      { pid: 1, ppid: 0, comm: 'systemd', uid: 0, score: 0.05, zone: 'SAFE' },
-      { pid: 450, ppid: 1, comm: 'sshd', uid: 0, score: 0.12, zone: 'SAFE' },
-      { pid: 812, ppid: 1, comm: 'postgres', uid: 70, score: 0.08, zone: 'SAFE' },
-      { pid: 915, ppid: 1, comm: 'nginx', uid: 33, score: 0.15, zone: 'SAFE' },
-      { pid: 1040, ppid: 915, comm: 'nginx worker', uid: 33, score: 0.18, zone: 'SAFE' },
-      { pid: 1205, ppid: 1, comm: 'kbd', uid: 0, score: 0.02, zone: 'SAFE' },
-      { pid: 1210, ppid: 1, comm: 'kb-checker', uid: 0, score: 0.01, zone: 'SAFE' },
-      { pid: 3102, ppid: 450, comm: 'bash', uid: 1000, score: 0.35, zone: 'SAFE' }
-    ];
-    setProcesses(initialProcesses);
+  const termRef = useRef<HTMLDivElement>(null);
+  const alertKeySet = useRef<Set<string>>(new Set());
 
-    // Initial logs
-    setLogLines([
-      `[${new Date().toLocaleTimeString()}] [CORE] eBPF telemetry hooks loaded successfully.`,
-      `[${new Date().toLocaleTimeString()}] [WATCHDOG] kb-checker safety daemon active.`,
-      `[${new Date().toLocaleTimeString()}] [CONTROL] kbd Go daemon listening on /run/kb/kba.sock.`,
-      `[${new Date().toLocaleTimeString()}] [HEALTH] standard gRPC check: SERVING`
-    ]);
-
-    // Initial chart data
-    const initialChart: ChartPoint[] = Array.from({ length: 8 }, (_, i) => ({
-      time: `11:${40 + i * 2}`,
-      safe: 8 + Math.floor(Math.random() * 2),
-      suspicious: Math.floor(Math.random() * 2),
-      borderlands: 0
-    }));
-    setChartData(initialChart);
+  // Log helper
+  const addLog = useCallback((text: string, cls = 'normal') => {
+    setLog(prev => [...prev.slice(-120), { text: `[${ts()}] ${text}`, cls }]);
   }, []);
 
-  // Auto-scroll diagnostics console
-  useEffect(() => {
-    terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logLines]);
+  // Add alert helper (dedup by id)
+  const addAlert = useCallback((a: KBAlert) => {
+    if (alertKeySet.current.has(a.id)) return;
+    alertKeySet.current.add(a.id);
+    setAlerts(prev => [a, ...prev].slice(0, 60));
+  }, []);
 
-  // Simulated Telemetry & Attack Event Loop
+  // Bootstrap
   useEffect(() => {
-    if (!isSimulated) return;
+    addLog('[CORE] eBPF CO-RE telemetry hooks loaded.', 'success');
+    addLog('[WATCHDOG] kb-checker safety daemon active.', 'success');
+    addLog('[CONTROL] kbd listening on /run/kb/kba.sock.', 'success');
+    addLog('[HEALTH] gRPC health check: SERVING (kba.sock)', 'success');
+    addLog('[STORE] SQLite L2 WAL journal mode: active.', 'success');
 
-    const interval = setInterval(() => {
-      // 1. Randomly update metrics or spawn benign process
+    // Seed chart
+    const now = new Date();
+    setChart(Array.from({ length: 10 }, (_, i) => {
+      const d = new Date(now.getTime() - (9 - i) * 4000);
+      return {
+        t: d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        safe: 7, sus: 0, bl: 0
+      };
+    }));
+  }, [addLog]);
+
+  // Auto-scroll terminal
+  useEffect(() => {
+    termRef.current?.scrollTo({ top: termRef.current.scrollHeight, behavior: 'smooth' });
+  }, [log]);
+
+  // Simulation loop
+  useEffect(() => {
+    if (!simulated) return;
+    const id = setInterval(() => {
       setProcesses(prev => {
-        let updated = [...prev];
-        
-        // Maybe spawn a process
-        if (Math.random() > 0.65 && updated.length < 15) {
-          const names = ['curl', 'git', 'node', 'python', 'sudo', 'grep', 'awk', 'docker'];
-          const randomName = names[Math.floor(Math.random() * names.length)];
-          const newPid = 4000 + Math.floor(Math.random() * 2000);
-          const ppid = updated[Math.floor(Math.random() * updated.length)].pid;
-          updated.push({
-            pid: newPid,
-            ppid,
-            comm: randomName,
-            uid: Math.random() > 0.5 ? 1000 : 0,
-            score: parseFloat((Math.random() * 0.25).toFixed(2)),
-            zone: 'SAFE'
-          });
-          setLogLines(logs => [...logs, `[${new Date().toLocaleTimeString()}] [CORE] sched_process_fork: PID ${newPid} (${randomName}) spawned.`]);
+        let procs = [...prev];
+
+        // Maybe spawn short-lived process
+        if (procs.length < 18 && Math.random() > 0.6) {
+          const comms = ['curl', 'wget', 'python3', 'node', 'sh', 'awk', 'gcc', 'make'];
+          const name  = comms[Math.floor(Math.random() * comms.length)];
+          const parent = procs[Math.floor(Math.random() * procs.length)];
+          const pid    = 4000 + Math.floor(Math.random() * 3000);
+          procs.push({ pid, ppid: parent.pid, comm: name, uid: Math.random() > 0.5 ? 1000 : 0, score: 0.05, zone: 'SAFE', startedAt: ts() });
+          addLog(`[CORE] sched_fork: PID ${pid} (${name}) from PPID ${parent.pid}`, 'dim');
         }
 
-        // Maybe trigger suspicious activity on bash or curl
-        updated = updated.map(p => {
-          if (p.zone === 'SAFE' && (p.comm === 'bash' || p.comm === 'curl') && Math.random() > 0.85) {
-            setLogLines(logs => [...logs, `[${new Date().toLocaleTimeString()}] [SENSOR] Privilege anomaly detected on PID ${p.pid}.`]);
-            return { ...p, score: 0.68, zone: 'SUSPICIOUS' };
+        // Maybe escalate a safe → suspicious
+        procs = procs.map(p => {
+          if (p.zone === 'SAFE' && !p.quorumPending && Math.random() > 0.92) {
+            addLog(`[SENSOR] Privilege anomaly on PID ${p.pid} (${p.comm}) — score rising`, 'warn');
+            return { ...p, score: 0.66, zone: 'SUSPICIOUS' as Zone };
           }
-          // Escalate suspicious to borderlands
-          if (p.zone === 'SUSPICIOUS' && Math.random() > 0.7) {
-            // Trigger AADS voting consensus
-            setLogLines(logs => [
-              ...logs,
-              `[${new Date().toLocaleTimeString()}] [AADS] Quorum voting requested for anomaly on PID ${p.pid} (${p.comm}).`,
-              `[${new Date().toLocaleTimeString()}] [AADS] [VOTE] Patroller: COMPROMISED (92% confidence)`,
-              `[${new Date().toLocaleTimeString()}] [AADS] [VOTE] Hunter: COMPROMISED (89% confidence)`,
-              `[${new Date().toLocaleTimeString()}] [AADS] [VERDICT] Quorum reached (COMPROMISED). Triggering isolation.`
-            ]);
-            
-            // Dispatch Alert
-            const alertId = `alt-${p.pid}-${Date.now()}`;
-            const newAlert: Alert = {
-              alertId,
-              alertType: 'BORDERLANDS_ENTRY',
-              pid: p.pid,
-              comm: p.comm,
-              severity: 'CRITICAL',
-              timestamp: new Date().toLocaleTimeString(),
-              evidence: ['ema_score=92.4', 'privilege_escalation_detected', 'namespace_drift']
-            };
-            setAlerts(al => [newAlert, ...al]);
-            
-            return { ...p, score: 0.94, zone: 'BORDERLANDS', isAADSQuorum: true };
+          // suspicious → borderlands → quorum
+          if (p.zone === 'SUSPICIOUS' && !p.quorumPending && Math.random() > 0.75) {
+            addLog(`[AADS] Quorum vote requested — PID ${p.pid} (${p.comm})`, 'info');
+            addLog(`[AADS] ├ Patroller: COMPROMISED (91%)`, 'info');
+            addLog(`[AADS] ├ Hunter:    COMPROMISED (88%)`, 'info');
+            addLog(`[AADS] └ VERDICT: ISOLATE — confidence 89.5%`, 'warn');
+
+            const id = `al-${p.pid}-${Date.now()}`;
+            addAlert({
+              id, type: 'BORDERLANDS_ENTRY', pid: p.pid, comm: p.comm,
+              severity: 'CRITICAL', ts: ts(),
+              evidence: [`ema_score=${(p.score * 100).toFixed(1)}`, 'privilege_escalation', 'namespace_drift']
+            });
+            return { ...p, score: 0.91, zone: 'BORDERLANDS' as Zone, quorumPending: true };
           }
           return p;
         });
 
-        // Auto-terminate borderlands processes after a short wait (mimicking active watchdog SIGKILL)
-        updated.forEach(p => {
-          if (p.zone === 'BORDERLANDS' && p.isAADSQuorum) {
+        // Auto-terminate borderlands processes (simulating SIGKILL)
+        procs.forEach(p => {
+          if (p.zone === 'BORDERLANDS' && p.quorumPending) {
             setTimeout(() => {
-              setProcesses(current => {
-                const isExists = current.some(cp => cp.pid === p.pid && cp.zone === 'BORDERLANDS');
-                if (!isExists) return current;
-                
-                setLogLines(logs => [
-                  ...logs,
-                  `[${new Date().toLocaleTimeString()}] [WATCHDOG] Integrity violation resolved.`,
-                  `[${new Date().toLocaleTimeString()}] [WATCHDOG] [QUARANTINE] Layer 1: SIGKILL sent to PID ${p.pid}.`,
-                  `[${new Date().toLocaleTimeString()}] [CORE] sched_process_exit: PID ${p.pid} evicted.`
-                ]);
-                return current.filter(cp => cp.pid !== p.pid);
+              setProcesses(cur => {
+                const still = cur.find(c => c.pid === p.pid && c.zone === 'BORDERLANDS');
+                if (!still) return cur;
+                addLog(`[WATCHDOG] Layer 1 — SIGKILL → PID ${p.pid}`, 'err');
+                addLog(`[CORE] sched_exit: PID ${p.pid} (${p.comm}) evicted.`, 'success');
+                return cur.filter(c => c.pid !== p.pid);
               });
-            }, 3500);
+            }, 3500 + Math.random() * 1500);
           }
         });
 
-        return updated;
+        return procs;
       });
 
-      // 2. Perform periodic safety audits (Rust watchdog ticks)
-      if (Math.random() > 0.75) {
-        setLogLines(logs => [
-          ...logs,
-          `[${new Date().toLocaleTimeString()}] [HEALTH] Performing gRPC availability audit over UDS: /run/kb/kba.sock...`,
-          `[${new Date().toLocaleTimeString()}] [HEALTH] Control plane gRPC check: SERVING (100ms deadline)`,
-          `[${new Date().toLocaleTimeString()}] [WATCHDOG] BPF map state integrity audit: OK (0 tampered links)`
-        ]);
+      // Chart tick
+      setProcesses(cur => {
+        const cnts = cur.reduce((a, p) => {
+          if (p.zone === 'SAFE') a.safe++;
+          else if (p.zone === 'SUSPICIOUS') a.sus++;
+          else a.bl++;
+          return a;
+        }, { safe: 0, sus: 0, bl: 0 });
+        setChart(prev => [...prev.slice(1), {
+          t: ts(), safe: cnts.safe, sus: cnts.sus, bl: cnts.bl
+        }]);
+        return cur;
+      });
+
+      // Periodic health audit log
+      if (Math.random() > 0.72) {
+        addLog('[HEALTH] UDS gRPC audit: SERVING (< 100ms)', 'success');
+        addLog('[WATCHDOG] BPF map integrity: 0 tampered links', 'success');
       }
+    }, 4200);
 
-      // 3. Update Chart Statistics
-      setChartData(prev => {
-        const nextTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const counts = processes.reduce((acc, curr) => {
-          if (curr.zone === 'SAFE') acc.safe++;
-          else if (curr.zone === 'SUSPICIOUS') acc.suspicious++;
-          else if (curr.zone === 'BORDERLANDS' || curr.zone === 'QUARANTINED') acc.borderlands++;
-          return acc;
-        }, { safe: 0, suspicious: 0, borderlands: 0 });
+    return () => clearInterval(id);
+  }, [simulated, addLog, addAlert]);
 
-        const nextPoints = [...prev.slice(1), {
-          time: nextTime,
-          safe: counts.safe,
-          suspicious: counts.suspicious,
-          borderlands: counts.borderlands
-        }];
-        return nextPoints;
-      });
+  // Filtered processes
+  const filtered = useMemo(() => processes.filter(p => {
+    const q = search.toLowerCase();
+    const matchQ = !q || p.comm.toLowerCase().includes(q) || String(p.pid).includes(q);
+    const matchZ = zoneFilter === 'ALL' || p.zone === zoneFilter;
+    return matchQ && matchZ;
+  }), [processes, search, zoneFilter]);
 
-    }, 4000);
+  // Metrics
+  const metrics = useMemo(() => ({
+    total:    processes.length,
+    safe:     processes.filter(p => p.zone === 'SAFE').length,
+    sus:      processes.filter(p => p.zone === 'SUSPICIOUS').length,
+    danger:   processes.filter(p => p.zone === 'BORDERLANDS' || p.zone === 'QUARANTINED').length,
+    alerts:   alerts.filter(a => a.severity === 'CRITICAL').length,
+  }), [processes, alerts]);
 
-    return () => clearInterval(interval);
-  }, [processes, isSimulated]);
-
-  // Filtered process listing
-  const filteredProcesses = useMemo(() => {
-    return processes.filter(p => {
-      const matchesSearch = p.comm.toLowerCase().includes(searchQuery.toLowerCase()) || p.pid.toString().includes(searchQuery);
-      const matchesZone = selectedZone === 'ALL' || p.zone === selectedZone;
-      return matchesSearch && matchesZone;
-    });
-  }, [processes, searchQuery, selectedZone]);
-
-  // Isolate a process manually (Operator action)
-  const handleIsolate = (pid: number, comm: string) => {
-    setProcesses(prev => 
-      prev.map(p => p.pid === pid ? { ...p, zone: 'QUARANTINED', score: 0.99 } : p)
-    );
-    const alertId = `alt-${pid}-${Date.now()}`;
-    const newAlert: Alert = {
-      alertId,
-      alertType: 'MANUAL_QUARANTINE',
-      pid,
-      comm,
-      severity: 'CRITICAL',
-      timestamp: new Date().toLocaleTimeString(),
-      evidence: ['manual_operator_isolation', 'force_quarantine_level_4']
-    };
-    setAlerts(al => [newAlert, ...al]);
-    setLogLines(logs => [
-      ...logs,
-      `[${new Date().toLocaleTimeString()}] [OPERATOR] Manual isolation requested for PID ${pid} (${comm}).`,
-      `[${new Date().toLocaleTimeString()}] [CONTAINMENT] Applying Layer 3 UDS Network dropping rule.`
-    ]);
+  // Operator: isolate
+  const isolate = (pid: number, comm: string) => {
+    setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'QUARANTINED', score: 1.0 } : p));
+    const id = `al-${pid}-${Date.now()}`;
+    addAlert({ id, type: 'MANUAL_QUARANTINE', pid, comm, severity: 'CRITICAL', ts: ts(), evidence: ['manual_operator_action', 'containment_level_4'] });
+    addLog(`[OPERATOR] Manual quarantine — PID ${pid} (${comm})`, 'err');
   };
 
-  // Restore quarantined process
-  const handleRestore = (pid: number, comm: string) => {
-    setProcesses(prev => 
-      prev.map(p => p.pid === pid ? { ...p, zone: 'SAFE', score: 0.05 } : p)
-    );
-    setLogLines(logs => [
-      ...logs,
-      `[${new Date().toLocaleTimeString()}] [OPERATOR] Restoring PID ${pid} (${comm}) to SAFE zone.`,
-      `[${new Date().toLocaleTimeString()}] [CONTAINMENT] Evicting isolation rules for PID ${pid}.`
-    ]);
+  // Operator: restore
+  const restore = (pid: number, comm: string) => {
+    setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'SAFE', score: 0.04, quorumPending: false } : p));
+    addLog(`[OPERATOR] Restored PID ${pid} (${comm}) → SAFE`, 'success');
   };
 
-  // Key metrics
-  const activePidsCount = processes.length;
-  const criticalAlertsCount = alerts.filter(a => a.severity === 'CRITICAL').length;
+  // Nav items
+  const NAV = [
+    { label: 'Processes', icon: <Cpu size={14} />,      badge: metrics.danger > 0 ? metrics.danger : null },
+    { label: 'Alerts',    icon: <Bell size={14} />,      badge: metrics.alerts > 0 ? metrics.alerts : null },
+    { label: 'Services',  icon: <Server size={14} />,    badge: null },
+    { label: 'Telemetry', icon: <Activity size={14} />,  badge: null },
+    { label: 'Console',   icon: <Terminal size={14} />,  badge: null },
+  ];
 
   return (
-    <div className="app-container">
-      {/* Header */}
-      <header className="app-header">
-        <div className="brand-section">
-          <div className="brand-logo"></div>
-          <div className="brand-text">
-            <h1>Kernel Borderlands</h1>
-            <p>Control Core Operator Console // v1.2.0</p>
+    <div className="shell">
+
+      {/* ── Top Bar ─────────────────────────────────────────────── */}
+      <header className="topbar">
+        <div className="topbar-brand">
+          <div className="brand-icon">
+            <div className="brand-icon-inner" />
+          </div>
+          <div>
+            <div className="brand-name">Kernel Borderlands</div>
+            <div className="brand-sub">Security Operations Console · v1.2.0</div>
           </div>
         </div>
 
-        <div className="header-controls">
-          <div className={`system-status ${isSimulated ? 'simulated' : ''}`}>
-            <span className="status-dot"></span>
-            {isSimulated ? 'SIMULATED FEED' : 'LIVE BACKEND'}
+        <div className="topbar-center" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--tx-dim)' }}>
+          {new Date().toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+          &nbsp;·&nbsp; codename <span style={{ color: 'var(--accent)' }}>kestrel</span>
+        </div>
+
+        <div className="topbar-right">
+          <div className="topbar-stat">
+            <span className="topbar-stat-label">Tracked PIDs</span>
+            <span className="topbar-stat-val">{metrics.total}</span>
+          </div>
+          <div className="topbar-sep" />
+          <div className="topbar-stat">
+            <span className="topbar-stat-label">Intercept Latency</span>
+            <span className="topbar-stat-val ok">430 ns</span>
+          </div>
+          <div className="topbar-sep" />
+          <div className="topbar-stat">
+            <span className="topbar-stat-label">Active Alerts</span>
+            <span className={`topbar-stat-val ${metrics.alerts > 0 ? 'alert' : 'ok'}`}>{metrics.alerts}</span>
+          </div>
+          <div className="topbar-sep" />
+
+          <div
+            className={`live-indicator ${simulated ? 'sim' : 'live'}`}
+            onClick={() => { setSimulated(!simulated); addLog(`[CONSOLE] Backend mode toggled → ${simulated ? 'LIVE' : 'SIMULATION'}`, 'info'); }}
+            title="Toggle feed mode"
+          >
+            {simulated ? <WifiOff size={11} /> : <Wifi size={11} />}
+            <span className="live-dot" />
+            {simulated ? 'SIMULATION' : 'LIVE FEED'}
           </div>
 
-          <button 
-            className="toggle-button" 
-            onClick={() => {
-              setIsSimulated(!isSimulated);
-              setLogLines(logs => [
-                ...logs,
-                `[${new Date().toLocaleTimeString()}] [CONSOLE] Toggled backend connector mode.`,
-              ]);
-            }}
-          >
-            <RefreshCw size={14} style={{ marginRight: '8px', verticalAlign: 'middle' }} />
-            {isSimulated ? 'Connect Live UDS' : 'Use Simulation'}
-          </button>
+          <button className="btn-icon" title="Refresh"><RefreshCw size={13} /></button>
+          <button className="btn-icon" title="Settings"><Settings size={13} /></button>
         </div>
       </header>
 
-      {/* Metrics Row */}
-      <section className="metrics-row">
-        <div className="metric-box">
-          <div className="metric-label">
-            <Cpu size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-            Active Tracked PIDs
+      {/* ── Sidebar ─────────────────────────────────────────────── */}
+      <aside className="sidebar">
+        <div className="nav-section-label">Navigation</div>
+        {NAV.map(n => (
+          <div
+            key={n.label}
+            className={`nav-item ${activeNav === n.label ? 'active' : ''}`}
+            onClick={() => setActiveNav(n.label)}
+          >
+            {n.icon} {n.label}
+            {n.badge != null && (
+              <span className={`nav-badge ${n.badge === 0 ? 'ok' : ''}`}>{n.badge}</span>
+            )}
           </div>
-          <div className="metric-value">{activePidsCount}</div>
-        </div>
-        <div className="metric-box">
-          <div className="metric-label">
-            <Activity size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-            eBPF Intercept Latency
-          </div>
-          <div className="metric-value highlight-safe">420ns</div>
-        </div>
-        <div className="metric-box">
-          <div className="metric-label">
-            <Database size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-            L1 Memory Cache Status
-          </div>
-          <div className="metric-value highlight-safe">RESTORED</div>
-        </div>
-        <div className="metric-box">
-          <div className="metric-label">
-            <AlertTriangle size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-            Active Alerts
-          </div>
-          <div className={`metric-value ${criticalAlertsCount > 0 ? 'highlight-alert' : ''}`}>
-            {criticalAlertsCount}
-          </div>
-        </div>
-      </section>
+        ))}
 
-      {/* Main Grid */}
-      <main className="dashboard-grid">
-        {/* Left Column: Diagnostics, Health, Swarm */}
-        <div className="side-column-left">
-          {/* Safety Watchdog */}
-          <div className="panel-card accent-safe">
-            <div className="panel-header">
-              <h2>Watchdog Services</h2>
-              <span className="panel-subtitle">Safety & Health checks</span>
-            </div>
-            <div className="status-list">
-              <div className="status-item">
-                <div className="status-info">
-                  <span className="status-title">kb-core (eBPF Sensor)</span>
-                  <span className="status-desc">Ring 0 syscall interception</span>
-                </div>
-                <span className="status-badge healthy">ACTIVE</span>
-              </div>
-              <div className="status-item">
-                <div className="status-info">
-                  <span className="status-title">kbd (Go Control Plane)</span>
-                  <span className="status-desc">IPC socket & SQLite store</span>
-                </div>
-                <span className="status-badge healthy">ACTIVE</span>
-              </div>
-              <div className="status-item">
-                <div className="status-info">
-                  <span className="status-title">kb-checker (Rust Safety)</span>
-                  <span className="status-desc">Hard fallback containment locks</span>
-                </div>
-                <span className="status-badge healthy">ACTIVE</span>
-              </div>
-              <div className="status-item">
-                <div className="status-info">
-                  <span className="status-title">AADS Agent Swarm</span>
-                  <span className="status-desc">ZeroMQ & Ray consensus loops</span>
-                </div>
-                <span className="status-badge healthy">ACTIVE</span>
-              </div>
+        <div className="sidebar-footer">
+          <div className="nav-section-label" style={{ padding: '0 0 8px' }}>System</div>
+          <div className="system-summary-row">
+            <span className="system-summary-label">Zone: SAFE</span>
+            <span className="system-summary-val ok">{metrics.safe}</span>
+          </div>
+          <div className="system-summary-row">
+            <span className="system-summary-label">Zone: SUSPICIOUS</span>
+            <span className="system-summary-val" style={{ color: metrics.sus > 0 ? 'var(--warn)' : undefined }}>{metrics.sus}</span>
+          </div>
+          <div className="system-summary-row">
+            <span className="system-summary-label">Zone: CRITICAL</span>
+            <span className={`system-summary-val ${metrics.danger > 0 ? 'bad' : 'ok'}`}>{metrics.danger}</span>
+          </div>
+          <div className="system-summary-row">
+            <span className="system-summary-label">L1 Cache</span>
+            <span className="system-summary-val ok">RESTORED</span>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Main ─────────────────────────────────────────────────── */}
+      <main className="main">
+
+        {/* Stat cards */}
+        <div className="stat-row">
+          <div className="stat-card">
+            <div className="stat-icon blue"><Cpu size={16} /></div>
+            <div className="stat-info">
+              <div className="stat-label">Tracked Processes</div>
+              <div className="stat-value blue">{metrics.total}</div>
+              <div className="stat-sub">L1 in-memory cache</div>
             </div>
           </div>
-
-          {/* Diagnostics Console */}
-          <div className="panel-card" style={{ flex: 1 }}>
-            <div className="panel-header">
-              <h2>Safety Audit Console</h2>
-              <Terminal size={14} style={{ color: 'var(--text-secondary)' }} />
+          <div className="stat-card">
+            <div className="stat-icon green"><Shield size={16} /></div>
+            <div className="stat-info">
+              <div className="stat-label">Safe Zone</div>
+              <div className="stat-value green">{metrics.safe}</div>
+              <div className="stat-sub">Nominal processes</div>
             </div>
-            <div className="terminal-console">
-              {logLines.map((line, idx) => (
-                <div 
-                  key={idx} 
-                  className={`terminal-line ${
-                    line.includes('[AADS]') ? 'cmd' : 
-                    line.includes('[WATCHDOG]') ? 'alert' : 
-                    line.includes('SERVING') ? 'success' : ''
-                  }`}
-                >
-                  {line}
-                </div>
-              ))}
-              <div ref={terminalEndRef} />
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon yellow"><AlertTriangle size={16} /></div>
+            <div className="stat-info">
+              <div className="stat-label">Suspicious</div>
+              <div className="stat-value yellow">{metrics.sus}</div>
+              <div className="stat-sub">Elevated EMA score</div>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon red"><Layers size={16} /></div>
+            <div className="stat-info">
+              <div className="stat-label">Borderlands / Quarantine</div>
+              <div className="stat-value red">{metrics.danger}</div>
+              <div className="stat-sub">Active containment</div>
             </div>
           </div>
         </div>
 
-        {/* Center Column: Swarm Visualizer & Process Table */}
-        <div className="center-column">
-          {/* Swarm Visualizer */}
-          <div className="panel-card">
-            <div className="panel-header">
-              <h2>Autonomous Swarm Visualizer</h2>
-              <span className="panel-subtitle">Ray shared-memory process nodes</span>
-            </div>
-            <div className="swarm-visualizer-container">
-              <div className="visualization-grid"></div>
-              {processes.map((p) => {
-                // Determine layout coordinate based on PID and status
-                const randomSeedX = (p.pid * 13) % 80;
-                const randomSeedY = (p.pid * 19) % 70;
-                const left = 10 + randomSeedX;
-                const top = 15 + randomSeedY;
+        {/* Content grid */}
+        <div className="content-grid">
 
-                return (
-                  <div
-                    key={p.pid}
-                    className={`swarm-particle ${p.zone.toLowerCase()}`}
-                    style={{ left: `${left}%`, top: `${top}%` }}
-                    data-comm={`${p.comm} (${p.pid})`}
+          {/* ── Left column ─────────────────────────── */}
+          <div className="col-left">
+
+            {/* Zone Trend Chart */}
+            <div className="panel" style={{ flexShrink: 0 }}>
+              <div className="panel-head">
+                <div className="panel-title">
+                  <span className="panel-title-dot" />
+                  Zone Distribution — Real-time
+                </div>
+                <div className="panel-actions">
+                  <span className="panel-tag">last 10 ticks</span>
+                </div>
+              </div>
+              <div className="chart-wrap">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chart} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="gSafe" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--safe)"   stopOpacity={0.25} />
+                        <stop offset="100%" stopColor="var(--safe)" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="gSus" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--warn)"   stopOpacity={0.25} />
+                        <stop offset="100%" stopColor="var(--warn)" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="gBl" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--danger)"   stopOpacity={0.3} />
+                        <stop offset="100%" stopColor="var(--danger)" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
+                    <XAxis dataKey="t" tick={{ fill: 'var(--tx-dim)', fontSize: 9 }} />
+                    <YAxis tick={{ fill: 'var(--tx-dim)', fontSize: 9 }} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }}
+                      labelStyle={{ color: 'var(--tx-secondary)' }}
+                      itemStyle={{ color: 'var(--tx-primary)' }}
+                    />
+                    <Area type="monotone" dataKey="safe" name="Safe"        stroke="var(--safe)"   fill="url(#gSafe)" strokeWidth={1.5} />
+                    <Area type="monotone" dataKey="sus"  name="Suspicious"  stroke="var(--warn)"   fill="url(#gSus)"  strokeWidth={1.5} />
+                    <Area type="monotone" dataKey="bl"   name="Borderlands" stroke="var(--danger)"  fill="url(#gBl)"   strokeWidth={1.5} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Process Table */}
+            <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+              <div className="panel-head">
+                <div className="panel-title">
+                  <span className="panel-title-dot green" />
+                  Tracked Processes
+                </div>
+                <div className="panel-actions">
+                  <span className="panel-tag">{filtered.length} / {processes.length} shown</span>
+                </div>
+              </div>
+
+              <div className="filter-bar">
+                <div className="input-wrap">
+                  <Search size={12} className="input-icon" />
+                  <input
+                    className="search-input"
+                    placeholder="Search PID or name…"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
                   />
-                );
-              })}
-            </div>
-          </div>
+                </div>
+                <select
+                  className="zone-filter"
+                  value={zoneFilter}
+                  onChange={e => setZoneFilter(e.target.value)}
+                >
+                  <option value="ALL">All Zones</option>
+                  <option value="SAFE">Safe</option>
+                  <option value="SUSPICIOUS">Suspicious</option>
+                  <option value="BORDERLANDS">Borderlands</option>
+                  <option value="QUARANTINED">Quarantined</option>
+                </select>
+              </div>
 
-          {/* Process Table */}
-          <div className="panel-card" style={{ flex: 1 }}>
-            <div className="panel-header">
-              <h2>Tracked Processes</h2>
-              <span className="panel-subtitle">L1 Cache states</span>
-            </div>
-
-            {/* Filter controls */}
-            <div className="filter-bar">
-              <input
-                type="text"
-                className="search-input"
-                placeholder="Search by PID or process name..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-              />
-              <select
-                className="select-input"
-                value={selectedZone}
-                onChange={e => setSelectedZone(e.target.value)}
-              >
-                <option value="ALL">All Zones</option>
-                <option value="SAFE">Safe</option>
-                <option value="SUSPICIOUS">Suspicious</option>
-                <option value="BORDERLANDS">Borderlands</option>
-                <option value="QUARANTINED">Quarantined</option>
-              </select>
-            </div>
-
-            {/* Table */}
-            <div className="table-wrapper">
-              <table className="process-table">
-                <thead>
-                  <tr>
-                    <th>Process Name</th>
-                    <th>PID</th>
-                    <th>PPID</th>
-                    <th>UID</th>
-                    <th>Zone</th>
-                    <th>Risk Index</th>
-                    <th>Mitigation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredProcesses.map(p => (
-                    <tr key={p.pid}>
-                      <td className="process-comm">{p.comm}</td>
-                      <td className="process-pid">{p.pid}</td>
-                      <td className="process-pid">{p.ppid}</td>
-                      <td className="process-pid">{p.uid}</td>
-                      <td>
-                        <span className={`zone-badge ${p.zone.toLowerCase()}`}>
-                          {p.zone}
-                        </span>
-                      </td>
-                      <td className={`process-score ${p.zone.toLowerCase()}`}>
-                        {p.score}
-                      </td>
-                      <td>
-                        {p.zone === 'QUARANTINED' ? (
-                          <button 
-                            className="action-btn unblock"
-                            onClick={() => handleRestore(p.pid, p.comm)}
-                          >
-                            <Unlock size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
-                            Evict
-                          </button>
-                        ) : (
-                          <button 
-                            className="action-btn"
-                            onClick={() => handleIsolate(p.pid, p.comm)}
-                          >
-                            <Lock size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
-                            Isolate
-                          </button>
-                        )}
-                      </td>
+              <div className="table-scroll">
+                <table className="proc-table">
+                  <thead>
+                    <tr>
+                      <th>Process</th>
+                      <th>PID</th>
+                      <th>PPID</th>
+                      <th>UID</th>
+                      <th>Zone</th>
+                      <th>Risk Index</th>
+                      <th>Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column: Threat Chart & Alerts Log */}
-        <div className="side-column-right">
-          {/* Threat Distribution Chart */}
-          <div className="panel-card">
-            <div className="panel-header">
-              <h2>Threat Zone Distribution</h2>
-              <span className="panel-subtitle">Real-time counts</span>
-            </div>
-            <div className="chart-container">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={chartData}
-                  margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                >
-                  <XAxis dataKey="time" stroke="#545b6b" fontSize={10} />
-                  <YAxis stroke="#545b6b" fontSize={10} />
-                  <Tooltip 
-                    contentStyle={{ 
-                      background: '#0d0e16', 
-                      borderColor: 'rgba(255, 255, 255, 0.08)',
-                      borderRadius: '6px',
-                      fontSize: '11px',
-                      color: '#f1f3f9'
-                    }} 
-                  />
-                  <Area type="monotone" dataKey="safe" stackId="1" stroke="var(--color-safe)" fill="var(--color-safe)" fillOpacity={0.1} />
-                  <Area type="monotone" dataKey="suspicious" stackId="1" stroke="var(--color-suspicious)" fill="var(--color-suspicious)" fillOpacity={0.1} />
-                  <Area type="monotone" dataKey="borderlands" stackId="1" stroke="var(--color-borderlands)" fill="var(--color-borderlands)" fillOpacity={0.1} />
-                </AreaChart>
-              </ResponsiveContainer>
+                  </thead>
+                  <tbody>
+                    {filtered.map(p => {
+                      const sc = p.score;
+                      const fill = scoreColor(sc);
+                      return (
+                        <tr key={p.pid}>
+                          <td><span className="proc-comm">{p.comm}</span></td>
+                          <td><span className="proc-pid">{p.pid}</span></td>
+                          <td><span className="proc-pid">{p.ppid}</span></td>
+                          <td><span className="proc-pid">{p.uid}</span></td>
+                          <td><span className={`zone-badge ${zoneClass(p.zone)}`}>{p.zone}</span></td>
+                          <td>
+                            <div className="score-bar-wrap">
+                              <div className="score-bar-bg">
+                                <div className="score-bar-fill" style={{ width: `${sc * 100}%`, background: fill }} />
+                              </div>
+                              <span className="score-val" style={{ color: fill }}>{sc.toFixed(2)}</span>
+                            </div>
+                          </td>
+                          <td>
+                            {p.zone === 'QUARANTINED'
+                              ? <button className="act-btn restore" onClick={() => restore(p.pid, p.comm)}><Unlock size={10} />Restore</button>
+                              : <button className="act-btn isolate" onClick={() => isolate(p.pid, p.comm)}><Lock size={10} />Isolate</button>
+                            }
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {filtered.length === 0 && (
+                      <tr><td colSpan={7}><div className="empty-state">No processes match filter</div></td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
-          {/* Active Alerts */}
-          <div className="panel-card accent-borderlands" style={{ flex: 1 }}>
-            <div className="panel-header">
-              <h2>Critical Threats Feed</h2>
-              <span className="panel-subtitle">Real-time alerts logs</span>
+          {/* ── Right column ─────────────────────────── */}
+          <div className="col-right">
+
+            {/* Services health */}
+            <div className="panel" style={{ flexShrink: 0 }}>
+              <div className="panel-head">
+                <div className="panel-title"><span className="panel-title-dot green" />Service Health</div>
+                <span className="panel-tag">6 services</span>
+              </div>
+              <div className="health-list">
+                {HEALTH_SERVICES.map(s => (
+                  <div key={s.name} className="health-item">
+                    <div className="health-left">
+                      <div className="health-name">{s.name}</div>
+                      <div className="health-desc">{s.desc}</div>
+                    </div>
+                    <span className={`health-badge ${s.status}`}>{s.status === 'ok' ? 'ACTIVE' : 'DOWN'}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="alert-feed">
-              {alerts.length === 0 ? (
-                <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: '40px', fontSize: '12px' }}>
-                  No active threat vectors detected.
-                </div>
-              ) : (
-                alerts.map(a => (
-                  <div key={a.alertId} className={`alert-card ${a.alertType === 'MANUAL_QUARANTINE' ? 'critical' : ''}`}>
-                    <div className="alert-card-header">
-                      <span className="alert-type" style={{ color: a.alertType === 'MANUAL_QUARANTINE' ? 'var(--color-quarantined)' : 'var(--color-borderlands)' }}>
-                        {a.alertType}
-                      </span>
-                      <span className="alert-time">{a.timestamp}</span>
+
+            {/* Alert Feed */}
+            <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+              <div className="panel-head">
+                <div className="panel-title"><span className="panel-title-dot red" />Threat Feed</div>
+                <span className="panel-tag">{alerts.length} events</span>
+              </div>
+              <div className="alert-feed">
+                {alerts.length === 0 && (
+                  <div className="empty-state">
+                    <Shield size={24} style={{ color: 'var(--tx-dim)' }} />
+                    No active threats detected
+                  </div>
+                )}
+                {alerts.map(a => (
+                  <div key={a.id} className={`alert-item ${a.severity.toLowerCase()}`}>
+                    <div className="alert-top">
+                      <span className={`alert-type ${a.severity.toLowerCase()}`}>{a.type}</span>
+                      <span className="alert-ts">{a.ts}</span>
                     </div>
-                    <div className="alert-details">
-                      PID <strong>{a.pid}</strong> (<strong>{a.comm}</strong>) entered <strong>BORDERLANDS</strong>.
+                    <div className="alert-body">
+                      PID <strong>{a.pid}</strong> (<strong>{a.comm}</strong>) — {a.severity}
                     </div>
-                    <div className="alert-evidence">
-                      {a.evidence.map((ev, i) => (
-                        <span key={i} className="evidence-tag">{ev}</span>
-                      ))}
+                    <div className="alert-tags">
+                      {a.evidence.map((e, i) => <span key={i} className="alert-tag">{e}</span>)}
                     </div>
                   </div>
-                ))
-              )}
+                ))}
+              </div>
+            </div>
+
+            {/* Audit Console */}
+            <div className="panel" style={{ flexShrink: 0 }}>
+              <div className="panel-head">
+                <div className="panel-title"><span className="panel-title-dot" />Audit Console</div>
+                <span className="panel-tag">systemd journal</span>
+              </div>
+              <div className="terminal" ref={termRef} style={{ maxHeight: 180 }}>
+                {log.map((l, i) => (
+                  <div key={i} className={`t-line ${l.cls}`}>{l.text}</div>
+                ))}
+              </div>
             </div>
           </div>
+
         </div>
       </main>
     </div>
   );
 }
-
-
