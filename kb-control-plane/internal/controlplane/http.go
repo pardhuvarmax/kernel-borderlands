@@ -84,7 +84,7 @@ func (s *HTTPServer) handleProcesses(w http.ResponseWriter, r *http.Request) {
 			Ppid:        cs.PPID,
 			Comm:        cs.Comm,
 			Uid:         cs.UID,
-			Score:       cs.EMAScore,
+			Score:       cs.EMAScore / 100.0,
 			Zone:        zoneStr,
 			Containment: contStr,
 		})
@@ -474,7 +474,7 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 				Ppid:      ev.Ppid,
 				Comm:      ev.Comm,
 				Type:      ev.EventType,
-				Score:     ev.ScoreDelta,
+				Score:     ev.ScoreDelta / 100.0,
 				Timestamp: ev.Timestamp,
 				Metadata:  ev.Metadata,
 			})
