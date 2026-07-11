@@ -480,12 +480,23 @@ static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
         return;
     }
 
-    uint32_t pid = cmd->pid;
+    uint32_t pid   = cmd->pid;
     uint32_t level = cmd->level;
     int map_fd = bpf_map__fd(skel->maps.contained_pids_map);
     if (map_fd >= 0) {
-        bpf_map_update_elem(map_fd, &pid, &level, BPF_ANY);
-        printf("[SENSOR] Applied containment level %u to PID %u (Reason: %s)\n", level, pid, cmd->reason);
+        if (level == 0) {
+            /* level 0 == ContainmentNone: remove the map entry entirely so the
+             * eBPF lsm hooks no longer see this PID as contained.
+             * bpf_map_update_elem(..., 0, ...) would leave a {pid→0} entry in
+             * the map — bpf_map_lookup_elem still returns a non-NULL pointer for
+             * value 0, keeping the lsm/file_open guard active and polluting the
+             * map for any future PID reuse of this slot. */
+            bpf_map_delete_elem(map_fd, &pid);
+            printf("[SENSOR] Cleared containment for PID %u (Reason: %s)\n", pid, cmd->reason);
+        } else {
+            bpf_map_update_elem(map_fd, &pid, &level, BPF_ANY);
+            printf("[SENSOR] Applied containment level %u to PID %u (Reason: %s)\n", level, pid, cmd->reason);
+        }
     }
 }
 

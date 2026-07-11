@@ -545,3 +545,97 @@ int BPF_PROG(kb_lsm_file_open, struct file *file, int mask)
     }
     return 0;
 }
+
+/*
+ * Containment level semantics applied by all five LSM hooks below:
+ *
+ *   Level 0 (None)      — no entry in map; all hooks pass through.
+ *   Level 1 (Cgroup)    — cgroup throttling only; no LSM blocking.
+ *   Level 2 (Seccomp)   — block network connections/binds and exec of new
+ *                          processes; file_open already blocks sensitive paths.
+ *   Level 3 (Namespace) — all level-2 blocks plus RWX/exec memory operations.
+ *   Level 4 (Terminate) — block everything the LSM can intercept; combined
+ *                          with the userspace SIGKILL sent by the enforcer.
+ *
+ * Return -EPERM (-1) uniformly across all hooks so the kernel presents a
+ * consistent "Operation not permitted" rather than hook-specific codes.
+ */
+
+/* Exec containment — prevent the process from replacing its image with a new
+ * binary. Level ≥2 blocks exec entirely; at level 4 this is belt-and-
+ * suspenders alongside the userspace SIGKILL. */
+SEC("lsm/bprm_check_security")
+int BPF_PROG(kb_lsm_bprm_check, struct linux_binprm *bprm)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u32 *level = bpf_map_lookup_elem(&contained_pids_map, &pid);
+    if (!level)
+        return 0;
+    /* Level 1 (Cgroup): throttle only — exec allowed. */
+    if (*level < 2)
+        return 0;
+    /* Level ≥2: block execve/execveat so the process cannot escape by
+     * re-exec'ing a clean binary or launching a child shell. */
+    return -1; /* -EPERM */
+}
+
+/* Network connect containment — prevent the process from opening new outbound
+ * connections. Level ≥2 blocks all AF_INET/AF_INET6 connects. */
+SEC("lsm/socket_connect")
+int BPF_PROG(kb_lsm_socket_connect, struct socket *sock,
+             struct sockaddr *address, int addrlen)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u32 *level = bpf_map_lookup_elem(&contained_pids_map, &pid);
+    if (!level)
+        return 0;
+    if (*level < 2)
+        return 0;
+    /* Block TCP/UDP connect for all containment levels ≥2. Unix-domain
+     * sockets (AF_UNIX) are not blocked here — the lsm/file_open hook
+     * already restricts file-backed socket paths if they are sensitive. */
+    __u16 family = 0;
+    bpf_probe_read_kernel(&family, sizeof(family), &address->sa_family);
+    if (family == 2 /* AF_INET */ || family == 10 /* AF_INET6 */)
+        return -1; /* -EPERM */
+    return 0;
+}
+
+/* Network bind containment — prevent the process from opening new listening
+ * ports. Level ≥2 blocks all AF_INET/AF_INET6 binds. */
+SEC("lsm/socket_bind")
+int BPF_PROG(kb_lsm_socket_bind, struct socket *sock,
+             struct sockaddr *address, int addrlen)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u32 *level = bpf_map_lookup_elem(&contained_pids_map, &pid);
+    if (!level)
+        return 0;
+    if (*level < 2)
+        return 0;
+    __u16 family = 0;
+    bpf_probe_read_kernel(&family, sizeof(family), &address->sa_family);
+    if (family == 2 /* AF_INET */ || family == 10 /* AF_INET6 */)
+        return -1; /* -EPERM */
+    return 0;
+}
+
+/* Memory protection containment — prevent the process from creating new
+ * executable mappings. Level ≥3 blocks any mprotect that adds PROT_EXEC,
+ * closing the common shellcode-injection path of mmap(RW)+mprotect(RX). */
+SEC("lsm/file_mprotect")
+int BPF_PROG(kb_lsm_file_mprotect, struct vm_area_struct *vma,
+             unsigned long reqprot, unsigned long prot)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u32 *level = bpf_map_lookup_elem(&contained_pids_map, &pid);
+    if (!level)
+        return 0;
+    /* Level 1-2: allow — mprotect is needed for JIT runtimes etc.
+     * Level ≥3 (Namespace/Terminate): block any mapping that gains PROT_EXEC. */
+    if (*level < 3)
+        return 0;
+    if (prot & KB_PROT_EXEC)
+        return -1; /* -EPERM */
+    return 0;
+}
