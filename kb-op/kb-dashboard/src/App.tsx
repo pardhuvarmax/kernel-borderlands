@@ -66,6 +66,14 @@ export default function App() {
   const [zoneFilter, setZoneFilter] = useState<string>('ALL');
   const [activeNav,  setActiveNav]  = useState('Processes');
 
+  const [services, setServices] = useState<any[]>(HEALTH_SERVICES);
+  const [metricsData, setMetricsData] = useState({
+    ebpf_latency_ns: 430,
+    grpc_rtt_ms: 0.1,
+    aads_latency_ms: 0.75,
+    events_per_second: 0
+  });
+
   const termRef = useRef<HTMLDivElement>(null);
   const alertKeySet = useRef<Set<string>>(new Set());
 
@@ -247,6 +255,20 @@ export default function App() {
           })).reverse();
           setLog(prev => [...prev.slice(-40), ...formatted]);
         }
+
+        // Fetch services health
+        const resServ = await fetch('http://localhost:8080/api/services');
+        if (resServ.ok) {
+          const servData = await resServ.json();
+          if (active) setServices(servData);
+        }
+
+        // Fetch performance metrics
+        const resMet = await fetch('http://localhost:8080/api/metrics');
+        if (resMet.ok) {
+          const metData = await resMet.json();
+          if (active) setMetricsData(metData);
+        }
       } catch (err: any) {
         if (active) {
           addLog(`[CONSOLE] Connection error: ${err.message}`, 'err');
@@ -344,10 +366,36 @@ export default function App() {
       });
     }, 4000);
 
+    // Services update ticker
+    const servicesTicker = setInterval(async () => {
+      try {
+        const res = await fetch('http://localhost:8080/api/services');
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        if (active) setServices(data);
+      } catch (err) {
+        // ignore
+      }
+    }, 5000);
+
+    // Metrics update ticker
+    const metricsTicker = setInterval(async () => {
+      try {
+        const res = await fetch('http://localhost:8080/api/metrics');
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        if (active) setMetricsData(data);
+      } catch (err) {
+        // ignore
+      }
+    }, 3000);
+
     return () => {
       active = false;
       if (eventSource) eventSource.close();
       clearInterval(chartTicker);
+      clearInterval(servicesTicker);
+      clearInterval(metricsTicker);
     };
   }, [simulated, addLog, addAlert]);
 
@@ -453,7 +501,14 @@ export default function App() {
           <div className="topbar-sep" />
           <div className="topbar-stat">
             <span className="topbar-stat-label">Intercept Latency</span>
-            <span className="topbar-stat-val ok">430 ns</span>
+            <span className="topbar-stat-val ok">{simulated ? '430 ns' : `${metricsData.ebpf_latency_ns} ns`}</span>
+          </div>
+          <div className="topbar-sep" />
+          <div className="topbar-stat">
+            <span className="topbar-stat-label">Event Rate</span>
+            <span className="topbar-stat-val" style={{ color: 'var(--accent)' }}>
+              {simulated ? '0.0/s' : `${metricsData.events_per_second.toFixed(1)}/s`}
+            </span>
           </div>
           <div className="topbar-sep" />
           <div className="topbar-stat">
@@ -657,7 +712,7 @@ export default function App() {
                   <span className="panel-tag">6 services</span>
                 </div>
                 <div className="health-list">
-                  {HEALTH_SERVICES.map(s => (
+                  {services.map(s => (
                     <div key={s.name} className="health-item">
                       <div className="health-left">
                         <div className="health-name">{s.name}</div>
@@ -767,21 +822,25 @@ export default function App() {
                     <thead><tr><th>Service</th><th>Description</th><th>Socket / Endpoint</th><th>Status</th></tr></thead>
                     <tbody>
                       {[
-                        { name: 'kb-core (eBPF Sensor)',      desc: 'Ring 0 syscall hooks via CO-RE',       sock: 'kernel ring buffer',         st: 'ok'  },
-                        { name: 'kbd (Go Control Plane)',      desc: 'Central event router & gRPC host',     sock: '/run/kb/kba.sock',           st: 'ok'  },
-                        { name: 'kb-checker (Rust Watchdog)', desc: 'Hard-stop containment daemon',         sock: '/run/kb/kbc.sock',           st: 'ok'  },
-                        { name: 'AADS Agent Swarm',           desc: 'ZeroMQ pub/sub + Ray Actor IPC',       sock: 'ipc:///run/kb/aads.ipc',     st: 'ok'  },
-                        { name: 'gRPC Health Service',        desc: 'Standard grpc_health_v1 probe',        sock: 'kba.sock — 100ms timeout',   st: 'ok'  },
-                        { name: 'SQLite L2 Store',            desc: 'WAL journal — persistent alert log',   sock: '/var/lib/kb/alerts.db',      st: 'ok'  },
-                        { name: 'kbctl CLI',                  desc: 'Operator shell interface',             sock: 'stdout / /run/kb/kbd.sock',  st: 'ok'  },
-                      ].map(s => (
-                        <tr key={s.name}>
-                          <td><span className="proc-comm">{s.name}</span></td>
-                          <td style={{ color: 'var(--tx-secondary)' }}>{s.desc}</td>
-                          <td><span className="proc-pid">{s.sock}</span></td>
-                          <td><span className={`health-badge ${s.st}`}>{s.st === 'ok' ? 'ACTIVE' : 'DOWN'}</span></td>
-                        </tr>
-                      ))}
+                        { name: 'kb-core (eBPF Sensor)',      desc: 'Ring 0 syscall hooks via CO-RE',       sock: 'kernel ring buffer' },
+                        { name: 'kbd (Go Control Plane)',      desc: 'Central event router & gRPC host',     sock: '/run/kb/kba.sock' },
+                        { name: 'kb-checker (Rust Watchdog)', desc: 'Hard-stop containment daemon',         sock: '/run/kb/kbc.sock' },
+                        { name: 'AADS Agent Swarm',           desc: 'ZeroMQ pub/sub + Ray Actor IPC',       sock: 'ipc:///run/kb/aads.ipc' },
+                        { name: 'gRPC Health Service',        desc: 'Standard grpc_health_v1 probe',        sock: 'kba.sock — 100ms timeout' },
+                        { name: 'SQLite L2 Store',            desc: 'WAL journal — persistent alert log',   sock: '/var/lib/kb/alerts.db' },
+                        { name: 'kbctl CLI',                  desc: 'Operator shell interface',             sock: 'stdout / /run/kb/kbd.sock' },
+                      ].map(s => {
+                        const statusObj = services.find(srv => srv.name === s.name);
+                        const status = statusObj ? statusObj.status : 'offline';
+                        return (
+                          <tr key={s.name}>
+                            <td><span className="proc-comm">{s.name}</span></td>
+                            <td style={{ color: 'var(--tx-secondary)' }}>{s.desc}</td>
+                            <td><span className="proc-pid">{s.sock}</span></td>
+                            <td><span className={`health-badge ${status}`}>{status === 'ok' ? 'ACTIVE' : 'DOWN'}</span></td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -839,9 +898,24 @@ export default function App() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
               {[
-                { label: 'eBPF Intercept Latency',  val: '430 ns', sub: 'avg over last 1000 events', color: 'var(--safe)' },
-                { label: 'gRPC Health Probe RTT',   val: '< 100ms', sub: 'kba.sock timeout threshold', color: 'var(--accent)' },
-                { label: 'AADS Consensus Latency',  val: '< 1ms',  sub: 'shared memory Arrow IPC',   color: 'var(--warn)' },
+                { 
+                  label: 'eBPF Intercept Latency',  
+                  val: simulated ? '430 ns' : `${metricsData.ebpf_latency_ns} ns`, 
+                  sub: 'avg over last 1000 events', 
+                  color: !simulated && metricsData.ebpf_latency_ns > 450 ? 'var(--warn)' : 'var(--safe)' 
+                },
+                { 
+                  label: 'gRPC Health Probe RTT',   
+                  val: simulated ? '< 100ms' : (metricsData.grpc_rtt_ms >= 0 ? `${metricsData.grpc_rtt_ms.toFixed(2)} ms` : 'OFFLINE'), 
+                  sub: 'kba.sock timeout threshold', 
+                  color: !simulated && metricsData.grpc_rtt_ms < 0 ? 'var(--danger)' : 'var(--accent)' 
+                },
+                { 
+                  label: 'AADS Consensus Latency',  
+                  val: simulated ? '< 1ms' : (metricsData.aads_latency_ms > 0 ? `${metricsData.aads_latency_ms.toFixed(2)} ms` : 'OFFLINE'), 
+                  sub: 'shared memory Arrow IPC',   
+                  color: !simulated && metricsData.aads_latency_ms === 0 ? 'var(--danger)' : 'var(--warn)' 
+                },
               ].map(m => (
                 <div key={m.label} className="panel">
                   <div style={{ padding: '20px 20px 16px' }}>
