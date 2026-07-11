@@ -227,8 +227,21 @@ func isProcessRunning(name string) bool {
 		if err != nil {
 			continue
 		}
-		if bytes.Contains(cmdline, []byte(name)) {
-			return true
+		
+		// Split cmdline by null byte
+		args := bytes.Split(cmdline, []byte{0})
+		for _, arg := range args {
+			if len(arg) == 0 {
+				continue
+			}
+			// Extract base name of the argument (e.g. "/usr/bin/raylet" -> "raylet")
+			base := arg
+			if idx := bytes.LastIndexByte(arg, '/'); idx >= 0 {
+				base = arg[idx+1:]
+			}
+			if bytes.Equal(base, []byte(name)) {
+				return true
+			}
 		}
 	}
 	return false
@@ -260,7 +273,7 @@ func (s *HTTPServer) handleServices(w http.ResponseWriter, r *http.Request) {
 	}
 
 	aadsStatus := "offline"
-	if isProcessRunning("main.py") || isProcessRunning("ray") {
+	if isProcessRunning("main.py") || isProcessRunning("raylet") {
 		aadsStatus = "ok"
 	}
 
