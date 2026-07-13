@@ -34,7 +34,7 @@ cd kb-op/kb-dashboard && npm run dev
 
 ## Architecture
 
-Data flow: `kb-core` (Ring 0 eBPF) → UDS `/run/kb/kbd.sock` → `kb-control-plane` (`kbd`) → gRPC (:50051)/WebSockets → operator interfaces (`kb-tui`, `kb-dashboard`, `kbctl`, `kb-mcp`) and `kb-aads`. `kb-checker` runs independently, watchdogging the rest over its own UDS sockets.
+Data flow: `kb-core` (Ring 0 eBPF) → UDS `/run/kb/kbd.sock` → `kb-control-plane` (`kbd`) → gRPC (UDS)/WebSockets → operator interfaces (`kb-tui`, `kb-dashboard`, `kbctl`, `kb-mcp`) and `kb-aads`. `kb-checker` runs independently, watchdogging the rest over its own UDS sockets.
 
 Load-bearing references — read before touching cross-subsystem behavior:
 - **Wire/event contract (kb-core ↔ kb-control-plane)**: [docs/architecture/kbd-contracts.md](docs/architecture/kbd-contracts.md), [docs/development/core-control/wire-protocol.md](docs/development/core-control/wire-protocol.md). Packed LE structs (`ProcessState`=128B, `ZoneTransition`=40B, `kb_wire_attack_rule`=220B) and locked `event_type` values — C and Go sides must change together.
