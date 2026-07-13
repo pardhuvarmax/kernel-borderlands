@@ -99,39 +99,8 @@ Using this standard provides key advantages:
     ```
 
 ### B. Rust Subsystem Changes (`kb-checker/`) — *Pardhu Varma*
-1.  **Integrate Health client in Safety Daemon**:
-    Implement a non-blocking Unix Domain Socket dialer in Rust to perform check queries:
-    ```rust
-    use tonic::transport::{Endpoint, Uri};
-    use tower::service_fn;
-    use tokio::net::UnixStream;
 
-    async fn check_control_plane_health() -> Result<(), Box<dyn std::error::Error>> {
-        // Dial the Unix domain socket instead of standard TCP URI
-        let channel = Endpoint::try_from("http://[::]:50051")?
-            .connect_with_connector(service_fn(|_| async {
-                UnixStream::connect("/run/kb/kbd.sock").await
-            }))
-            .await?;
-
-        let mut client = grpc_health_v1::health_client::HealthClient::new(channel);
-        let request = grpc_health_v1::HealthCheckRequest {
-            service: "kb.KernelBorderlands".to_string(),
-        };
-
-        // Enforce a strict 100ms deadline
-        let response = tokio::time::timeout(
-            tokio::time::Duration::from_millis(100),
-            client.check(request)
-        ).await??;
-
-        if response.into_inner().status == grpc_health_v1::health_check_response::ServingStatus::Serving {
-            Ok(())
-        } else {
-            Err("Control plane reported state: NOT_SERVING".into())
-        }
-    }
-    ```
+- **TASK-2 COMPLETED**
 
 ---
 
@@ -143,37 +112,8 @@ In a containerized system, PIDs are recycled frequently. If the kernel does not 
 By intercepting `sched_process_exit` directly in Ring 0, we can immediately flush the stale cache entry the moment the process terminates, preventing **PID recycling injection attacks**.
 
 ### A. C Subsystem Changes (`kb-core/`) — *Pardhu Varma*
-1.  **Define C Struct in `include/kb_common.h`**:
-    ```c
-    #define MSG_TYPE_PROCESS_EXIT 4
 
-    struct __attribute__((packed)) kb_wire_process_exit {
-        uint32_t pid;
-        int64_t  exit_time_ns;
-        uint32_t exit_code;
-    };
-    ```
-2.  **Add Exit Hook in `ebpf/kbd_sensor.bpf.c`**:
-    Bind a tracepoint to capture kernel exits:
-    ```c
-    SEC("tracepoint/sched/sched_process_exit")
-    int kb_sched_process_exit(void *ctx) {
-        struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-        uint32_t pid = bpf_get_current_pid_tgid() >> 32;
-        
-        struct kb_wire_process_exit exit_event = {
-            .pid = pid,
-            .exit_time_ns = bpf_ktime_get_ns(),
-            .exit_code = task->exit_code
-        };
-        
-        // Push the exit_event struct to C userspace ring buffer
-        bpf_ringbuf_output(&exit_events_ringbuf, &exit_event, sizeof(exit_event), 0);
-        return 0;
-    }
-    ```
-3.  **Forward Packet in C Userspace Loader**:
-    The userspace C sensor reads the exit frame from the ring buffer and writes it directly to the UDS connection.
+- **TASK-3 COMPLETED**
 
 ### B. Go Subsystem Changes (`kb-control-plane/`) — *Tejaswini*
 1.  **Define Go Struct in `internal/ipc/types.go`**:
