@@ -41,7 +41,8 @@ Load-bearing references — read before touching cross-subsystem behavior:
 - **Kernel hook points**: [docs/architecture/hookpoints.md](docs/architecture/hookpoints.md).
 - **Socket topology & boot order**: [docs/architecture/boot_sequence_spec.md](docs/architecture/boot_sequence_spec.md), [docs/development/core-control/kba_uds_binding_spec.md](docs/development/core-control/kba_uds_binding_spec.md). Sockets under `/run/kb/`: `kbd.sock` (telemetry), `kba.sock` (gRPC enforcement IPC), `kbc.sock` (kb-checker diagnostics).
 - **Storage design (L1 sync.Map / L2 SQLite WAL)**: [docs/development/adr/ADR-1.md](docs/development/adr/ADR-1.md); other ADRs in [docs/development/adr/](docs/development/adr/).
-- **BPF LSM setup**: [docs/architecture/enabling-bpf-lsm.md](docs/architecture/enabling-bpf-lsm.md). **Cross-kernel portability (BTF/CO-RE)**: [docs/architecture/cross-kernel-portability.md](docs/architecture/cross-kernel-portability.md).
+- **BPF LSM setup**: [docs/architecture/enabling-bpf-lsm.md](docs/architecture/enabling-bpf-lsm.md). 
+- **Cross-kernel portability (BTF/CO-RE)**: [docs/architecture/cross-kernel-portability.md](docs/architecture/cross-kernel-portability.md).
 - **kb-checker's KISS/no-state/no-network constraints**: [kb-checker/README.md](kb-checker/README.md) — this is a security-critical design invariant, not a style preference; don't add persistent state or network listeners to it.
 - **Feature specs** (behavior engine, dynamic rules, CPM/CWP, TLS plaintext monitoring, in-context mitigation, Ray integration): [docs/features/](docs/features/).
 - **Full system spec**: [docs/specifications/kernel_borderlands_specification.md](docs/specifications/kernel_borderlands_specification.md).
