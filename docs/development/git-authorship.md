@@ -80,13 +80,13 @@ Ensure that the **Author** field matches your identity before pushing.
 
 Use the following author information when creating commits from the shared repository.
 
-## PardhuVarma Konduru
+- PardhuVarma
 
 GitHub: **PardhuVarma**
 
 ```bash
 git commit \
-  --author="PardhuVarma Konduru <140948604+pardhuvarmax@users.noreply.github.com>" \
+  --author="PardhuVarma <140948604+pardhuvarmax@users.noreply.github.com>" \
   -m "<commit message>"
 ```
 
@@ -95,19 +95,19 @@ Amend the previous commit:
 ```bash
 git commit \
   --amend \
-  --author="PardhuVarma Konduru <140948604+pardhuvarmax@users.noreply.github.com>" \
+  --author="PardhuVarma <140948604+pardhuvarmax@users.noreply.github.com>" \
   --no-edit
 ```
 
 ---
 
-## Kandukoori Teju
+- Teju
 
 GitHub: **Tejaswini4119**
 
 ```bash
 git commit \
-  --author="Kandukoori Teju <k*****tej*******@gmail.com>" \
+  --author="Teju <k*****tej*******@gmail.com>" \
   -m "<commit message>"
 ```
 
@@ -116,13 +116,13 @@ Amend the previous commit:
 ```bash
 git commit \
   --amend \
-  --author="Kandukoori Teju <k*****tej*******@gmail.com>" \
+  --author="Teju <k*****tej*******@gmail.com>" \
   --no-edit
 ```
 
 ---
 
-## Karedla Rupa Yeshvitha
+- Rupa
 
 GitHub: **Rupakaredla**
 
