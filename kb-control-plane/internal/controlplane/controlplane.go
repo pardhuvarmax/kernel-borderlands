@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/audit"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/enforcement"
@@ -16,14 +19,17 @@ import (
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 )
 
+const ServiceName = "kernel-borderlands"
+
 type ControlPlane struct {
 	pb.UnimplementedKernelBorderlandsServer
-	store    *store.Store
-	audit    *audit.Logger
-	enforcer *enforcement.Enforcer
-	policy   *policy.Engine
-	grpc     *grpc.Server
-	listener *ipc.Listener // created once in New(), used in Start()
+	store        *store.Store
+	healthServer *health.Server
+	audit        *audit.Logger
+	enforcer     *enforcement.Enforcer
+	policy       *policy.Engine
+	grpc         *grpc.Server
+	listener     *ipc.Listener // created once in New(), used in Start()
 
 	// comm cache — pid → comm (populated by ProcessState messages)
 	commCache sync.Map
@@ -63,9 +69,10 @@ func New(dbPath, policyPath string) (*ControlPlane, error) {
 	// Build cp first (handler must exist before NewListener so it can be
 	// passed as the MessageHandler), then wire the enforcer to the listener.
 	cp := &ControlPlane{
-		store:  s,
-		audit:  audit.New(s.DB()),
-		policy: p,
+		store:        s,
+		audit:        audit.New(s.DB()),
+		policy:       p,
+		healthServer: health.NewServer(),
 	}
 
 	// NewListener records the socket path and stores cp as the MessageHandler.
@@ -92,15 +99,20 @@ func (cp *ControlPlane) Start() error {
 		}
 	}()
 
-	lis, err := net.Listen("tcp", ":50051")
+	lis, err := listenUnix(ipc.SocketGRPC)
 	if err != nil {
-		return err
+		return fmt.Errorf("grpc uds listen: %w", err)
 	}
+
 	cp.grpc = grpc.NewServer()
+	registerHealthService(cp.grpc, cp.healthServer)
 	pb.RegisterKernelBorderlandsServer(cp.grpc, cp)
+
 	go func() {
-		log.Println("[KB] gRPC on :50051")
-		cp.grpc.Serve(lis)
+		log.Println("[KB] gRPC on unix://" + ipc.SocketGRPC)
+		if err := cp.grpc.Serve(lis); err != nil {
+			log.Printf("[KB] grpc Serve exited: %v", err)
+		}
 	}()
 
 	// Start HTTP API & SSE server on :8080 for web dashboard
@@ -115,13 +127,66 @@ func (cp *ControlPlane) Start() error {
 }
 
 func (cp *ControlPlane) Stop() {
+	// Flip to NOT_SERVING *before* tearing anything else down, so any
+	// in-flight health probe from kb-checker gets an honest answer
+	// instead of a connection-refused/hang.
+	if cp.healthServer != nil {
+		cp.healthServer.SetServingStatus(ServiceName, healthpb.HealthCheckResponse_NOT_SERVING)
+	}
 	cp.grpc.GracefulStop()
+	os.Remove(ipc.SocketGRPC) // best-effort cleanup so next start doesn't hit a stale file
 	cp.store.Close()
 	// Signal the IPC accept loop to stop.
 	if cp.listener != nil {
 		close(cp.listener.Done)
 	}
 }
+
+// listenUnix binds a UDS listener at path, clearing any stale socket file
+// left behind by a previous run, and sets 0660 permissions per the
+// ownership table (root:root, group-readable/writable for kb-checker).
+func listenUnix(path string) (net.Listener, error) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("removing stale socket %s: %w", path, err)
+	}
+	lis, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o660); err != nil {
+		lis.Close()
+		return nil, fmt.Errorf("chmod socket %s: %w", path, err)
+	}
+	return lis, nil
+}
+
+// registerHealthService wires the standard gRPC health-checking protocol
+// onto an existing server pair and marks it SERVING. Extracted so it can
+// be exercised in tests without binding a real socket.
+func registerHealthService(grpcServer *grpc.Server, hs *health.Server) {
+	healthpb.RegisterHealthServer(grpcServer, hs)
+	hs.SetServingStatus(ServiceName, healthpb.HealthCheckResponse_SERVING)
+	log.Printf("[KB] gRPC health service registered, status=SERVING for %q", ServiceName)
+}
+
+// onCriticalDependencyLost flips health status to NOT_SERVING immediately
+// when something the control plane depends on to function correctly goes
+// down — e.g. the last connected sensor drops off the IPC socket, or a
+// store write starts failing. This gives kb-checker an honest signal
+// right away instead of waiting until Stop() is called, which only
+// covers deliberate shutdown, not degraded-but-still-running states.
+func (cp *ControlPlane) onCriticalDependencyLost(reason string) {
+	log.Printf("[KB] critical dependency lost, marking NOT_SERVING: %s", reason)
+	cp.healthServer.SetServingStatus(ServiceName, healthpb.HealthCheckResponse_NOT_SERVING)
+}
+
+// onDependencyRecovered flips health status back to SERVING once a
+// previously-lost dependency (see onCriticalDependencyLost) is confirmed
+// healthy again.
+func (cp *ControlPlane) onDependencyRecovered() {
+	cp.healthServer.SetServingStatus(ServiceName, healthpb.HealthCheckResponse_SERVING)
+}
+
 
 // ── MessageHandler (called by IPC listener) ──
 
@@ -247,7 +312,7 @@ func (cp *ControlPlane) recordEventTime() {
 	cp.metricMu.Lock()
 	defer cp.metricMu.Unlock()
 	cp.eventTimestamps = append(cp.eventTimestamps, time.Now())
-	
+
 	// Keep last 10 seconds
 	cutoff := time.Now().Add(-10 * time.Second)
 	idx := 0
@@ -265,7 +330,7 @@ func (cp *ControlPlane) recordEventTime() {
 func (cp *ControlPlane) GetEventsPerSecond() float64 {
 	cp.metricMu.Lock()
 	defer cp.metricMu.Unlock()
-	
+
 	cutoff := time.Now().Add(-10 * time.Second)
 	count := 0
 	for _, t := range cp.eventTimestamps {

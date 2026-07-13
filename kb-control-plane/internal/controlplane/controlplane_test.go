@@ -1,11 +1,25 @@
 package controlplane
 
 import (
+	"context"
+	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/test/bufconn"
+
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 )
+
+// ═══════════════════════════════════════════════════════════════════
+// Shared test fixtures
+// ═══════════════════════════════════════════════════════════════════
 
 // newTestControlPlane wires a real ControlPlane against an in-memory
 // SQLite DB and no policy file (defaults only). This exercises the same
@@ -42,6 +56,25 @@ func waitForCount(t *testing.T, get func() (int, error), want int) {
 	}
 	t.Fatalf("timed out waiting for count=%d, last saw count=%d err=%v", want, last, lastErr)
 }
+
+func auditCount(t *testing.T, cp *ControlPlane) int {
+	t.Helper()
+	n, err := auditCountErr(cp)
+	if err != nil {
+		t.Fatalf("query audit_log: %v", err)
+	}
+	return n
+}
+
+func auditCountErr(cp *ControlPlane) (int, error) {
+	var n int
+	err := cp.store.DB().QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&n)
+	return n, err
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OnProcessState / OnZoneTransition — scoring & PID-reuse guard
+// ═══════════════════════════════════════════════════════════════════
 
 func TestOnProcessStateUpdatesL1(t *testing.T) {
 	cp := newTestControlPlane(t)
@@ -150,17 +183,274 @@ func TestOnZoneTransitionUnknownPIDAllowsThrough(t *testing.T) {
 	waitForCount(t, func() (int, error) { return auditCountErr(cp) }, before+1)
 }
 
-func auditCount(t *testing.T, cp *ControlPlane) int {
+// ═══════════════════════════════════════════════════════════════════
+// Task 2 — gRPC health service, Group 1: protocol logic over bufconn
+// (in-memory transport, no real socket/file involved).
+// ═══════════════════════════════════════════════════════════════════
+
+const bufSize = 1024 * 1024
+
+// newBufconnHealthClient spins up a real *grpc.Server with only the
+// health service registered via registerHealthService — the same helper
+// Start() calls — served over bufconn instead of a real UDS path.
+func newBufconnHealthClient(t *testing.T) (healthpb.HealthClient, *health.Server, func()) {
 	t.Helper()
-	n, err := auditCountErr(cp)
-	if err != nil {
-		t.Fatalf("query audit_log: %v", err)
+
+	lis := bufconn.Listen(bufSize)
+	grpcServer := grpc.NewServer()
+	hs := health.NewServer()
+	registerHealthService(grpcServer, hs)
+
+	go func() {
+		_ = grpcServer.Serve(lis)
+	}()
+
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		return lis.DialContext(ctx)
 	}
-	return n
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	//nolint:staticcheck // DialContext is fine for bufconn test dialing
+	conn, err := grpc.DialContext(ctx, "passthrough:///bufnet",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial bufconn: %v", err)
+	}
+
+	cleanup := func() {
+		conn.Close()
+		grpcServer.GracefulStop()
+		lis.Close()
+	}
+
+	return healthpb.NewHealthClient(conn), hs, cleanup
 }
 
-func auditCountErr(cp *ControlPlane) (int, error) {
-	var n int
-	err := cp.store.DB().QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&n)
-	return n, err
+func TestHealthService_ReportsServingAfterRegister(t *testing.T) {
+	client, _, cleanup := newBufconnHealthClient(t)
+	defer cleanup()
+
+	resp, err := client.Check(context.Background(), &healthpb.HealthCheckRequest{
+		Service: ServiceName,
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if resp.Status != healthpb.HealthCheckResponse_SERVING {
+		t.Errorf("status = %v, want SERVING", resp.Status)
+	}
+}
+
+func TestHealthService_FlipsToNotServingBeforeShutdown(t *testing.T) {
+	client, hs, cleanup := newBufconnHealthClient(t)
+	defer cleanup()
+
+	resp, err := client.Check(context.Background(), &healthpb.HealthCheckRequest{Service: ServiceName})
+	if err != nil {
+		t.Fatalf("Check (pre): %v", err)
+	}
+	if resp.Status != healthpb.HealthCheckResponse_SERVING {
+		t.Fatalf("precondition failed: status = %v, want SERVING", resp.Status)
+	}
+
+	// Mirrors the exact line Stop() runs before grpc.GracefulStop().
+	hs.SetServingStatus(ServiceName, healthpb.HealthCheckResponse_NOT_SERVING)
+
+	resp, err = client.Check(context.Background(), &healthpb.HealthCheckRequest{Service: ServiceName})
+	if err != nil {
+		t.Fatalf("Check (post): %v", err)
+	}
+	if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+		t.Errorf("status = %v, want NOT_SERVING", resp.Status)
+	}
+}
+
+func TestHealthService_UnknownServiceNameErrors(t *testing.T) {
+	client, _, cleanup := newBufconnHealthClient(t)
+	defer cleanup()
+
+	_, err := client.Check(context.Background(), &healthpb.HealthCheckRequest{
+		Service: "kb.SomeServiceThatWasNeverRegistered",
+	})
+	if err == nil {
+		t.Fatal("expected an error for an unregistered service name, got nil")
+	}
+}
+
+func TestHealthService_EmptyServiceNameChecksOverallServer(t *testing.T) {
+	client, hs, cleanup := newBufconnHealthClient(t)
+	defer cleanup()
+
+	hs.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+
+	resp, err := client.Check(context.Background(), &healthpb.HealthCheckRequest{Service: ""})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if resp.Status != healthpb.HealthCheckResponse_SERVING {
+		t.Errorf("status = %v, want SERVING", resp.Status)
+	}
+}
+
+// Regression guard: New() must construct healthServer exactly once, and
+// Start() must reuse that same instance (not silently allocate a second
+// health.Server, which was the original bug in this file).
+func TestNewControlPlane_HealthServerIsSingleInstance(t *testing.T) {
+	cp := newTestControlPlane(t)
+
+	if cp.healthServer == nil {
+		t.Fatal("expected New() to construct a non-nil healthServer")
+	}
+
+	before := cp.healthServer
+	registerHealthService(grpc.NewServer(), cp.healthServer)
+
+	if cp.healthServer != before {
+		t.Error("healthServer instance changed after registration — New()/Start() likely re-created it")
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Task 2 — gRPC health service, Group 2: real Unix domain socket
+// behavior. Covers listenUnix() specifically — stale-file recovery and
+// the 0660 permission requirement from the ownership table — which
+// bufconn structurally cannot exercise.
+// ═══════════════════════════════════════════════════════════════════
+
+func TestGRPCHealthService_OverRealUnixSocket(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "kba-test.sock")
+
+	lis, err := listenUnix(sockPath)
+	if err != nil {
+		t.Fatalf("listenUnix: %v", err)
+	}
+
+	grpcServer := grpc.NewServer()
+	hs := health.NewServer()
+	registerHealthService(grpcServer, hs)
+
+	go func() {
+		_ = grpcServer.Serve(lis)
+	}()
+	t.Cleanup(grpcServer.GracefulStop)
+
+	// Confirm listenUnix actually set permissions per the ownership
+	// table (root:root, 0660), not just that it bound successfully.
+	info, err := os.Stat(sockPath)
+	if err != nil {
+		t.Fatalf("stat socket file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o660 {
+		t.Errorf("socket file mode = %o, want 0660", perm)
+	}
+
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", sockPath)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	//nolint:staticcheck // DialContext is fine for a test dial
+	conn, err := grpc.DialContext(ctx, "passthrough:///unix-test",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		t.Fatalf("dial real unix socket: %v", err)
+	}
+	defer conn.Close()
+
+	client := healthpb.NewHealthClient(conn)
+	resp, err := client.Check(context.Background(), &healthpb.HealthCheckRequest{
+		Service: ServiceName,
+	})
+	if err != nil {
+		t.Fatalf("Check over real UDS: %v", err)
+	}
+	if resp.Status != healthpb.HealthCheckResponse_SERVING {
+		t.Errorf("status = %v, want SERVING", resp.Status)
+	}
+}
+
+// Reproduces the exact failure mode that only exists for UDS, never TCP:
+// a socket file left on disk by a previous (e.g. crashed) run. Without
+// the os.Remove guard inside listenUnix, this fails with
+// "address already in use" instead of recovering.
+//
+// We simulate the leftover file directly rather than binding a real
+// listener and closing it — Go's net.UnixListener automatically unlinks
+// its socket file on a graceful Close() (that's the default
+// unlink-on-close behavior), which would just delete the very file we're
+// trying to leave behind. A real crash never calls Close(), so the file
+// survives; bind() fails with EADDRINUSE against any existing path
+// regardless of whether it's a real socket, so a plain empty file
+// reproduces the scenario without depending on listener internals.
+func TestListenUnix_RemovesStaleSocketFile(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "stale.sock")
+
+	if err := os.WriteFile(sockPath, nil, 0o660); err != nil {
+		t.Fatalf("failed to create stale file fixture: %v", err)
+	}
+
+	if _, err := os.Stat(sockPath); err != nil {
+		t.Fatalf("precondition failed, stale file not present: %v", err)
+	}
+
+	lis, err := listenUnix(sockPath)
+	if err != nil {
+		t.Fatalf("listenUnix did not recover from stale socket file: %v", err)
+	}
+	lis.Close()
+}
+
+// Exercises listenUnix + registerHealthService together in the exact
+// sequence Start() uses, over a real (temp) UDS path — catches the class
+// of bug where the helpers exist but Start() doesn't actually call them
+// in the right order.
+func TestStartSequence_ListenThenRegisterOverUnixSocket(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "kba-sequence-test.sock")
+
+	lis, err := listenUnix(sockPath)
+	if err != nil {
+		t.Fatalf("listenUnix: %v", err)
+	}
+	grpcServer := grpc.NewServer()
+	hs := health.NewServer()
+	registerHealthService(grpcServer, hs)
+
+	go func() { _ = grpcServer.Serve(lis) }()
+	t.Cleanup(grpcServer.GracefulStop)
+
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", sockPath)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	//nolint:staticcheck
+	conn, err := grpc.DialContext(ctx, "passthrough:///seq-test",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := healthpb.NewHealthClient(conn)
+	resp, err := client.Check(context.Background(), &healthpb.HealthCheckRequest{Service: ServiceName})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if resp.Status != healthpb.HealthCheckResponse_SERVING {
+		t.Errorf("status = %v, want SERVING", resp.Status)
+	}
 }
