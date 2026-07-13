@@ -128,7 +128,7 @@ GitHub: **Rupakaredla**
 
 ```bash
 git commit \
-  --author="Karedla Rupa Yeshvitha <karedla*****@gmail.com>" \
+  --author="Rupa <*****@gmail.com>" \
   -m "<commit message>"
 ```
 
@@ -137,7 +137,7 @@ Amend the previous commit:
 ```bash
 git commit \
   --amend \
-  --author="Karedla Rupa Yeshvitha <karedla*****@gmail.com>" \
+  --author="Rupa <*****@gmail.com>" \
   --no-edit
 ```
 
