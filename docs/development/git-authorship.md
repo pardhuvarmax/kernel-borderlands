@@ -76,11 +76,9 @@ Ensure that the **Author** field matches your identity before pushing.
 
 ---
 
-# Repository Commit Authors
+# Repository Commit Authors (Core Team Specific)
 
 Use the following author information when creating commits from the shared repository.
-
----
 
 ## PardhuVarma Konduru
 
