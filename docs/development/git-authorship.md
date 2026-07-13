@@ -124,7 +124,7 @@ git commit \
 
 ## Karedla Rupa Yeshvitha
 
-GitHub: *(add username if applicable)*
+GitHub: **Rupakaredla**
 
 ```bash
 git commit \
