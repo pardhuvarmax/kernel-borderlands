@@ -7,6 +7,10 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 ## [Unreleased] - 2026-07-14
 
 ### Added
+- **eBPF Rate Limiting (`kb-core`)**: Implemented hybrid BPF token buckets using Task Local Storage and LRU Hash Maps.
+- **Deep Resource Isolation (`kb-core`)**: Upgraded rate limiting to track limits by `PID + Resource ID` (e.g., Destination IP, Syscall ID) to prevent smoke-grenade sensor evasion.
+- **Telemetry Batching (`kb-core`)**: Added `KB_EVT_DROPPED_TELEMETRY` event to accurately aggregate and report dropped payloads to the userspace behavior engine.
+- **Rate Limit Isolation Test (`kb-core`)**: Added `tests/isolation_test.py` to test BPF token bucket overload boundaries.
 - **Build & Test Scripts (`kb-core`)**: Added helper utilities `build.sh`, `clean.sh`, `test.sh`, and `attach.sh` for simplified operations.
 - **Git Authorship Aliases**: Added system-wide bash aliases to `/etc/bash.bashrc` to handle multi-contributor commits cleanly.
 - **IPC Restore Test (`kb-core`)**: Added dedicated python integration test script `kb-core/tests/test_restore_ipc.py` to mock control plane containment commands.
@@ -22,6 +26,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ### July 2026
 
+*   **2026-07-14** - eBPF token bucket rate limiting, telemetry batching, and deep resource isolation (*PardhuVarma*)
 *   **2026-07-14** - gap work implementation, LSM hook return corrections & IPC restore tests (*PardhuVarma*)
 *   **2026-07-14** - readme updates (*Rupa Karedla*)
 *   **2026-07-13** - git authorship documentation updates (*PardhuVarma*)
