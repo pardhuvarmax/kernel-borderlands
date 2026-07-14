@@ -2,7 +2,7 @@
 
 **Document Version:** 2.0
 **Component:** Userspace Sensor / eBPF Containment Engine
-**Status:** [![COMPLETED](https://img.shields.io/badge/STATUS-COMPLETED-brightgreen?style=for-the-badge&logo=github)](https://github.com) (Signed off by PardhuVarma on 2026-07-14)
+**Status:** Completed. (Signed off by PardhuVarma on 2026-07-14)
 
 ---
 
