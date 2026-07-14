@@ -14,6 +14,34 @@ This approach keeps the repository configuration unchanged while ensuring that e
 
 ---
 
+## Convenience Git Commit Aliases (System-Wide)
+
+To make this process easier and prevent GitHub from displaying `"X authored and Y committed"`, system-wide bash aliases have been set up in `/etc/bash.bashrc`. These aliases automatically configure both the **Author** and the **Committer** variables for the single commit command.
+
+Instead of writing out long `--author` flags or changing local configs, you can use these custom commands:
+
+*   **Rupa**: Use `git-commit-rupa`
+    ```bash
+    git-commit-rupa -m "commit message"
+    ```
+*   **Pardhu**: Use `git-commit-pardhu`
+    ```bash
+    git-commit-pardhu -m "commit message"
+    ```
+*   **Karthik**: Use `git-commit-karthik`
+    ```bash
+    git-commit-karthik -m "commit message"
+    ```
+*   **Teju**: Use `git-commit-teju`
+    ```bash
+    git-commit-teju -m "commit message"
+    ```
+
+These commands will automatically set `GIT_AUTHOR_*` and `GIT_COMMITTER_*` environment variables for that commit only, ensuring clean authorship on GitHub.
+
+---
+
+
 # Creating a New Commit
 
 After completing your changes:
