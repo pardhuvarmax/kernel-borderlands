@@ -27,6 +27,7 @@ char LICENSE[] SEC("license") = "GPL";
 #define KB_EVT_NETWORK_BIND      6
 #define KB_EVT_MEMORY_MMAP       7
 #define KB_EVT_MEMORY_MPROTECT   8
+#define KB_EVT_DROPPED_TELEMETRY 9
 
 struct kb_unified_event {
     __u32 pid;
@@ -126,6 +127,94 @@ struct {
     __type(value, __u32);   // Containment Level
 } contained_pids_map SEC(".maps");
 
+struct kb_token_bucket {
+    __u64 last_time;
+    __u64 tokens;
+    __u64 dropped_count;
+    __u32 priority_bypass;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_TASK_STORAGE);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, int);
+    __type(value, struct kb_token_bucket);
+} kb_rate_limit_task_map SEC(".maps");
+
+struct kb_lru_key {
+    __u32 tgid;
+    __u64 start_time;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 10240);
+    __type(key, struct kb_lru_key);
+    __type(value, struct kb_token_bucket);
+} kb_rate_limit_lru_map SEC(".maps");
+
+#define KB_RL_MAX_TOKENS 100
+#define KB_RL_REFILL_RATE_NS 10000000 // 10ms = 100 tokens/sec
+
+static __always_inline int kb_rate_limit_throttle(void)
+{
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    struct kb_token_bucket *bucket = NULL;
+    
+    if (bpf_core_enum_value_exists(enum bpf_func_id, BPF_FUNC_task_storage_get)) {
+        bucket = bpf_task_storage_get(&kb_rate_limit_task_map, task, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
+    }
+    
+    if (!bucket) {
+        struct kb_lru_key key = {};
+        key.tgid = BPF_CORE_READ(task, tgid);
+        key.start_time = BPF_CORE_READ(task, start_time);
+        
+        bucket = bpf_map_lookup_elem(&kb_rate_limit_lru_map, &key);
+        if (!bucket) {
+            struct kb_token_bucket new_bucket = {};
+            new_bucket.tokens = KB_RL_MAX_TOKENS;
+            new_bucket.last_time = bpf_ktime_get_ns();
+            bpf_map_update_elem(&kb_rate_limit_lru_map, &key, &new_bucket, BPF_ANY);
+            bucket = bpf_map_lookup_elem(&kb_rate_limit_lru_map, &key);
+            if (!bucket) return 0;
+        }
+    }
+    
+    __u64 now = bpf_ktime_get_ns();
+    __u64 elapsed = now - bucket->last_time;
+    
+    if (elapsed > KB_RL_REFILL_RATE_NS) {
+        __u64 add_tokens = elapsed / KB_RL_REFILL_RATE_NS;
+        bucket->tokens += add_tokens;
+        if (bucket->tokens > KB_RL_MAX_TOKENS) {
+            bucket->tokens = KB_RL_MAX_TOKENS;
+        }
+        bucket->last_time = now;
+    }
+    
+    if (bucket->dropped_count > 0 && bucket->tokens > 0) {
+         struct kb_unified_event *e = bpf_ringbuf_reserve(&kb_events, sizeof(*e), 0);
+         if (e) {
+             __builtin_memset(e, 0, sizeof(*e));
+             e->pid = BPF_CORE_READ(task, tgid);
+             e->event_type = KB_EVT_DROPPED_TELEMETRY;
+             e->length = bucket->dropped_count;
+             e->ts_ns = now;
+             bpf_ringbuf_submit(e, 0);
+         }
+         bucket->dropped_count = 0;
+    }
+
+    if (bucket->tokens > 0) {
+        bucket->tokens--;
+        return 0; // allow
+    } else {
+        bucket->dropped_count++;
+        return 1; // throttle
+    }
+}
+
 static __always_inline struct kb_unified_event *kb_reserve_event(void)
 {
     struct kb_unified_event *e =
@@ -209,6 +298,8 @@ int kb_handle_syscall(struct trace_event_raw_sys_enter *ctx)
     __u64 *t = bpf_map_lookup_elem(&kb_syscall_totals, &pid);
     if (!t || (*t % 100 != 0))
         return 0;
+
+    if (kb_rate_limit_throttle()) return 0;
 
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
@@ -319,6 +410,8 @@ int kb_handle_connect(struct trace_event_raw_sys_enter *ctx)
     struct sockaddr_in sin = {};
     bpf_probe_read_user(&sin, sizeof(sin), addr);
 
+    if (kb_rate_limit_throttle()) return 0;
+
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_NETWORK_CONNECT);
@@ -341,6 +434,8 @@ int kb_handle_bind(struct trace_event_raw_sys_enter *ctx)
     if (family != 2) return 0;
     struct sockaddr_in sin = {};
     bpf_probe_read_user(&sin, sizeof(sin), addr);
+
+    if (kb_rate_limit_throttle()) return 0;
 
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
@@ -371,6 +466,8 @@ int kb_handle_mmap(struct trace_event_raw_sys_enter *ctx)
     int is_anon = (flags & KB_MAP_ANON) != 0;
     if (!is_rwx && !(is_exec && is_anon)) return 0;
 
+    if (kb_rate_limit_throttle()) return 0;
+
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_MEMORY_MMAP);
@@ -389,6 +486,8 @@ int kb_handle_mprotect(struct trace_event_raw_sys_enter *ctx)
     __u64 length = (__u64)ctx->args[1];
     __u32 prot = (__u32)ctx->args[2];
     if (!(prot & KB_PROT_EXEC)) return 0;
+
+    if (kb_rate_limit_throttle()) return 0;
 
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
