@@ -20,7 +20,53 @@ See [README.md](README.md) for the project pitch and [docs/README.md](docs/READM
 | `docs/` | Markdown | Architecture specs, ADRs, event/wire contracts |
 | `config/` | YAML | `kb.yaml`, `policy.yaml`, `allowlist.yaml`, `agents.yaml`, `dashboard.yaml` — see [config/README.md](config/README.md) |
 | `scripts/` | Bash / Python | Setup, attack-lab simulation, dataset tooling — see [scripts/README.md](scripts/README.md) |
-| `libbpf/` | C (vendored) | libbpf dependency for `kb-core` |
+| `libbpf/` | C (vendored) | libbpf dependency for `kb-core` |The handoff should allow another coding session or a human developer to continue the work with or eithout any further minimal additional investigations.
+
+
+## Documentation Policy
+
+- The documentation under `docs/` is the canonical source of truth for this repository.
+- Before implementing features, modifying code, refactoring, debugging, or making architectural decisions, consult the relevant documentation first.
+- When documentation and implementation disagree, do not assume the code is correct. Explain the discrepancy and ask for clarification before changing behavior.
+- When proposing or implementing non-trivial changes, mention the documentation files consulted whenever they materially influenced the implementation.
+- Consult only the documentation relevant to the current task. Do not read unrelated documentation unless required.
+
+## Primary Documentation
+
+1. Specifications : 
+    [docs/specifications/](docs/specifications/)
+
+2. Architecture :
+    [docs/architecture/](docs/architecture/)
+
+3. Development :
+    [docs/development/](docs/development/)
+
+4. Features (Evolving) :
+    [docs/features/](docs/features/)
+
+## Workflow
+
+For every non-trivial task:
+
+1. Identify the relevant documentation. Read only the files necessary for the current task.
+2. Verify expected behavior and interfaces in `docs/specifications/`.
+3. Confirm architectural consistency using `docs/architecture/`.
+4. Implement the requested changes.
+5. If the implementation conflicts with the documentation, do not guess or silently change behavior—explain the conflict and ask for clarification.
+6. If required documentation does not exist, state that explicitly instead of inferring undocumented architecture.
+7. Prefer the smallest correct change that satisfies the request. Avoid unrelated refactors.
+
+Documentation precedence:
+
+1. `docs/specifications/`
+2. `docs/architecture/`
+3. `docs/development/`
+4. `docs/features/`
+5. Source code
+6. General knowledge
+
+Treat these directories as the project's canonical knowledge base. Prefer documented behavior over assumptions, and preserve documented contracts unless explicitly instructed otherwise.
 
 Full command reference (build/test/run for every subsystem) lives in [docs/development/developer-commands.md](docs/development/developer-commands.md) — prefer that over duplicating it here. Quick essentials:
 
@@ -51,4 +97,24 @@ Load-bearing references — read before touching cross-subsystem behavior:
 
 - **Shared structs stay byte-identical**: edits to wire structs must keep the C (`__attribute__((packed))`) and Go layouts in sync — verify against [docs/architecture/kbd-contracts.md](docs/architecture/kbd-contracts.md).
 - **Rules/policy are compiled, not hand-edited on the sensor side**: `config/policy.yaml` / `rules.yaml` are compiled by `kb-control-plane` and pushed to the C sensor over the bridge at connect time.
+- **Preserve public interfaces**: Unless explicitly requested, avoid breaking public APIs, wire formats, configuration schemas, CLI behavior, or IPC contracts.
 - **Commit authorship**: shared working copy, multiple contributors — never change repo `user.name`/`user.email`; use `git commit --author="Name <email>" -m "..."` per [docs/development/git-authorship.md](docs/development/git-authorship.md).
+
+## Work Continuity & Handoff
+
+If you are approaching practical context or response limits, or you judge that you cannot complete the remaining work to a high standard within the current session:
+
+1. Stop before making speculative or incomplete changes.
+2. Finish the current logical unit of work, leaving the repository in a consistent, buildable state.
+3. Produce a concise handoff summary including:
+   - What was completed.
+   - What files were modified.
+   - What remains to be done.
+   - Any assumptions or open questions.
+   - Any important documentation consulted.
+   - Any known risks, caveats, or follow-up work.
+   - Recommended next steps (ordered by priority).
+4. Do not begin additional implementation that cannot reasonably be completed within the remaining context.
+5. Prefer a clean, well-documented stopping point over a partially implemented feature.
+
+The handoff should be sufficiently complete to allow another coding session or a human developer to resume the work immediately, with little to no additional investigation.
