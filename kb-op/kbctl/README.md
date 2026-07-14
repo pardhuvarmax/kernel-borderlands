@@ -65,3 +65,6 @@ By default, `kbctl` connects to `localhost:50051`. You can configure the target 
 # Specify a different gRPC server endpoint
 kbctl policy reload --server 192.168.1.100:50051
 ```
+
+## Owner
+- Rupa — CLI Tooling and Operator Infra.

@@ -110,3 +110,6 @@ All operator interfaces follow the Kernel Borderlands visual theme:
 - **Primary Color Accents**: Neon Orange (`#FF5722`) and Toxic Matrix Green (`#00FF66`).
 - **Layout Model**: Clean, responsive grid cards detailing threat zone statuses (`SAFE` $\to$ `SUSPICIOUS` $\to$ `BORDERLANDS`).
 - **Interactions**: Subtle, non-intrusive micro-animations with zero layout shifts on resize or mode change.
+
+## Owner
+- Rupa — TUI, CLI Tooling & Operator Infra.
