@@ -882,6 +882,7 @@ static const char *event_type_name(__u8 t)
         case KB_EVT_MEMORY_MMAP:      return "memory_mmap";
         case KB_EVT_MEMORY_MPROTECT:  return "memory_mprotect";
         case 9:                       return "tls_plaintext";
+        case 10:                      return "telemetry_dropped";
         default:                      return "unknown";
     }
 }
@@ -902,7 +903,7 @@ static int handle_event(void *ctx, void *data, size_t sz)
     if (e->event_type == KB_EVT_SYSCALL)
         return 0;
 
-    if (e->event_type != 9) {
+    if (e->event_type != 9 && e->event_type != 10) {
         kb_scoring_result_t r = process_behavior_and_score(e);
         bridge_dispatch(r, e->ts_ns);
     }
@@ -911,14 +912,20 @@ static int handle_event(void *ctx, void *data, size_t sz)
     char src[INET_ADDRSTRLEN] = {0};
     char prot[4];
 
-    printf("[%-17s] PID=%-6u PPID=%-6u UID=%-5u COMM=%-16s ",
-           event_type_name(e->event_type),
-           e->pid, e->ppid, e->uid, e->comm);
+    if (e->event_type != 10) {
+        printf("[%-17s] PID=%-6u PPID=%-6u UID=%-5u COMM=%-16s ",
+               event_type_name(e->event_type),
+               e->pid, e->ppid, e->uid, e->comm);
+    }
 
     switch (e->event_type) {
         case KB_EVT_PROCESS_EXEC:
             try_attach_go_tls(skel, e->pid, (const char *)e->comm);
             printf("\n");
+            break;
+
+        case 10:
+            printf("Overloaded Batch: PID %u occurred %llu times in the last second, %llu events dropped\n", e->pid, 100 + (unsigned long long)e->length, (unsigned long long)e->length);
             break;
 
         case KB_EVT_PROCESS_EXIT:
