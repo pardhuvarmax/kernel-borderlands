@@ -417,7 +417,11 @@ int kb_ssl_write(struct pt_regs *ctx)
 
     kb_fill_common(e, pid, 9); // 9 = KB_EVT_TLS_PLAINTEXT
     e->flags = num; // store original length
-    int copy_len = num > 127 ? 127 : num;
+    unsigned int copy_len = (unsigned int)num;
+    if (copy_len > 127) {
+        copy_len = 127;
+    }
+    copy_len &= 127;
     bpf_probe_read_user(&e->filename, copy_len, buf);
     e->filename[copy_len] = '\0';
     bpf_ringbuf_submit(e, 0);
@@ -441,7 +445,11 @@ int kb_go_tls_write(struct pt_regs *ctx)
 
     kb_fill_common(e, pid, 9); // 9 = KB_EVT_TLS_PLAINTEXT
     e->flags = num;
-    int copy_len = num > 127 ? 127 : num;
+    unsigned int copy_len = (unsigned int)num;
+    if (copy_len > 127) {
+        copy_len = 127;
+    }
+    copy_len &= 127;
     bpf_probe_read_user(&e->filename, copy_len, buf);
     e->filename[copy_len] = '\0';
     bpf_ringbuf_submit(e, 0);
@@ -597,7 +605,7 @@ int BPF_PROG(kb_lsm_socket_connect, struct socket *sock,
     __u16 family = 0;
     bpf_probe_read_kernel(&family, sizeof(family), &address->sa_family);
     if (family == 2 /* AF_INET */ || family == 10 /* AF_INET6 */)
-        return -1; /* -EPERM */
+        return -13; /* -EACCES */
     return 0;
 }
 
@@ -616,7 +624,7 @@ int BPF_PROG(kb_lsm_socket_bind, struct socket *sock,
     __u16 family = 0;
     bpf_probe_read_kernel(&family, sizeof(family), &address->sa_family);
     if (family == 2 /* AF_INET */ || family == 10 /* AF_INET6 */)
-        return -1; /* -EPERM */
+        return -13; /* -EACCES */
     return 0;
 }
 
@@ -636,6 +644,6 @@ int BPF_PROG(kb_lsm_file_mprotect, struct vm_area_struct *vma,
     if (*level < 3)
         return 0;
     if (prot & KB_PROT_EXEC)
-        return -1; /* -EPERM */
+        return -13; /* -EACCES */
     return 0;
 }

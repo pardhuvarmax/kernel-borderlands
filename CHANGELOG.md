@@ -9,6 +9,12 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 ### Added
 - **Build & Test Scripts (`kb-core`)**: Added helper utilities `build.sh`, `clean.sh`, `test.sh`, and `attach.sh` for simplified operations.
 - **Git Authorship Aliases**: Added system-wide bash aliases to `/etc/bash.bashrc` to handle multi-contributor commits cleanly.
+- **IPC Restore Test (`kb-core`)**: Added dedicated python integration test script `kb-core/tests/test_restore_ipc.py` to mock control plane containment commands.
+
+### Changed
+- **Containment Restore path correctness (`kb-core`)**: Implemented return check for `bpf_map_delete_elem` and `bpf_map_update_elem` in `kbd_sensor.c`, logging deletion/update failures to stderr.
+- **Bounded logging outputs (`kb-core`)**: Bounded `cmd->reason` string printing to 64 bytes (`%.64s`) to avoid out-of-bound memory reads when logs print non-null-terminated reason strings.
+- **LSM BPF Hook Verifications (`kb-core`)**: Modified LSM socket hook return values (`kb_lsm_socket_connect`, `kb_lsm_socket_bind`, `kb_lsm_file_mprotect`) in `kbd_sensor.bpf.c` to return `-13` (`-EACCES`) instead of `-1` to fix modern kernel verifier rejection.
 
 ---
 
@@ -16,6 +22,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ### July 2026
 
+*   **2026-07-14** - gap work implementation, LSM hook return corrections & IPC restore tests (*PardhuVarma*)
 *   **2026-07-14** - readme updates (*Rupa Karedla*)
 *   **2026-07-13** - git authorship documentation updates (*PardhuVarma*)
 *   **2026-07-13** - Controlplane updates (*Tejaswini*)
