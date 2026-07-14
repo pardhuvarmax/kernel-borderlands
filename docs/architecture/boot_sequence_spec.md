@@ -102,12 +102,12 @@ sequenceDiagram
     *   `kb-checker` attempts to acquire a raw POSIX lock (`flock`) on `/run/kb/kb-checker.pid`.
     *   It binds the diagnostic reporting socket `/run/kb/kbc.sock`.
 *   **`T+6.20s` — Blocking Boot Audits**:
-    *   **JIT Bytecode Check**: Checker pulls JITed bytecode for `kbd_sensor` from kernel memory, hashes it (SHA-256), and validates it against `/etc/kb/ebpf_policies.json`.
+    *   **JIT Bytecode Check**: Checker pulls JITed bytecode for `kbd_sensor` from kernel memory, hashes it (SHA-256), and validates it against the pre-compiled, read-only `/etc/kb/ebpf_policies.json` generated during package compilation/installation. If JIT memory reads are blocked by kernel capability constraints, the checker logs a warning and proceeds with hook presence validation instead of raising a failure.
     *   **Map Check**: Checker dumps `/run/kb/contained_pids_map` and compares it against active containments from Go database (`kbd`).
     *   **Liveness Check**: Checker subscribes to event stream on `kba.sock`, executes a test process (`/bin/true`), and waits up to **3s** for the process execution event to stream back.
     *   **Performance Check**: Calculates average runtime latency of hooks to ensure it's under 500ns.
 *   **`T+7.50s` — Startup Decision**:
-    *   *If checks pass*: `kb-checker` starts its scheduled background verification loops (running every 5s/30s/60s).
+    *   *If checks pass (or warning cap fallback triggered)*: `kb-checker` starts its scheduled background verification loops (running every 5s/30s/60s).
     *   *If checks fail*: `kb-checker` executes the **Tampering Containment Protocol**: unloads `kbd_sensor` from kernel memory, sends the failure report and stack trace to `kbd` over `kba.sock`, and exits with code 1.
 *   **`T+8.50s` — Phase 3: Ray Swarm / Workload Activation**:
     *   *If `kb-checker` succeeded*: Systemd releases the gate and starts the Swarm Node Agent (`kbd-agent.service` / Ray workload manager).
