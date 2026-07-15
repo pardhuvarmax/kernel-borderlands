@@ -7,9 +7,9 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 ## [Unreleased] - 2026-07-15
 
 ### Added
-- **Process Exit Lifecycle (`kb-control-plane`)**: Implemented packet routing and decoding for `MsgTypeProcessExit` (`4`) to immediately flush stale L1 memory cache and L2 SQLite process records upon process termination, preventing PID reuse vulnerabilities.
-- **Process Exit Unit Tests (`kb-control-plane`)**: Added unit and integration tests in `controlplane_test.go` and `wire_test.go` to verify cache eviction and SQL deletion.
-- **eBPF Rate Limiting (`kb-core`)**: Implemented hybrid BPF token buckets using Task Local Storage and LRU Hash Maps.
+- **Process Exit Lifecycle (`kb-control-plane`)**: Implemented packet routing and decoding for `MsgTypeProcessExit` (`4`) to immediately flush stale L1 memory cache and L2 SQLite process records upon process termination, preventing PID reuse vulnerabilities. [Tejaswini4119]
+- **Process Exit Unit Tests (`kb-control-plane`)**: Added unit and integration tests in `controlplane_test.go` and `wire_test.go` to verify cache eviction and SQL deletion. [Tejaswini4119]
+- **eBPF Rate Limiting (`kb-core`)**: Implemented hybrid BPF token buckets using Task Local Storage and LRU Hash Maps. 
 - **Deep Resource Isolation (`kb-core`)**: Upgraded rate limiting to track limits by `PID + Resource ID` (e.g., Destination IP, Syscall ID) to prevent smoke-grenade sensor evasion.
 - **Telemetry Batching (`kb-core`)**: Added `KB_EVT_DROPPED_TELEMETRY` event to accurately aggregate and report dropped payloads to the userspace behavior engine.
 - **Rate Limit Isolation Test (`kb-core`)**: Added `tests/isolation_test.py` to test BPF token bucket overload boundaries.
