@@ -173,3 +173,40 @@ func TestKBZoneStringNames(t *testing.T) {
 		}
 	}
 }
+
+func buildProcessExitFrame(pid uint32, exitTime int64, exitCode uint32) []byte {
+	var b []byte
+	b = append(b, 0x42, 0x4B) // magic, LE: 0x4B42
+	b = append(b, WireVersion, MsgTypeProcessExit)
+	b = append(b, u32(pid)...)
+	b = append(b, u64(uint64(exitTime))...)
+	b = append(b, u32(exitCode)...)
+	return b
+}
+
+func TestParseProcessExitRoundTrip(t *testing.T) {
+	frame := buildProcessExitFrame(5678, 111_000_000_000, 127)
+
+	msg, err := parseProcessExit(frame)
+	if err != nil {
+		t.Fatalf("parseProcessExit: %v", err)
+	}
+
+	if msg.PID != 5678 {
+		t.Errorf("pid = %d, want 5678", msg.PID)
+	}
+	if msg.ExitTimeNs != 111_000_000_000 {
+		t.Errorf("exit_time_ns = %d, want 111e9", msg.ExitTimeNs)
+	}
+	if msg.ExitCode != 127 {
+		t.Errorf("exit_code = %d, want 127", msg.ExitCode)
+	}
+}
+
+func TestParseProcessExitRejectsShortBuffer(t *testing.T) {
+	frame := buildProcessExitFrame(1, 0, 0)
+	short := frame[:len(frame)-1] // one byte short of 20
+	if _, err := parseProcessExit(short); err == nil {
+		t.Error("expected error for truncated ProcessExit frame, got nil")
+	}
+}

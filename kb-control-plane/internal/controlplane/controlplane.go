@@ -19,7 +19,16 @@ import (
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 )
 
+// ServiceName is the gRPC health-checking service name kbd registers
+// itself under. kb-checker (Rust) must query this exact string when
+// dialing /run/kb/kba.sock.
 const ServiceName = "kernel-borderlands"
+
+// storeFailureThreshold is the number of CONSECUTIVE store-write failures
+// required before health status flips to NOT_SERVING. Isolated failures
+// (lock contention, brief disk pressure) are expected occasionally under
+// load and should not page anyone — only a real trend should.
+const storeFailureThreshold = 5
 
 type ControlPlane struct {
 	pb.UnimplementedKernelBorderlandsServer
@@ -44,6 +53,13 @@ type ControlPlane struct {
 	// Live metrics tracking
 	metricMu        sync.Mutex
 	eventTimestamps []time.Time
+
+	// Store-write health tracking — see recordStoreResult. Guards
+	// storeFailureCount/storeUnhealthy since OnProcessState can be
+	// called concurrently across multiple sensor connections.
+	storeFailureMu    sync.Mutex
+	storeFailureCount int
+	storeUnhealthy    bool
 }
 
 func New(dbPath, policyPath string) (*ControlPlane, error) {
@@ -187,6 +203,39 @@ func (cp *ControlPlane) onDependencyRecovered() {
 	cp.healthServer.SetServingStatus(ServiceName, healthpb.HealthCheckResponse_SERVING)
 }
 
+// recordStoreResult tracks CONSECUTIVE store-write outcomes and flips
+// gRPC health status only when a real trend emerges, not on isolated
+// failures. Call this after every store write on the hot path (currently
+// just OnProcessState's UpsertProcessState call).
+//
+// Recovery is intentionally simple for now: a single success after
+// crossing the failure threshold clears the unhealthy state immediately
+// (asymmetric — fail-fast at storeFailureThreshold, recover-fast at 1).
+// This errs on the safe side (staying NOT_SERVING slightly longer than
+// strictly necessary) rather than requiring a separate, more complex
+// consecutive-success counter. Revisit if this proves too twitchy in
+// practice — start simple, tune from real failure data.
+func (cp *ControlPlane) recordStoreResult(err error) {
+	cp.storeFailureMu.Lock()
+	defer cp.storeFailureMu.Unlock()
+
+	if err != nil {
+		cp.storeFailureCount++
+		if cp.storeFailureCount == storeFailureThreshold && !cp.storeUnhealthy {
+			cp.storeUnhealthy = true
+			cp.onCriticalDependencyLost(fmt.Sprintf(
+				"store: %d consecutive write failures, last error: %v",
+				cp.storeFailureCount, err))
+		}
+		return
+	}
+
+	cp.storeFailureCount = 0
+	if cp.storeUnhealthy {
+		cp.storeUnhealthy = false
+		cp.onDependencyRecovered()
+	}
+}
 
 // ── MessageHandler (called by IPC listener) ──
 
@@ -194,9 +243,11 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	cp.recordEventTime()
 	cp.commCache.Store(msg.PID, msg.Comm)
 
-	if err := cp.store.UpsertProcessState(msg); err != nil {
+	err := cp.store.UpsertProcessState(msg)
+	if err != nil {
 		log.Printf("[KB] store: %v", err)
 	}
+	cp.recordStoreResult(err)
 
 	// Remove on process exit — event_count won't increment after exit,
 	// so use the zone: if a process_exit event came through the C side
@@ -220,6 +271,17 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 			"uid":           fmt.Sprintf("%d", msg.UID),
 		},
 	})
+}
+
+func (cp *ControlPlane) OnProcessExit(msg *ipc.ProcessExitMsg) {
+	// Delete volatile cache entries to prevent PID reuse vulnerabilities
+	cp.commCache.Delete(msg.PID)
+
+	// Push exit details to L2 DB
+	if err := cp.store.TerminateProcessState(msg.PID, msg.ExitTimeNs, msg.ExitCode); err != nil {
+		log.Printf("[KB] store term: %v", err)
+	}
+	log.Printf("[KB] Process PID=%d terminated (Code: %d)", msg.PID, msg.ExitCode)
 }
 
 func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {

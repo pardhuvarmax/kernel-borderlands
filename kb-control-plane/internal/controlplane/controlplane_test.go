@@ -2,9 +2,11 @@ package controlplane
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,6 +98,57 @@ func TestOnProcessStateUpdatesL1(t *testing.T) {
 	// which don't carry comm on the wire) should also be populated.
 	if v, ok := cp.commCache.Load(uint32(100)); !ok || v.(string) != "nginx" {
 		t.Errorf("commCache[100] = %v, %v; want \"nginx\", true", v, ok)
+	}
+}
+
+func TestOnProcessExitFlushesCache(t *testing.T) {
+	cp := newTestControlPlane(t)
+
+	// Seed the process state
+	cp.OnProcessState(&ipc.ProcessStateMsg{
+		PID: 100, PPID: 1, Comm: "nginx", StartTimeNs: 1000,
+		EMAScore: 55.5, Zone: ipc.ZoneSuspicious,
+	})
+
+	// Verify L1 cache is populated
+	_, ok := cp.store.GetProcessState(100)
+	if !ok {
+		t.Fatal("expected process to be tracked in L1")
+	}
+	if _, ok := cp.commCache.Load(uint32(100)); !ok {
+		t.Fatal("expected process comm to be in commCache")
+	}
+
+	// Wait for the async L2 SQLite insert to complete
+	waitForCount(t, func() (int, error) {
+		var count int
+		err := cp.store.DB().QueryRow("SELECT COUNT(*) FROM process_state WHERE pid = ?", 100).Scan(&count)
+		return count, err
+	}, 1)
+
+	// Trigger process exit
+	cp.OnProcessExit(&ipc.ProcessExitMsg{
+		PID:        100,
+		ExitTimeNs: 2000,
+		ExitCode:   0,
+	})
+
+	// Verify it is flushed from L1 and commCache
+	if _, ok := cp.store.GetProcessState(100); ok {
+		t.Error("expected process to be evicted from L1 after exit")
+	}
+	if _, ok := cp.commCache.Load(uint32(100)); ok {
+		t.Error("expected process comm to be removed from commCache after exit")
+	}
+
+	// Verify SQLite row is deleted synchronously
+	var count int
+	err := cp.store.DB().QueryRow("SELECT COUNT(*) FROM process_state WHERE pid = ?", 100).Scan(&count)
+	if err != nil {
+		t.Fatalf("querying SQLite: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected process row to be deleted from SQLite process_state table, got count %d", count)
 	}
 }
 
@@ -453,4 +506,135 @@ func TestStartSequence_ListenThenRegisterOverUnixSocket(t *testing.T) {
 	if resp.Status != healthpb.HealthCheckResponse_SERVING {
 		t.Errorf("status = %v, want SERVING", resp.Status)
 	}
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// recordStoreResult — consecutive-failure health safety net
+// ═══════════════════════════════════════════════════════════════════
+
+// TestRecordStoreResult_StaysHealthyBelowThreshold confirms isolated
+// failures (fewer than storeFailureThreshold in a row) do NOT flip
+// health status — this is the whole point of counting consecutive
+// failures instead of reacting to every single error.
+func TestRecordStoreResult_StaysHealthyBelowThreshold(t *testing.T) {
+	cp := newTestControlPlane(t)
+	dummyErr := fmt.Errorf("simulated transient write failure")
+
+	for i := 0; i < storeFailureThreshold-1; i++ {
+		cp.recordStoreResult(dummyErr)
+	}
+
+	if cp.storeUnhealthy {
+		t.Fatalf("flipped unhealthy after %d failures, threshold is %d",
+			storeFailureThreshold-1, storeFailureThreshold)
+	}
+}
+
+// TestRecordStoreResult_FlipsAtThreshold confirms health status flips to
+// NOT_SERVING (via onCriticalDependencyLost -> cp.healthServer) exactly
+// when the Nth consecutive failure lands, not before.
+func TestRecordStoreResult_FlipsAtThreshold(t *testing.T) {
+	cp := newTestControlPlane(t)
+	dummyErr := fmt.Errorf("simulated persistent write failure")
+
+	for i := 0; i < storeFailureThreshold; i++ {
+		cp.recordStoreResult(dummyErr)
+	}
+
+	if !cp.storeUnhealthy {
+		t.Fatalf("did not flip unhealthy after %d consecutive failures", storeFailureThreshold)
+	}
+
+	resp, err := cp.healthServer.Check(context.Background(), &healthpb.HealthCheckRequest{
+		Service: ServiceName,
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if resp.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+		t.Errorf("gRPC health status = %v, want NOT_SERVING after threshold breach", resp.Status)
+	}
+}
+
+// TestRecordStoreResult_RecoversOnNextSuccess confirms a single success
+// after crossing the failure threshold clears the unhealthy state and
+// flips gRPC health back to SERVING — the documented asymmetric
+// recovery behavior (fail-fast, recover-fast).
+func TestRecordStoreResult_RecoversOnNextSuccess(t *testing.T) {
+	cp := newTestControlPlane(t)
+	dummyErr := fmt.Errorf("simulated persistent write failure")
+
+	for i := 0; i < storeFailureThreshold; i++ {
+		cp.recordStoreResult(dummyErr)
+	}
+	if !cp.storeUnhealthy {
+		t.Fatal("precondition failed: expected unhealthy state before testing recovery")
+	}
+
+	cp.recordStoreResult(nil) // one success
+
+	if cp.storeUnhealthy {
+		t.Fatal("did not recover after a single success post-threshold")
+	}
+	if cp.storeFailureCount != 0 {
+		t.Errorf("storeFailureCount = %d, want 0 after a success", cp.storeFailureCount)
+	}
+
+	resp, err := cp.healthServer.Check(context.Background(), &healthpb.HealthCheckRequest{
+		Service: ServiceName,
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if resp.Status != healthpb.HealthCheckResponse_SERVING {
+		t.Errorf("gRPC health status = %v, want SERVING after recovery", resp.Status)
+	}
+}
+
+// TestRecordStoreResult_SuccessResetsCounterBelowThreshold confirms an
+// intermittent success in the middle of a failure streak resets the
+// consecutive counter, matching the documented "consecutive, not
+// cumulative" semantics — fail, fail, succeed, fail, fail should never
+// trip the threshold even though 4 total failures occurred.
+func TestRecordStoreResult_SuccessResetsCounterBelowThreshold(t *testing.T) {
+	cp := newTestControlPlane(t)
+	dummyErr := fmt.Errorf("simulated intermittent failure")
+
+	cp.recordStoreResult(dummyErr)
+	cp.recordStoreResult(dummyErr)
+	cp.recordStoreResult(nil) // resets streak
+	cp.recordStoreResult(dummyErr)
+	cp.recordStoreResult(dummyErr)
+
+	if cp.storeUnhealthy {
+		t.Fatal("flipped unhealthy despite the failure streak being broken by a success partway through")
+	}
+	if cp.storeFailureCount != 2 {
+		t.Errorf("storeFailureCount = %d, want 2 (only counts since the last success)", cp.storeFailureCount)
+	}
+}
+
+// TestRecordStoreResult_ConcurrentCallsDontRace exercises
+// recordStoreResult from many goroutines simultaneously, mixing success
+// and failure outcomes. This test's job is to fail under `go test -race`
+// if the storeFailureMu guard is ever removed or bypassed — it
+// intentionally does not assert a specific final state, since the
+// interleaving of concurrent mixed outcomes is nondeterministic by
+// design.
+func TestRecordStoreResult_ConcurrentCallsDontRace(t *testing.T) {
+	cp := newTestControlPlane(t)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			if n%2 == 0 {
+				cp.recordStoreResult(fmt.Errorf("simulated failure %d", n))
+			} else {
+				cp.recordStoreResult(nil)
+			}
+		}(i)
+	}
+	wg.Wait()
 }

@@ -8,8 +8,8 @@ This specification serves as the master architectural reference and step-by-step
 
 1. [Architectural Context & Design Paradigms](#1-architectural-context--design-paradigms)
 2. [Task 1: Go-to-C IPC Feedback & Containment Map](#2-task-1-go-to-c-ipc-feedback--containment-map) [COMPLETED]
-3. [Task 2: Standard gRPC Health Checking Protocol](#3-task-2-standard-grpc-health-checking-protocol)
-4. [Task 3: Process Exit Lifecycle (sched_process_exit)](#4-task-3-process-exit-lifecycle)
+3. [Task 2: Standard gRPC Health Checking Protocol](#3-task-2-standard-grpc-health-checking-protocol) [COMPLETED]
+4. [Task 3: Process Exit Lifecycle (sched_process_exit)](#4-task-3-process-exit-lifecycle) [COMPLETED]
 5. [Task 4: SSH Wish Hardening & MCP Metrics](#5-task-4-ssh-wish-hardening--mcp-metrics)
 6. [Verification & Testing Suite](#6-verification--testing-suite)
 
@@ -67,36 +67,8 @@ Using this standard provides key advantages:
 *   **Decoupled Audits**: The checker does not need administrative privileges or authentication keys to perform basic availability audits, keeping credentials out of the safety loop.
 
 ### A. Go Subsystem Changes (`kb-control-plane/`) — *Tejaswini*
-1.  **Register Health Server in `internal/controlplane/controlplane.go`**:
-    Import the standard health check packages and register the service during Start:
-    ```go
-    import (
-        "google.golang.org/grpc/health"
-        healthpb "google.golang.org/grpc/health/grpc_health_v1"
-    )
 
-    type ControlPlane struct {
-        // ...
-        healthServer *health.Server
-    }
-
-    func (cp *ControlPlane) Start() error {
-        // ...
-        cp.healthServer = health.NewServer()
-        healthpb.RegisterHealthServer(cp.grpc, cp.healthServer)
-        
-        // Mark the primary service status as SERVING
-        cp.healthServer.SetServingStatus("kb.KernelBorderlands", healthpb.HealthCheckResponse_SERVING)
-        return nil
-    }
-
-    func (cp *ControlPlane) Stop() {
-        // Mark as NOT_SERVING prior to shutting down sockets
-        cp.healthServer.SetServingStatus("kb.KernelBorderlands", healthpb.HealthCheckResponse_NOT_SERVING)
-        cp.grpc.GracefulStop()
-        cp.store.Close()
-    }
-    ```
+- **TASK-2 COMPLETED**
 
 ### B. Rust Subsystem Changes (`kb-checker/`) — *Pardhu Varma*
 
@@ -116,47 +88,8 @@ By intercepting `sched_process_exit` directly in Ring 0, we can immediately flus
 - **TASK-3 COMPLETED**
 
 ### B. Go Subsystem Changes (`kb-control-plane/`) — *Tejaswini*
-1.  **Define Go Struct in `internal/ipc/types.go`**:
-    ```go
-    type ProcessExitMsg struct {
-        PID        uint32
-        ExitTimeNs int64
-        ExitCode   uint32
-    }
-    ```
-2.  **Handle Packet inside Go Listener (`internal/ipc/listener.go`)**:
-    Add `MSG_TYPE_PROCESS_EXIT = 4` case route to the packet decoder:
-    ```go
-    case 4: // MSG_TYPE_PROCESS_EXIT
-        var exitFrame ProcessExitMsg
-        binary.Read(buf, binary.LittleEndian, &exitFrame)
-        l.handler.OnProcessExit(&exitFrame)
-    ```
-3.  **Process Termination in `controlplane.go`**:
-    ```go
-    func (cp *ControlPlane) OnProcessExit(msg *ipc.ProcessExitMsg) {
-        // Delete volatile cache entries to prevent PID reuse vulnerabilities
-        cp.commCache.Delete(msg.PID)
-        
-        // Push exit details to L2 DB
-        if err := cp.store.TerminateProcessState(msg.PID, msg.ExitTimeNs, msg.ExitCode); err != nil {
-            log.Printf("[KB] store term: %v", err)
-        }
-        log.Printf("[KB] Process PID=%d terminated (Code: %d)", msg.PID, msg.ExitCode)
-    }
-    ```
-4.  **Update L2 Database in `internal/store/store.go`**:
-    Execute an SQLite query to mark the process status:
-    ```go
-    func (s *Store) TerminateProcessState(pid uint32, exitTime int64, code uint32) error {
-        _, err := s.db.Exec(`
-            UPDATE process_states 
-            SET status = 'TERMINATED', last_seen = ?, exit_code = ? 
-            WHERE pid = ? AND status = 'RUNNING'
-        `, exitTime, code, pid)
-        return err
-    }
-    ```
+
+- **TASK-3 COMPLETED**
 
 ---
 

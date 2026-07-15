@@ -9,6 +9,12 @@ type ContainmentCmdMsg struct {
 	Reason [64]byte
 }
 
+type ProcessExitMsg struct {
+	PID        uint32
+	ExitTimeNs int64
+	ExitCode   uint32
+}
+
 // Containment levels — keep in sync with kb_common.h
 const (
 	ContainmentNone      uint32 = 0

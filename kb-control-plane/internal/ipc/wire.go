@@ -69,6 +69,7 @@ type ZoneTransitionMsg struct {
 type MessageHandler interface {
     OnProcessState(msg *ProcessStateMsg)
     OnZoneTransition(msg *ZoneTransitionMsg)
+    OnProcessExit(msg *ProcessExitMsg)
 }
 
 func readFloat64(buf []byte, off int) (float64, int) {
@@ -131,6 +132,19 @@ func parseZoneTransition(buf []byte) (*ZoneTransitionMsg, error) {
     return msg, nil
 }
 
+func parseProcessExit(buf []byte) (*ProcessExitMsg, error) {
+    const expected = 20
+    if len(buf) < expected {
+        return nil, fmt.Errorf("process exit: want %d bytes got %d", expected, len(buf))
+    }
+    off := 4 // skip header
+    msg := &ProcessExitMsg{}
+    msg.PID        = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.ExitTimeNs = int64(binary.LittleEndian.Uint64(buf[off:])); off += 8
+    msg.ExitCode   = binary.LittleEndian.Uint32(buf[off:])
+    return msg, nil
+}
+
 type Reader struct{ conn net.Conn; handler MessageHandler }
 
 func NewReader(conn net.Conn, h MessageHandler) *Reader { return &Reader{conn, h} }
@@ -167,6 +181,10 @@ func (r *Reader) ReadLoop() error {
         case WireMsgZoneTransition:
             if msg, err := parseZoneTransition(buf); err == nil {
                 r.handler.OnZoneTransition(msg)
+            }
+        case MsgTypeProcessExit:
+            if msg, err := parseProcessExit(buf); err == nil {
+                r.handler.OnProcessExit(msg)
             }
         }
     }

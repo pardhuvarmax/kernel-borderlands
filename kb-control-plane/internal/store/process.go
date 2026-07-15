@@ -243,3 +243,9 @@ func (s *Store) ListAll() []*CachedState {
 	})
 	return out
 }
+
+func (s *Store) TerminateProcessState(pid uint32, exitTime int64, code uint32) error {
+	s.l1.Delete(pid)
+	_, err := s.db.Exec(`DELETE FROM process_state WHERE pid = ?`, pid)
+	return err
+}
