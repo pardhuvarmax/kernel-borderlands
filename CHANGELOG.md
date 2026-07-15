@@ -9,6 +9,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 ### Added
 - **Process Exit Lifecycle (`kb-control-plane`)**: Implemented packet routing and decoding for `MsgTypeProcessExit` (`4`) to immediately flush stale L1 memory cache and L2 SQLite process records upon process termination, preventing PID reuse vulnerabilities. [Tejaswini4119]
 - **Process Exit Unit Tests (`kb-control-plane`)**: Added unit and integration tests in `controlplane_test.go` and `wire_test.go` to verify cache eviction and SQL deletion. [Tejaswini4119]
+- **SSH Hardening & MCP Specs (`docs`)**: Added Task 4 implementation plan details for SSH Wish hardening and MCP metrics integration. [Tejaswini4119]
 - **eBPF Rate Limiting (`kb-core`)**: Implemented hybrid BPF token buckets using Task Local Storage and LRU Hash Maps. 
 - **Deep Resource Isolation (`kb-core`)**: Upgraded rate limiting to track limits by `PID + Resource ID` (e.g., Destination IP, Syscall ID) to prevent smoke-grenade sensor evasion.
 - **Telemetry Batching (`kb-core`)**: Added `KB_EVT_DROPPED_TELEMETRY` event to accurately aggregate and report dropped payloads to the userspace behavior engine.
@@ -28,7 +29,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ### July 2026
 
-*   **2026-07-15** - process exit lifecycle implementation, cache flushes & unit tests (*Tejaswini*)
+*   **2026-07-15** - process exit lifecycle implementation, cache flushes, unit tests & Task 4 plan (*Tejaswini*)
 *   **2026-07-14** - eBPF token bucket rate limiting, telemetry batching, and deep resource isolation (*PardhuVarma*)
 *   **2026-07-14** - gap work implementation, LSM hook return corrections & IPC restore tests (*PardhuVarma*)
 *   **2026-07-14** - readme updates (*Rupa Karedla*)
