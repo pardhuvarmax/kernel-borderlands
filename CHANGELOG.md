@@ -19,6 +19,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 - **IPC Restore Test (`kb-core`)**: Added dedicated python integration test script `kb-core/tests/test_restore_ipc.py` to mock control plane containment commands.
 
 ### Changed
+- **SSH Hardening Architecture Spec (`docs`)**: Refactored the Task 4 SSH Hardening design spec to move the network-facing SSH server into `kbd` (control plane daemon) and make `kb-tui` a pure subprocess driven over PTY stdin/stdout. [Tejaswini4119]
 - **Containment Restore path correctness (`kb-core`)**: Implemented return check for `bpf_map_delete_elem` and `bpf_map_update_elem` in `kbd_sensor.c`, logging deletion/update failures to stderr.
 - **Bounded logging outputs (`kb-core`)**: Bounded `cmd->reason` string printing to 64 bytes (`%.64s`) to avoid out-of-bound memory reads when logs print non-null-terminated reason strings.
 - **LSM BPF Hook Verifications (`kb-core`)**: Modified LSM socket hook return values (`kb_lsm_socket_connect`, `kb_lsm_socket_bind`, `kb_lsm_file_mprotect`) in `kbd_sensor.bpf.c` to return `-13` (`-EACCES`) instead of `-1` to fix modern kernel verifier rejection.
@@ -29,7 +30,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ### July 2026
 
-*   **2026-07-15** - process exit lifecycle implementation, cache flushes, unit tests & Task 4 plan (*Tejaswini*)
+*   **2026-07-15** - process exit lifecycle implementation, cache flushes, unit tests, and refactored SSH daemon-side architecture spec (*Tejaswini*)
 *   **2026-07-14** - eBPF token bucket rate limiting, telemetry batching, and deep resource isolation (*PardhuVarma*)
 *   **2026-07-14** - gap work implementation, LSM hook return corrections & IPC restore tests (*PardhuVarma*)
 *   **2026-07-14** - readme updates (*Rupa Karedla*)
