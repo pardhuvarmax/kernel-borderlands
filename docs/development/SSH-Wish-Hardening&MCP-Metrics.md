@@ -1,16 +1,61 @@
-# Implementation Plan - Task 4: SSH Wish Hardening & MCP Metrics
+# Implementation Plan - Task 4: SSH Hardening & MCP Metrics
 
 ## Goal Description
 Task 4 focuses on two areas:
-1. **TUI SSH Hardening**: Transition the `kb-tui` service from regenerating SSH host keys on every startup (which causes MITM warnings) to loading a persistent host key from `/etc/kb/tui_host_key`, and validating authorized public keys.
-2. **MCP Metrics Integration**: Expose host/system statistics through the Model Context Protocol (MCP) server `kb.get_statistics` tool by querying the Control Plane daemon (`kbd`) via gRPC.
+1. **Control Plane SSH Hardening**: Add a hardened SSH service to `kbd` (the Control Plane daemon) responsible for authenticating remote operators via persistent host key + authorized public keys, allocating a PTY, and launching the `kb-tui` interface. SSH no longer lives inside `kb-tui`.
+2. **MCP Metrics Integration**: Expose host/system statistics through the Model Context Protocol (MCP) server `kb.get_statistics` tool by querying `kbd` via gRPC.
+
+---
+
+## Architecture
+
+SSH is a network-facing service and belongs to the daemon, not the UI. `kb-tui` is a pure remote operator interface driven over stdin/stdout and IPC/gRPC — it should have no knowledge of sockets, host keys, or authentication.
+
+```
+SSH Client
+      │
+      ▼
+kbd
+├── HTTP
+├── gRPC
+├── IPC
+├── SSH   ← moved here
+└── Policy
+      │
+      spawn
+      ▼
+Rust kb-tui
+```
+
+### Session Flow
+```
+Operator
+  ssh kb@host
+      ↓
+  kbd
+      ↓
+  Validate host key
+      ↓
+  Validate authorized_keys
+      ↓
+  Allocate PTY
+      ↓
+  Launch kb-tui
+      ↓
+  Attach stdin/stdout
+      ↓
+  kb-tui
+      ↓
+  IPC/gRPC
+      ↓
+  kbd backend
+```
 
 ---
 
 ## Proposed Changes
 
 ### 1. Control Plane & gRPC API (`kb-control-plane/`)
-We need to update the Control Plane's gRPC interface to expose the system metrics so the MCP server (or TUI) can fetch them.
 
 #### [MODIFY] `proto/kb.proto`
 Add an empty request message, a statistics response message, and register the `GetSystemStats` RPC method.
@@ -24,7 +69,7 @@ message SystemStats {
 
 service KernelBorderlands {
     // ... existing RPCs ...
-    
+
     // Query global telemetry stats and process volumes
     rpc GetSystemStats(Empty) returns (SystemStats);
 }
@@ -47,77 +92,87 @@ func (cp *ControlPlane) GetSystemStats(
 
 ---
 
-### 2. TUI SSH Hardening (`kb-op/kb-tui/`)
+### 2. Control Plane SSH Service (`kb-control-plane/internal/ssh/`)
 
-#### [NEW] `kb-op/kb-tui/cmd/main.go`
-Create the entrypoint for the TUI, loading the persistent host key from `/etc/kb/tui_host_key` and implementing public key authentication.
+#### [NEW] Package layout
+```
+internal/
+    ssh/
+        auth.go       // authorized_keys parsing & validation
+        hostkey.go    // persistent host key load/generate
+        server.go      // wish server setup, listen/serve
+        session.go     // PTY allocation, kb-tui process spawn, attach stdio
+        config.go      // paths, addr, key policy
+        README.md
+```
+
+Responsibilities:
+* Load persistent host key (generate once if absent, never regenerate on restart)
+* Validate authorized public keys (public-key auth only, no passwords)
+* Run the Wish SSH server
+* Allocate a PTY per session
+* Manage session lifecycle (connect, resize, disconnect, logging)
+* Spawn and attach the `kb-tui` binary as a subprocess, wiring its stdin/stdout to the SSH session
+
+Hardening details to include in this section:
+* Persistent host key stored at `/etc/kb/ssh_host_ed25519_key` (renamed — see naming note below), Ed25519
+* `/etc/kb/authorized_keys` for authorized public keys, public-key auth only (no password fallback)
+* Per-session PTY allocation
+* Session logging (connect/disconnect, source IP, key fingerprint)
+* Fallback to a local path only in dev, with a clear warning — production should hard-fail if `/etc/kb` isn't writable/readable rather than silently falling back
+
+#### [MODIFY] `cmd/kbd/main.go`
+Wire the SSH service into daemon startup alongside the other transports:
 ```go
-package main
-
-import (
-	"log"
-	"os"
-	"path/filepath"
-
-	"github.com/charmbracelet/wish"
-	"github.com/gliderlabs/ssh"
-)
-
-func validateAuthorizedKeys(key ssh.PublicKey) bool {
-	// Authorized key validation logic
-	return true
-}
-
-func StartSSH() {
-	hostKeyPath := "/etc/kb/tui_host_key"
-	
-	// Create directory if it doesn't exist (if permissions allow, otherwise fallback to local dir)
-	if err := os.MkdirAll(filepath.Dir(hostKeyPath), 0755); err != nil {
-		log.Printf("Warning: failed to create /etc/kb directory: %v, using local fallback", err)
-		hostKeyPath = "./tui_host_key"
-	}
-
-	s, err := wish.NewServer(
-		wish.WithAddress("0.0.0.0:2222"),
-		wish.WithHostKeyPath(hostKeyPath),
-		wish.WithPublicKeyAuth(func(ctx ssh.Context, key ssh.PublicKey) bool {
-			return validateAuthorizedKeys(key)
-		}),
-	)
-	if err != nil {
-		log.Fatalf("Failed to create SSH server: %v", err)
-	}
-
-	log.Printf("Starting SSH server on 0.0.0.0:2222 (Host Key: %s)", hostKeyPath)
-	if err := s.ListenAndServe(); err != nil {
-		log.Fatalf("SSH server shut down: %v", err)
-	}
-}
-
 func main() {
-	StartSSH()
+	cp := controlplane.New(...)
+
+	go cp.StartHTTP()
+	go cp.StartGRPC()
+	go cp.StartIPC()
+
+	if err := ssh.Start(cp); err != nil {
+		log.Fatalf("failed to start SSH service: %v", err)
+	}
+
+	cp.Run()
 }
 ```
 
 ---
 
-### 3. MCP Server & Metrics Gateway (`kb-op/kb-mcp/`)
+### 3. `kb-op/kb-tui/` — plain Rust crate
+```
+kb-op/
+    kb-tui/
+        Cargo.toml
+        src/
+            main.rs
+            app.rs
+            ui/
+            widgets/
+            ipc/
+```
+`kb-tui` must not contain: Wish, `gliderlabs/ssh`, host key loading, `authorized_keys` handling, or any SSH configuration. Its responsibility is limited to:
+* stdin / stdout / terminal resize handling
+* IPC/gRPC calls to `kbd` for data
+
+No network-facing code of any kind.
+
+---
+
+### 4. MCP Server & Metrics Gateway (`kb-op/kb-mcp/`)
 
 #### [NEW] `kb-op/kb-mcp/main.go`
-Create the entrypoint for the Model Context Protocol (MCP) server. It will dial the Control Plane's gRPC socket and expose the `kb.get_statistics` JSON-RPC tool.
+Entrypoint for the Model Context Protocol (MCP) server. Dials the Control Plane's gRPC socket and exposes the `kb.get_statistics` JSON-RPC tool. This component is independent of the SSH service.
 ```go
 package main
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
-	"net"
-	"os"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 )
 
@@ -136,19 +191,38 @@ func getSystemStatistics(client pb.KernelBorderlandsClient) (string, error) {
 }
 
 func main() {
-	// Basic MCP server logic (JSON-RPC stdio transport) or client stub
 	log.Println("MCP server starting...")
 }
 ```
 
 ---
 
+## Naming Note
+
+The host key belongs to the SSH service provided by `kbd`, not to the TUI. Rename:
+```
+/etc/kb/tui_host_key
+```
+to
+```
+/etc/kb/ssh_host_ed25519_key
+```
+(or `/etc/kb/kbd_host_key`). This leaves room for future operator interfaces beyond `kb-tui` without implying the key is UI-specific.
+
+---
+
 ## Verification Plan
 
 ### Automated Tests
-Run `go test ./...` in the `kb-control-plane` directory to ensure that modifying the gRPC service definition does not break any existing code.
+Run `go test ./...` in `kb-control-plane` to ensure the new `GetSystemStats` RPC and the new `internal/ssh` package don't break existing code. Add unit tests for `internal/ssh`: host key load/persist, authorized_keys parsing, and rejection of unauthorized keys.
 
 ### Manual Verification
 1. Run `make proto` inside `kb-control-plane` to regenerate Protobuf files.
-2. Build the control plane and ensure the server implements the `GetSystemStats` RPC method.
-3. Test that the Wish SSH Server loads `/etc/kb/tui_host_key` (or falls back to local path if permission denied) and serves on port 2222.
+2. Build `kbd` and confirm it starts HTTP, gRPC, IPC, and SSH services together.
+3. Confirm the host key at `/etc/kb/ssh_host_ed25519_key` is generated once and persists across restarts (no MITM warning on reconnect).
+4. Run `ssh kb@localhost` and confirm:
+   ```
+   kbd → SSH → validates key → launches kb-tui → Ratatui appears
+   ```
+5. Confirm an unauthorized public key is rejected.
+6. Confirm `kb-op/kb-tui` builds as a plain Rust crate with no SSH/network dependencies.
