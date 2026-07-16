@@ -7,8 +7,8 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 ## [Unreleased] - 2026-07-16
 
 ### Added
-- **AADS Real UDS Verification Guide & Script (`docs/development/control-aads`)**: Added a guide and helper Python script `tests/verify_real_connection.py` to run live connection integration tests between the Python AADS client and the Go control plane. [PardhuVarma]
-- **AADS gRPC-over-UDS Client & Ray Actors (`kb-aads`)**: Implemented the Python gRPC client in `comms/grpc_client.py` covering all `kb.proto` methods, created a UDS socket integration test suite with `pytest`, decorated base agents to leverage Ray remote actors, and structured the JJE consensus quorum model. [PardhuVarma]
+- **AADS Real UDS Verification Guide & Script (`docs/development/control-aads`)**: Added a guide and helper Python script `tests/verify_real_connection.py` to run live connection integration tests between the Python AADS client and the Go control plane. [Karthik]
+- **AADS gRPC-over-UDS Client & Ray Actors (`kb-aads`)**: Implemented the Python gRPC client in `comms/grpc_client.py` covering all `kb.proto` methods, created a UDS socket integration test suite with `pytest`, decorated base agents to leverage Ray remote actors, and structured the JJE consensus quorum model. [Karthik]
 - **AADS Development Plan (`docs/development/control-aads`)**: Created the comprehensive roadmap and architectural blueprint for migrating python agents to Ray remote actors, implementing JJE consensus quorum, integrating gRPC-over-UDS communications, configuring Ray RLlib multi-agent reinforcement learning, and enabling Ray mTLS cluster encryption. [PardhuVarma]
 - **Process Exit Lifecycle (`kb-control-plane`)**: Implemented packet routing and decoding for `MsgTypeProcessExit` (`4`) to immediately flush stale L1 memory cache and L2 SQLite process records upon process termination, preventing PID reuse vulnerabilities. [Tejaswini4119]
 - **Process Exit Unit Tests (`kb-control-plane`)**: Added unit and integration tests in `controlplane_test.go` and `wire_test.go` to verify cache eviction and SQL deletion. [Tejaswini4119]
@@ -37,7 +37,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ### July 2026
 
-*   **2026-07-16** - AADS gRPC-over-UDS client, UDS test suite, Ray remote actor base agents, JJE consensus, real connection verification script, and development plan (*PardhuVarma*)
+*   **2026-07-16** - AADS gRPC-over-UDS client, UDS test suite, Ray remote actor base agents, JJE consensus, real connection verification script, and development plan (*Karthik*)
 *   **2026-07-15** - process exit lifecycle implementation, cache flushes, unit tests, and refactored SSH daemon-side architecture spec (*Tejaswini*); updated TUI README for Ratatui and kbd SSH delegation (*PardhuVarma*)
 *   **2026-07-14** - eBPF token bucket rate limiting, telemetry batching, and deep resource isolation (*PardhuVarma*)
 *   **2026-07-14** - gap work implementation, LSM hook return corrections & IPC restore tests (*PardhuVarma*)
