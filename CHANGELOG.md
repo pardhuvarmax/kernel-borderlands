@@ -4,9 +4,10 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ---
 
-## [Unreleased] - 2026-07-15
+## [Unreleased] - 2026-07-16
 
 ### Added
+- **AADS Development Plan (`docs/development/control-aads`)**: Created the comprehensive roadmap and architectural blueprint for migrating python agents to Ray remote actors, implementing JJE consensus quorum, integrating gRPC-over-UDS communications, and configuring Ray RLlib multi-agent reinforcement learning. [PardhuVarma]
 - **Process Exit Lifecycle (`kb-control-plane`)**: Implemented packet routing and decoding for `MsgTypeProcessExit` (`4`) to immediately flush stale L1 memory cache and L2 SQLite process records upon process termination, preventing PID reuse vulnerabilities. [Tejaswini4119]
 - **Process Exit Unit Tests (`kb-control-plane`)**: Added unit and integration tests in `controlplane_test.go` and `wire_test.go` to verify cache eviction and SQL deletion. [Tejaswini4119]
 - **SSH Hardening & MCP Specs (`docs`)**: Added Task 4 implementation plan details for SSH Wish hardening and MCP metrics integration. [Tejaswini4119]
@@ -34,6 +35,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ### July 2026
 
+*   **2026-07-16** - AADS development plan for Ray migration, JJE consensus, gRPC-over-UDS, and RLlib MARL integration (*PardhuVarma*)
 *   **2026-07-15** - process exit lifecycle implementation, cache flushes, unit tests, and refactored SSH daemon-side architecture spec (*Tejaswini*); updated TUI README for Ratatui and kbd SSH delegation (*PardhuVarma*)
 *   **2026-07-14** - eBPF token bucket rate limiting, telemetry batching, and deep resource isolation (*PardhuVarma*)
 *   **2026-07-14** - gap work implementation, LSM hook return corrections & IPC restore tests (*PardhuVarma*)
