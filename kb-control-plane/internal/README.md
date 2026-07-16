@@ -92,29 +92,42 @@ Responsibilities:
 - Behavioral event history
 
 ---
+ 
+### ssh/
+ 
+Hardened operator console SSH service.
+ 
+Responsibilities:
+ 
+- Setup and run the Wish SSH server
+- Load/validate persistent host keys
+- Validate authorized public keys (no password fallback)
+- Handle pseudo-terminal (PTY) allocation per session
+- Spawn and attach the `kb-tui` dashboard process
+ 
+---
 
 ## Runtime Flow
 
 ```text
-                  Core Plane
-                       │
-                       ▼
-                 IPC Receiver
-                       │
-                       ▼
-              Control Plane Runtime
-                       │
-          ┌────────────┼────────────┐
-          │            │            │
-          ▼            ▼            ▼
-       Store        Policy       Audit
-          │            │
-          └──────┬─────┘
-                 ▼
-          Enforcement
-                 │
-                 ▼
-         Enforcement Plane
+   Core Plane              Operator
+       │                       │ (SSH)
+       ▼                       ▼
+  IPC Receiver             SSH Server
+       │                       │ (PTY)
+       ▼                       ▼
+  Control Plane Runtime ◄─── kb-tui (gRPC/IPC)
+       │
+  ┌────┼────┐
+  ▼    ▼    ▼
+Store Policy Audit
+  │    │
+  └──┬─┘
+     ▼
+Enforcement
+     │
+     ▼
+Enforcement Plane
 ```
 
 ---
@@ -142,6 +155,7 @@ internal/
 ├── enforcement/     Enforcement coordination
 ├── ipc/             Core ↔ Control IPC transport
 ├── policy/          Behavioral policy engine
+├── ssh/             Hardened SSH server and TUI manager
 └── store/           Runtime behavioral state store
 ```
 
