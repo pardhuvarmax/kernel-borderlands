@@ -22,11 +22,20 @@ Communicates with `kbd_sensor` over `/run/kb/kbd.sock` (formerly `/var/run/kbd.s
     -   `kb_wire_attack_rule` $\to$ Exactly **220 bytes** (LE, Packed).
 *   **Dynamic Rules Handshake**: On connection start, Go compiles `rules.yaml` and transmits them over the bridge to dynamically update the C sensor's behavior rules list.
 
+### 3. Hardened SSH Service
+A secure, network-facing SSH console service embedded in the `kbd` daemon:
+*   **Persistent Host Keys**: Uses Ed25519 host keys stored at `/etc/kb/ssh_host_ed25519_key` (persists to prevent MITM warnings on operator reconnection).
+*   **Public-Key Authentication**: Parses `/etc/kb/authorized_keys` to authenticate connections (no password fallback allowed).
+*   **PTY Allocation & Subprocess Spawning**: Allocates a PTY per session and attaches the stdin/stdout/stderr of the local `kb-tui` binary to the SSH session.
+*   **Secure Auditing**: Logs operator logins, source IPs, and key fingerprints.
+*   **Development Fallback**: Detects development or testing modes to fall back to workspace-local files with diagnostic warnings.
+
 ---
 
 ## Directory Structure
 *   **`cmd/kbd/`**: Daemon executable entrypoint.
 *   **`internal/controlplane/`**: Core daemon runtime and gRPC handlers.
+*   **`internal/ssh/`**: Hardened SSH server, public key auth validator, and PTY session lifecycle wrapper.
 *   **`internal/store/`**: L1/L2 hybrid database state store.
 *   **`internal/ipc/`**: UDS wire parsing, socket listeners, and rules serialization.
 *   **`internal/policy/`**: Threshold policies and auto-containment configuration.
