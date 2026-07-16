@@ -6,8 +6,6 @@
 - `install_python.sh` — Python 3.11 + venv
 - `install_node.sh`   — Node.js 20+
 - `install_rust.sh`   — Rust + cargo
-- `install_kafka.sh`  — Apache Kafka + ZooKeeper
-- `install_redis.sh`  — Redis
 - `verify.sh`         — Verify all dependencies installed correctly
 
 ## Run
