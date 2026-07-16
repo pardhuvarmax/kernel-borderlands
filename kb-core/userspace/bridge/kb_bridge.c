@@ -14,10 +14,16 @@
 #include <unistd.h>
 #include <time.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <stdlib.h>
 
-
+// Connect-time read deadline. Without this, a blocking read() on this fd
+// for a frame the peer never sends (e.g. kbd_sensor's read_rules_from_bridge()
+// or read_sensitive_paths_from_bridge() waiting on a push kbd doesn't make)
+// hangs forever instead of failing fast into the documented
+// "use compiled-in defaults" fallback path both callers already have.
+#define KB_BRIDGE_CONNECT_READ_TIMEOUT_SEC 2
 
 #pragma pack(push, 1)
 struct kb_wire_process_state {
@@ -80,6 +86,15 @@ static int connect_once(const char *sock_path)
         errno = saved_errno;
         return -1;
     }
+
+    struct timeval tv = { .tv_sec = KB_BRIDGE_CONNECT_READ_TIMEOUT_SEC, .tv_usec = 0 };
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        int saved_errno = errno;
+        close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+
     return fd;
 }
 

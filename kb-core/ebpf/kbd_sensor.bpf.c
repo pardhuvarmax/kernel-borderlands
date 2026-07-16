@@ -625,7 +625,33 @@ int BPF_PROG(kb_lsm_file_open, struct file *file, int mask)
     char path_buf[64] = {};
     int len = bpf_d_path(&file->f_path, path_buf, sizeof(path_buf));
     if (len < 0) return 0;
+    if (len > 63) len = 63; // defensive clamp — path_buf is 64 bytes
 
+    // bpf_d_path only guarantees the string itself is written and
+    // NUL-terminated; it does not guarantee the remainder of the buffer
+    // past the terminator is zeroed. is_sensitive_kernel_path's map
+    // lookups compare the full fixed-size 64-byte key, not just the
+    // NUL-terminated string, so any leftover stack bytes past the
+    // terminator make an otherwise-correct entry silently fail to match.
+    // Force exact zero-padding here so it's byte-identical to how
+    // populate_sensitive_paths()/apply_sensitive_paths_frame() build keys.
+    #pragma unroll
+    for (int i = 63; i >= 0; i--) {
+        if (i >= len) path_buf[i] = 0;
+    }
+
+    // Sensitive-path blocking is containment-triggered, not blanket: it
+    // only applies to a process an operator has already put into
+    // containment (level >= 2), same as every other LSM hook below. An
+    // earlier version of this hook blocked ALL processes unconditionally
+    // regardless of containment status — including sudo/PAM reading
+    // /etc/sudoers and /etc/shadow on every invocation, which made the
+    // floor entries here indistinguishable from a system-wide outage.
+    // Passive detection of sensitive-path reads still happens for every
+    // process regardless of containment, via kb_handle_openat's
+    // KB_EV_SHADOW_ACCESS/KB_EV_SUDOERS_ACCESS/KB_EV_PASSWD_ACCESS/
+    // KB_EV_SSH_KEY_ACCESS evidence flags feeding behavioral scoring —
+    // removing the hard block here does not remove that monitoring.
     if (level) {
         if (*level >= 3) {
             return -13; // Block ALL file open requests (full sandbox quarantine)
@@ -637,9 +663,6 @@ int BPF_PROG(kb_lsm_file_open, struct file *file, int mask)
         }
     }
 
-    if (is_sensitive_kernel_path(path_buf)) {
-        return -13; // Block by returning -EACCES
-    }
     return 0;
 }
 

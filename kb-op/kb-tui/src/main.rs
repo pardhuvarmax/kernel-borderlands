@@ -1,103 +1,142 @@
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{
-    backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Row, Table},
-    Terminal,
-};
-use std::{io, time::Duration};
+mod app;
+mod demo;
+mod grpc;
+mod kb;
+mod query;
+mod ui;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Setup terminal
+use std::io;
+use std::sync::Arc;
+use std::time::Duration;
+
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind};
+use crossterm::execute;
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use futures::StreamExt;
+use ratatui::backend::{Backend, CrosstermBackend};
+use ratatui::Terminal;
+use tokio::sync::{mpsc, Mutex};
+
+use app::{Action, App, AppEvent};
+use grpc::KbClient;
+use kb::kb::ContainmentRequest;
+
+type SharedClient = Arc<Mutex<Option<KbClient>>>;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Run app loop
-    let res = run_app(&mut terminal);
+    let result = run(&mut terminal).await;
 
-    // Restore terminal
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
 
-    if let Err(err) = res {
-        println!("{:?}", err);
+    if let Err(err) = result {
+        eprintln!("{err:?}");
     }
-
-	Ok(())
+    Ok(())
 }
 
-fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
+async fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
+    let mut app = App::new();
+    let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
+
+    let client: SharedClient = Arc::new(Mutex::new(None));
+    {
+        let tx = tx.clone();
+        let client = client.clone();
+        tokio::spawn(async move {
+            let c = grpc::start(tx).await;
+            *client.lock().await = c;
+        });
+    }
+
+    let mut events = EventStream::new();
+    let mut ticker = tokio::time::interval(Duration::from_millis(250));
+
     loop {
-        terminal.draw(|f| {
-            let size = f.size();
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .margin(1)
-                .constraints(
-                    [
-                        Constraint::Length(3),
-                        Constraint::Min(2),
-                        Constraint::Length(3),
-                    ]
-                    .as_ref(),
-                )
-                .split(size);
+        terminal.draw(|f| ui::draw(f, &mut app))?;
 
-            // Title
-            let title = Paragraph::new("=== Kernel Borderlands Operator Console ===")
-                .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-                .alignment(ratatui::layout::Alignment::Center)
-                .block(Block::default().borders(Borders::ALL).title("Status"));
-            f.render_widget(title, chunks[0]);
-
-            // Table of PIDs / Zones
-            let rows = vec![
-                Row::new(vec!["1234", "nginx", "SAFE", "0.00", "NONE"]),
-                Row::new(vec!["5678", "apache2", "SUSPICIOUS", "42.50", "CGROUP"]),
-                Row::new(vec!["9012", "malicious.sh", "BORDERLANDS", "88.20", "TERMINATE"]),
-            ];
-            let table = Table::new(rows, [
-                Constraint::Percentage(15),
-                Constraint::Percentage(25),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-            ])
-            .header(
-                Row::new(vec!["PID", "COMM", "ZONE", "SCORE", "CONTAINMENT"])
-                    .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            )
-            .block(Block::default().borders(Borders::ALL).title("Active Monitored Processes"))
-            .style(Style::default().fg(Color::White));
-            f.render_widget(table, chunks[1]);
-
-            // Footer
-            let footer = Paragraph::new("Press 'q' to disconnect | IPC Connection: Connected")
-                .style(Style::default().fg(Color::DarkGray))
-                .alignment(ratatui::layout::Alignment::Center)
-                .block(Block::default().borders(Borders::ALL));
-            f.render_widget(footer, chunks[2]);
-        })?;
-
-        if event::poll(Duration::from_millis(500))? {
-            if let Event::Key(key) = event::read()? {
-                if let KeyCode::Char('q') = key.code {
-                    return Ok(());
+        tokio::select! {
+            _ = ticker.tick() => {
+                app.tick();
+            }
+            maybe_event = events.next() => {
+                if let Some(Ok(Event::Key(key))) = maybe_event {
+                    if key.kind == KeyEventKind::Press {
+                        match app.handle_key(key) {
+                            Action::None => {}
+                            Action::Quit => app.should_quit = true,
+                            Action::SubmitContainment { pid, level, reason } => {
+                                spawn_containment(pid, level, reason, tx.clone(), client.clone());
+                            }
+                            Action::RunQuery(cmd) => {
+                                spawn_query(cmd, tx.clone(), client.clone());
+                            }
+                        }
+                    }
                 }
             }
+            Some(ev) = rx.recv() => {
+                app.apply_event(ev);
+            }
+        }
+
+        if app.should_quit {
+            return Ok(());
         }
     }
+}
+
+fn spawn_containment(
+    pid: u32,
+    level: kb::kb::ContainmentLevel,
+    reason: String,
+    tx: mpsc::UnboundedSender<AppEvent>,
+    client: SharedClient,
+) {
+    tokio::spawn(async move {
+        let maybe_client = client.lock().await.clone();
+        let event = match maybe_client {
+            Some(mut c) => {
+                let request = ContainmentRequest {
+                    pid,
+                    level: level as i32,
+                    reason,
+                };
+                match c.set_containment(request).await {
+                    Ok(resp) => AppEvent::ContainmentResult {
+                        pid,
+                        success: resp.into_inner().success,
+                        message: "containment request applied".to_string(),
+                    },
+                    Err(e) => AppEvent::ContainmentResult {
+                        pid,
+                        success: false,
+                        message: e.to_string(),
+                    },
+                }
+            }
+            None => AppEvent::ContainmentResult {
+                pid,
+                success: true,
+                message: "simulated — offline/demo mode, not persisted".to_string(),
+            },
+        };
+        let _ = tx.send(event);
+    });
+}
+
+fn spawn_query(cmd: String, tx: mpsc::UnboundedSender<AppEvent>, client: SharedClient) {
+    tokio::spawn(async move {
+        let maybe_client = client.lock().await.clone();
+        let lines = query::run(maybe_client, &cmd).await;
+        let _ = tx.send(AppEvent::QueryResult(lines));
+    });
 }

@@ -8,16 +8,16 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/audit"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/enforcement"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/policy"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ssh"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
+	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 // ServiceName is the gRPC health-checking service name kbd registers
@@ -108,6 +108,7 @@ func New(dbPath, policyPath string) (*ControlPlane, error) {
 		return nil, fmt.Errorf("ipc listener: %w", err)
 	}
 	cp.listener = listener
+	listener.SetSensitivePaths(p.SensitivePaths())
 
 	// Enforcer routes containment commands to the C sensor via the listener.
 	cp.enforcer = enforcement.NewEnforcer(listener)

@@ -30,9 +30,9 @@ flowchart TD
 ```
 
 ### A. Terminal Interface (`kb-tui/`)
-- **Description**: An SSH-accessible console built using Go, Bubble Tea, Lip Gloss, and Wish. It provides a keyboard-driven interface to manage process states and threat mitigations without requiring browser access.
-- **Served On**: SSH Port `2222` (wish gateway).
-- **Features**: Live process color-coded lists, real-time alert logs viewports, and keyboard execution triggers.
+- **Description**: A console built using Rust, ratatui, and tonic (gRPC). It provides a keyboard-driven interface to manage process states and threat mitigations without requiring browser access.
+- **Served On**: SSH access is provided by `kbd` itself (host keys, `authorized_keys`, PTY allocation) — `kbd` spawns `kb-tui` attached to the session. `kb-tui` connects to the control plane's `KernelBorderlands` gRPC service over the Unix domain socket at `/run/kb/kba.sock`.
+- **Features**: Live process color-coded lists, real-time alert feed, system telemetry header, an interactive query console, and keyboard execution triggers for containment actions.
 
 ### B. Web Dashboard (`kb-dashboard/`)
 - **Description**: A modern React-based visualization panel compiled with Vite and TypeScript.
@@ -56,14 +56,14 @@ flowchart TD
 # Navigate to TUI directory
 cd kb-op/kb-tui
 
-# Build the Wish SSH console binary
-go build -o kb-tui cmd/main.go
+# Build the ratatui console binary
+cargo build --release
 
-# Start the SSH server locally
-./kb-tui
+# Run locally (connects directly to kbd over /run/kb/kba.sock)
+cargo run
 
-# Connect from any terminal
-ssh operator@localhost -p 2222
+# Or, over SSH: kbd handles the SSH server and PTY spawn, kb-tui is not dialed directly
+ssh kb@kb-server
 ```
 
 ### Running the Web Dashboard

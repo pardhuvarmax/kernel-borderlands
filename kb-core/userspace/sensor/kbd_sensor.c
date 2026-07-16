@@ -400,16 +400,28 @@ static void scan_syscall_entropy(struct kbd_sensor_bpf *skel)
     }
 }
 
+// kbd currently sends at most one frame at connect time (the
+// sensitive_paths push below) — the rules push (msg_type 3) this
+// function reads for is never actually sent by production Go code. Since
+// this is a blind length-prefixed read (it must consume the bytes before
+// it can even see the msg_type field inside them), if a sensitive_paths
+// frame arrives here instead, it would otherwise be silently drained and
+// discarded, leaving nothing for read_sensitive_paths_from_bridge() to
+// read later. Stash it here instead of freeing it so that later call can
+// use it, regardless of which frame actually shows up first on the wire.
+static char     *pending_sensitive_paths_buf;
+static uint32_t  pending_sensitive_paths_len;
+
 static int read_rules_from_bridge(int fd)
 {
     uint32_t payload_len = 0;
     if (read(fd, &payload_len, 4) != 4) {
         return -1;
     }
-    
+
     char *buf = malloc(payload_len);
     if (!buf) return -1;
-    
+
     size_t total = 0;
     while (total < payload_len) {
         ssize_t n = read(fd, buf + total, payload_len - total);
@@ -419,7 +431,7 @@ static int read_rules_from_bridge(int fd)
         }
         total += n;
     }
-    
+
     if (payload_len < 8) {
         free(buf);
         return -1;
@@ -428,20 +440,124 @@ static int read_rules_from_bridge(int fd)
     uint8_t version = buf[2];
     uint8_t msg_type = buf[3];
     if (magic != 0x4B42 || version != 3 || msg_type != 3) {
-        free(buf);
+        if (magic == KB_WIRE_MAGIC && version == KB_WIRE_VERSION && msg_type == KB_WIRE_MSG_SENSITIVE_PATHS) {
+            pending_sensitive_paths_buf = buf; // ownership transferred; freed by read_sensitive_paths_from_bridge
+            pending_sensitive_paths_len = payload_len;
+        } else {
+            free(buf);
+        }
         return -1;
     }
-    
+
     uint32_t rule_count = *(uint32_t *)(buf + 4);
     size_t expected_size = 8 + rule_count * sizeof(struct kb_wire_attack_rule);
     if (payload_len < expected_size) {
         free(buf);
         return -1;
     }
-    
+
     kb_rules_load_wire((const struct kb_wire_attack_rule *)(buf + 8), rule_count);
     free(buf);
     return 0;
+}
+
+#define KB_SENSITIVE_PATH_KEY_SIZE 64
+// 4-byte header + 4-byte count + up to map-capacity (64) fixed-size keys.
+// Bounding the payload up front and reading into a fixed stack buffer
+// avoids the unbounded-malloc(payload_len) pattern read_rules_from_bridge
+// above uses — kbd is a trusted local peer, but there's no reason to
+// trust an arbitrary length here when the real maximum is known and small.
+#define KB_SENSITIVE_PATHS_MAX_PAYLOAD (8 + 64 * KB_SENSITIVE_PATH_KEY_SIZE)
+
+// Validates a sensitive-paths frame body (already fully read into buf,
+// payload_len bytes) and merges its entries into the already-loaded
+// kb_sensitive_paths BPF map, on top of the compiled-in floor
+// populate_sensitive_paths() already wrote. Shared by both the
+// stashed-frame and fresh-read paths in read_sensitive_paths_from_bridge
+// below.
+static int apply_sensitive_paths_frame(const char *buf, uint32_t payload_len, struct kbd_sensor_bpf *skel)
+{
+    if (payload_len < 8) {
+        return -1;
+    }
+    uint16_t magic = *(const uint16_t *)buf;
+    uint8_t version = buf[2];
+    uint8_t msg_type = buf[3];
+    if (magic != KB_WIRE_MAGIC || version != KB_WIRE_VERSION || msg_type != KB_WIRE_MSG_SENSITIVE_PATHS) {
+        return -1;
+    }
+
+    uint32_t count = *(const uint32_t *)(buf + 4);
+    size_t expected_size = 8 + (size_t)count * KB_SENSITIVE_PATH_KEY_SIZE;
+    if (payload_len < expected_size) {
+        return -1;
+    }
+
+    int map_fd = bpf_map__fd(skel->maps.kb_sensitive_paths);
+    if (map_fd < 0) {
+        fprintf(stderr, "apply_sensitive_paths_frame: failed to get kb_sensitive_paths map fd\n");
+        return -1;
+    }
+
+    __u32 one = 1;
+    for (uint32_t i = 0; i < count; i++) {
+        char key[KB_SENSITIVE_PATH_KEY_SIZE] = {0};
+        // Wire entries are already NUL-padded to 64 bytes by the Go
+        // sender; copy defensively and force-terminate anyway since this
+        // buffer crosses a process boundary.
+        memcpy(key, buf + 8 + (size_t)i * KB_SENSITIVE_PATH_KEY_SIZE, KB_SENSITIVE_PATH_KEY_SIZE);
+        key[KB_SENSITIVE_PATH_KEY_SIZE - 1] = '\0';
+        int err = bpf_map_update_elem(map_fd, key, &one, BPF_ANY);
+        if (err) {
+            fprintf(stderr, "[PATH AUDITOR] Failed to add operator sensitive path %s: %d\n", key, err);
+        } else {
+            printf("[PATH AUDITOR] Registered operator sensitive path prefix: %s\n", key);
+        }
+    }
+
+    return 0;
+}
+
+// Applies the operator-supplied sensitive_paths push from kbd (if any).
+// Must be called after the skeleton is loaded (the map doesn't exist
+// before that), unlike read_rules_from_bridge above which only touches a
+// userspace table and can run earlier — which is exactly why this frame
+// might already have arrived and been stashed by read_rules_from_bridge
+// (kbd sends this frame immediately at connect, before the sensor has
+// even finished loading BPF programs). Check that stash first; only fall
+// back to a fresh blocking read if nothing was stashed, in case kbd's
+// send is simply still in flight. Returns 0 on success (including "kbd
+// sent nothing to add"), -1 on any framing/read error — callers should
+// treat -1 as "compiled-in floor only, unchanged" rather than fatal.
+static int read_sensitive_paths_from_bridge(int fd, struct kbd_sensor_bpf *skel)
+{
+    if (pending_sensitive_paths_buf) {
+        int rc = apply_sensitive_paths_frame(pending_sensitive_paths_buf, pending_sensitive_paths_len, skel);
+        free(pending_sensitive_paths_buf);
+        pending_sensitive_paths_buf = NULL;
+        pending_sensitive_paths_len = 0;
+        return rc;
+    }
+
+    uint32_t payload_len = 0;
+    if (read(fd, &payload_len, 4) != 4) {
+        return -1;
+    }
+    if (payload_len < 8 || payload_len > KB_SENSITIVE_PATHS_MAX_PAYLOAD) {
+        return -1;
+    }
+
+    char buf[KB_SENSITIVE_PATHS_MAX_PAYLOAD];
+    size_t total = 0;
+    while (total < payload_len) {
+        ssize_t n = read(fd, buf + total, payload_len - total);
+        if (n <= 0) {
+            return -1;
+        }
+        total += n;
+    }
+
+    return apply_sensitive_paths_frame(buf, payload_len, skel);
 }
 
 static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
@@ -769,11 +885,18 @@ static void populate_sensitive_paths(struct kbd_sensor_bpf *skel)
         return;
     }
 
+    // /etc/passwd is deliberately NOT in this list: it holds no credential
+    // material on a modern shadow-password system, is world-readable by
+    // design, and is opened by nearly every userland tool that resolves a
+    // UID (ls -l, id, ps, sudo, ssh, ...). Kernel-blocking it (-EACCES)
+    // breaks routine system operation for negligible security benefit.
+    // Reads of it are still flagged for behavioral scoring via
+    // KB_EV_PASSWD_ACCESS in the eBPF evidence path — this list only
+    // controls the *hard* LSM block, not detection.
     const char *paths[] = {
         "/etc/shadow",
-        "/etc/passwd",
         "/etc/sudoers",
-        "/root/"
+        "/root/.ssh/"
     };
     __u32 one = 1;
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
@@ -1025,7 +1148,11 @@ int main(void)
         if (read_rules_from_bridge(bridge_fd) < 0) {
             fprintf(stderr, "kbd_sensor: failed to read rules from control plane, using default compiled rules\n");
         }
-        make_fd_nonblocking(bridge_fd);
+        // NOTE: bridge_fd is deliberately left blocking (with the
+        // connect-time SO_RCVTIMEO deadline from kb_bridge.c) until after
+        // read_sensitive_paths_from_bridge() runs below, post-skeleton-load.
+        // Switching to non-blocking here first would race that later read
+        // against EAGAIN if kbd's push hadn't fully landed yet.
     }
 
     printf("╔══════════════════════════════════════════════╗\n");
@@ -1051,6 +1178,19 @@ int main(void)
     }
 
     populate_sensitive_paths(skel);
+
+    // Merge in any operator-supplied additions from policy.yaml's
+    // sensitive_paths (see kb-control-plane/internal/policy/policy.go),
+    // pushed once by kbd right after accepting this connection. Must run
+    // after populate_sensitive_paths() — the map doesn't exist until the
+    // skeleton above is loaded. bridge_fd < 0 (no control plane yet) just
+    // means the compiled-in floor above stands alone, same as always.
+    if (bridge_fd >= 0) {
+        if (read_sensitive_paths_from_bridge(bridge_fd, skel) < 0) {
+            fprintf(stderr, "kbd_sensor: no additional sensitive paths from control plane, using compiled-in floor only\n");
+        }
+        make_fd_nonblocking(bridge_fd);
+    }
 
     err = kbd_sensor_bpf__attach(skel);
     if (err) {

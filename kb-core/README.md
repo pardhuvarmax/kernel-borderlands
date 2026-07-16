@@ -19,10 +19,10 @@ The kernel-level observability and security enforcement layer for Kernel Borderl
 
 ## eBPF Telemetry & Containment Hooks
 
-### A. Authoritative VFS LSM File Blocking (BPF LSM)
+### A. Containment-Triggered VFS LSM File Blocking (BPF LSM)
 *   **Hook**: `lsm/file_open`
 *   **Description**: Intercepts file open operations at the Virtual File System (VFS) layer after symlinks and relative directories are resolved.
-*   **Verdict**: Queries the dynamic `kb_sensitive_paths` eBPF map. Returns `-EACCES` (-13) to natively block open attempts inside kernel-space before they return to userland.
+*   **Verdict**: For a process already under operator containment at level ≥2 (Seccomp or above), queries the dynamic `kb_sensitive_paths` eBPF map and returns `-EACCES` (-13) to natively block open attempts inside kernel-space before they return to userland. Uncontained processes are never blocked — sensitive-path reads are always flagged for behavioral scoring regardless of containment state, but the hard block is targeted at already-contained processes, not blanket, so it doesn't interfere with routine operation (`sudo`, PAM, etc. reading `/etc/sudoers`/`/etc/shadow`).
 *   **Verifier-Safe Directory Traversal**: Resolves parent directories dynamically using an unrolled loop (`#pragma unroll`) to perform suffix checks without exceeding BPF verifier complexity limits.
 
 ### B. Out-of-Band Plaintext TLS Inspection

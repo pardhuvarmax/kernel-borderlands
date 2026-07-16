@@ -17,6 +17,25 @@ type Listener struct {
 	Done  chan struct{}
 
 	handler MessageHandler // set by NewListener; dispatched per-conn by ReadLoop
+
+	sensitivePathsMu sync.Mutex
+	sensitivePaths   []string // set via SetSensitivePaths, pushed to each newly-connected sensor
+}
+
+// SetSensitivePaths updates the operator-supplied sensitive-path
+// additions pushed to every sensor that connects from now on. It does
+// not retroactively push to already-connected sensors — this feature is
+// restart/reconnect-only by design, not a live reload.
+func (l *Listener) SetSensitivePaths(paths []string) {
+	l.sensitivePathsMu.Lock()
+	defer l.sensitivePathsMu.Unlock()
+	l.sensitivePaths = paths
+}
+
+func (l *Listener) getSensitivePaths() []string {
+	l.sensitivePathsMu.Lock()
+	defer l.sensitivePathsMu.Unlock()
+	return l.sensitivePaths
 }
 
 // NewListener creates a Listener that will bind to the UDS path from
@@ -94,6 +113,12 @@ func (l *Listener) Listen() error {
 		l.mu.Unlock()
 
 		log.Printf("[IPC] sensor connected: %v", conn.RemoteAddr())
+
+		if sp := l.getSensitivePaths(); len(sp) > 0 {
+			if err := SendSensitivePaths(conn, sp); err != nil {
+				log.Printf("[IPC] failed to send sensitive paths to sensor: %v", err)
+			}
+		}
 
 		go func(c net.Conn) {
 			defer func() {

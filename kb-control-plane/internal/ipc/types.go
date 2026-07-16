@@ -25,11 +25,22 @@ const (
 )
 
 // Message type + framing constants (must match C header)
+//
+// FIXED: MsgTypeContainmentCmd was 3, colliding with the (dead-code) rules
+// payload's hardcoded msgTypeRules in rules.go, and NOT matching the C
+// side's own KB_WIRE_MSG_CONTAINMENT_CMD (kb_bridge.h), which is 5.
+// kbd_sensor.c's handle_incoming_containment_cmd() checks msg_type == 5,
+// so every containment command sent with the old value 3 was silently
+// dropped — kbd would log the audit entry and report success (the sensor
+// never NACKs), but contained_pids_map was never actually updated,
+// meaning SetContainment had never worked end-to-end. Confirmed via a
+// live test: kbd logged SET_CONTAINMENT_SECCOMP for a real PID, but
+// `bpftool map dump` of contained_pids_map on the sensor came back empty.
 const (
-	MsgMagic             uint16 = 0x4B42
-	MsgTypeContainmentCmd byte  = 3
-	MsgTypeProcessExit    byte  = 4
+	MsgMagic              uint16 = 0x4B42
+	MsgTypeContainmentCmd byte   = 5
+	MsgTypeProcessExit    byte   = 4
 
-	headerSize  = 4  // magic(2) + version(1) + msgtype(1)
+	headerSize     = 4  // magic(2) + version(1) + msgtype(1)
 	cmdPayloadSize = 72 // 4 + 4 + 64
 )

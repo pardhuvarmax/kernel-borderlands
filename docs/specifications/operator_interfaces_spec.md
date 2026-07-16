@@ -34,7 +34,7 @@ By maintaining four independent surfaces, Kernel Borderlands achieves **Graceful
 |---|---|---|---|---|
 | **`kb-dashboard`** | Security Operations Center (SOC) Analysts | WebSockets (JSON stream) | - D3.js live process swarm graphs<br>- Zone distribution heatmaps<br>- Visual trend metrics | Real-time threat visual monitoring and human-in-the-loop security oversight. |
 | **`kbctl`** | DevOps / Security Engineers & CI Pipelines | gRPC / Protobuf | - Dynamic policy reloads<br>- Target process isolation<br>- Cryptographic audit exports | Scripted playbooks, CI/CD integrations, and rapid command-line overrides. |
-| **`kb-tui`** | Remote Operators & Systems Administrators | Wish SSH host (Port 2222) / Bubble Tea | - Headless process tables<br>- Live scrollable alert feeds<br>- Keyboard-driven containment | Low-bandwidth emergency triage and headless server monitoring without browser overhead. |
+| **`kb-tui`** | Remote Operators & Systems Administrators | gRPC over UDS (`/run/kb/kba.sock`) / ratatui, SSH transport provided by `kbd` | - Headless process tables<br>- Live scrollable alert feeds<br>- Keyboard-driven containment | Low-bandwidth emergency triage and headless server monitoring without browser overhead. |
 | **`kb-mcp`** | AI Agents, LLM engines, & AADS Swarm | JSON-RPC 2.0 / stdio | - Telemetry resource streams<br>- Process profile and anomaly tools<br>- AI-native prompt templates | Standardized workspace interface allowing AI tools to query states and execute containment. |
 
 ---
@@ -52,9 +52,10 @@ The web dashboard is the visual focal point of the platform. By leveraging D3.js
 - **Playbook Integration**: Allows shell script wrappers to automate recovery actions (e.g., if a high-value database process enters the `SUSPICIOUS` zone, `kbctl` can be scripted to trigger backup snapshots and reload network rules automatically).
 
 ### C. SSH Terminal Interface (`kb-op/kb-tui/`)
-The terminal console is built on the Elm architecture (Bubble Tea) and served via Wish over standard SSH on port 2222.
+The terminal console is a Rust binary built with ratatui, driven over the stdin/stdout of a PTY that `kbd` allocates and attaches after authenticating the SSH connection (SSH host keys, `authorized_keys`, and PTY handling all live in `kbd`, not in `kb-tui` itself). `kb-tui` talks to the control plane's `KernelBorderlands` gRPC service over the Unix domain socket at `/run/kb/kba.sock` — the same UDS gateway used by `kb-checker` and the Ray agent swarm.
 - **Zero Browser Dependencies**: Renders high-fidelity process tables and scrolling audit logs in standard terminal windows.
 - **Secure Remote Access**: Permits operator access over standard encrypted SSH channels, removing the need to expose web servers or HTTP gateways on production bastions.
+- **Graceful Degradation**: If `/run/kb/kba.sock` is unreachable, `kb-tui` falls back to a clearly-bannered offline/demo mode rather than failing outright.
 
 ### D. Model Context Protocol Server (`kb-op/kb-mcp/`)
 `kb-mcp` is the AI-native gateway for Kernel Borderlands. By implementing the Model Context Protocol, it allows external LLMs (such as Claude, ChatGPT, or the local AADS reinforcement learning swarm) to query system telemetry using a standardized tool-based schema.

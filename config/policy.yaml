@@ -2,6 +2,21 @@ defaults:
   suspicious:   40.0
   borderlands:  75.0
 
+# Additional paths tracked by the kernel LSM hook (lsm/file_open), on top
+# of the compiled-in floor (/etc/shadow, /etc/sudoers, /root/.ssh/) in
+# kb-core/userspace/sensor/kbd_sensor.c. Entries here are ADDITIVE ONLY —
+# they can never remove or replace the compiled-in floor. Must be
+# absolute paths, <= 63 bytes (fixed-size BPF map key), not bare "/".
+# Takes effect on kbd_sensor (re)connect — not a live reload.
+#
+# NOTE: reads of these paths are always flagged for behavioral scoring,
+# for every process. The hard -EACCES block only applies to a process
+# already under operator containment at level >= 2 (Seccomp) — it is not
+# a blanket block on normal system operation (sudo/PAM reading
+# /etc/sudoers, /etc/shadow, etc. are unaffected unless already contained).
+sensitive_paths:
+  - /tmp/kb-pipeline-test-secret.txt
+
 policies:
   - comm: nginx
     suspicious:   55.0

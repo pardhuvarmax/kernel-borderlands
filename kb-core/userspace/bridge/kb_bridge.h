@@ -26,6 +26,12 @@
 #define KB_WIRE_MSG_ZONE_TRANSITION  2
 #define KB_WIRE_MSG_PROCESS_EXIT     4
 #define KB_WIRE_MSG_CONTAINMENT_CMD  5
+// NOTE: msg_type 3 is double-booked on the Go side between the rules
+// payload (kb-control-plane/internal/ipc/rules.go's msgTypeRules) and
+// MsgTypeContainmentCmd (kb-control-plane/internal/ipc/types.go) — a
+// pre-existing landmine, not touched here. 6 is the first genuinely
+// unused value; see kb-control-plane/internal/ipc/sensitive_paths.go.
+#define KB_WIRE_MSG_SENSITIVE_PATHS  6
 
 #pragma pack(push, 1)
 struct kb_wire_header {
