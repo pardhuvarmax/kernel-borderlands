@@ -25,6 +25,9 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 - **Bounded logging outputs (`kb-core`)**: Bounded `cmd->reason` string printing to 64 bytes (`%.64s`) to avoid out-of-bound memory reads when logs print non-null-terminated reason strings.
 - **LSM BPF Hook Verifications (`kb-core`)**: Modified LSM socket hook return values (`kb_lsm_socket_connect`, `kb_lsm_socket_bind`, `kb_lsm_file_mprotect`) in `kbd_sensor.bpf.c` to return `-13` (`-EACCES`) instead of `-1` to fix modern kernel verifier rejection.
 
+### Removed 
+- **Kafka Removal in AADS Subsystem (kb-aads/)**: removed kafka legacy code to implement low latency native uds communications fr inter-agent, and ray clusters.
+
 ---
 
 ## Major Subsystem Milestones (Chronological History)
