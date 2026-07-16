@@ -25,6 +25,7 @@ const (
 	KernelBorderlands_StreamEvents_FullMethodName        = "/kb.KernelBorderlands/StreamEvents"
 	KernelBorderlands_SubmitAgentDecision_FullMethodName = "/kb.KernelBorderlands/SubmitAgentDecision"
 	KernelBorderlands_StreamAlerts_FullMethodName        = "/kb.KernelBorderlands/StreamAlerts"
+	KernelBorderlands_GetSystemStats_FullMethodName      = "/kb.KernelBorderlands/GetSystemStats"
 )
 
 // KernelBorderlandsClient is the client API for KernelBorderlands service.
@@ -45,6 +46,8 @@ type KernelBorderlandsClient interface {
 	SubmitAgentDecision(ctx context.Context, in *AgentDecision, opts ...grpc.CallOption) (*DecisionAck, error)
 	// Stream alerts
 	StreamAlerts(ctx context.Context, in *EventFilter, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Alert], error)
+	// Query global telemetry stats and process volumes
+	GetSystemStats(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*SystemStats, error)
 }
 
 type kernelBorderlandsClient struct {
@@ -142,6 +145,16 @@ func (c *kernelBorderlandsClient) StreamAlerts(ctx context.Context, in *EventFil
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type KernelBorderlands_StreamAlertsClient = grpc.ServerStreamingClient[Alert]
 
+func (c *kernelBorderlandsClient) GetSystemStats(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*SystemStats, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SystemStats)
+	err := c.cc.Invoke(ctx, KernelBorderlands_GetSystemStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KernelBorderlandsServer is the server API for KernelBorderlands service.
 // All implementations must embed UnimplementedKernelBorderlandsServer
 // for forward compatibility.
@@ -160,6 +173,8 @@ type KernelBorderlandsServer interface {
 	SubmitAgentDecision(context.Context, *AgentDecision) (*DecisionAck, error)
 	// Stream alerts
 	StreamAlerts(*EventFilter, grpc.ServerStreamingServer[Alert]) error
+	// Query global telemetry stats and process volumes
+	GetSystemStats(context.Context, *Empty) (*SystemStats, error)
 	mustEmbedUnimplementedKernelBorderlandsServer()
 }
 
@@ -187,6 +202,9 @@ func (UnimplementedKernelBorderlandsServer) SubmitAgentDecision(context.Context,
 }
 func (UnimplementedKernelBorderlandsServer) StreamAlerts(*EventFilter, grpc.ServerStreamingServer[Alert]) error {
 	return status.Error(codes.Unimplemented, "method StreamAlerts not implemented")
+}
+func (UnimplementedKernelBorderlandsServer) GetSystemStats(context.Context, *Empty) (*SystemStats, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSystemStats not implemented")
 }
 func (UnimplementedKernelBorderlandsServer) mustEmbedUnimplementedKernelBorderlandsServer() {}
 func (UnimplementedKernelBorderlandsServer) testEmbeddedByValue()                           {}
@@ -296,6 +314,24 @@ func _KernelBorderlands_StreamAlerts_Handler(srv interface{}, stream grpc.Server
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type KernelBorderlands_StreamAlertsServer = grpc.ServerStreamingServer[Alert]
 
+func _KernelBorderlands_GetSystemStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KernelBorderlandsServer).GetSystemStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KernelBorderlands_GetSystemStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KernelBorderlandsServer).GetSystemStats(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KernelBorderlands_ServiceDesc is the grpc.ServiceDesc for KernelBorderlands service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -314,6 +350,10 @@ var KernelBorderlands_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SubmitAgentDecision",
 			Handler:    _KernelBorderlands_SubmitAgentDecision_Handler,
+		},
+		{
+			MethodName: "GetSystemStats",
+			Handler:    _KernelBorderlands_GetSystemStats_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

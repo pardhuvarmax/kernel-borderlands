@@ -78,6 +78,13 @@ message ContainmentRequest {
 }
 message ContainmentResponse { bool success = 1; }
 
+message Empty {}
+
+message SystemStats {
+    double events_per_second = 1;
+    uint32 active_processes  = 2;
+}
+
 // KB Control Plane Service
 service KernelBorderlands {
     // Query process state
@@ -103,4 +110,8 @@ service KernelBorderlands {
     // Stream alerts
     rpc StreamAlerts(EventFilter)
         returns (stream Alert);
+
+    // Query global telemetry stats and process volumes
+    rpc GetSystemStats(Empty) returns (SystemStats);
 }
+

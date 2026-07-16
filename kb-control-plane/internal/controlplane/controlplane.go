@@ -16,6 +16,7 @@ import (
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/enforcement"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/policy"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ssh"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 )
 
@@ -39,6 +40,7 @@ type ControlPlane struct {
 	policy       *policy.Engine
 	grpc         *grpc.Server
 	listener     *ipc.Listener // created once in New(), used in Start()
+	sshService   *ssh.Service
 
 	// comm cache — pid → comm (populated by ProcessState messages)
 	commCache sync.Map
@@ -82,6 +84,11 @@ func New(dbPath, policyPath string) (*ControlPlane, error) {
 		return nil, err
 	}
 
+	sshSvc, err := ssh.NewService()
+	if err != nil {
+		return nil, fmt.Errorf("ssh service: %w", err)
+	}
+
 	// Build cp first (handler must exist before NewListener so it can be
 	// passed as the MessageHandler), then wire the enforcer to the listener.
 	cp := &ControlPlane{
@@ -89,6 +96,7 @@ func New(dbPath, policyPath string) (*ControlPlane, error) {
 		audit:        audit.New(s.DB()),
 		policy:       p,
 		healthServer: health.NewServer(),
+		sshService:   sshSvc,
 	}
 
 	// NewListener records the socket path and stores cp as the MessageHandler.
@@ -108,6 +116,11 @@ func New(dbPath, policyPath string) (*ControlPlane, error) {
 }
 
 func (cp *ControlPlane) Start() error {
+	// Start SSH service
+	if err := cp.sshService.Start(); err != nil {
+		return fmt.Errorf("ssh service start: %w", err)
+	}
+
 	// Use the listener constructed in New() — do NOT call NewListener again.
 	go func() {
 		if err := cp.listener.Listen(); err != nil {
@@ -115,7 +128,11 @@ func (cp *ControlPlane) Start() error {
 		}
 	}()
 
-	lis, err := listenUnix(ipc.SocketGRPC)
+	grpcSocketPath := os.Getenv("KB_GRPC_SOCKET")
+	if grpcSocketPath == "" {
+		grpcSocketPath = ipc.SocketGRPC
+	}
+	lis, err := listenUnix(grpcSocketPath)
 	if err != nil {
 		return fmt.Errorf("grpc uds listen: %w", err)
 	}
@@ -125,7 +142,7 @@ func (cp *ControlPlane) Start() error {
 	pb.RegisterKernelBorderlandsServer(cp.grpc, cp)
 
 	go func() {
-		log.Println("[KB] gRPC on unix://" + ipc.SocketGRPC)
+		log.Println("[KB] gRPC on unix://" + grpcSocketPath)
 		if err := cp.grpc.Serve(lis); err != nil {
 			log.Printf("[KB] grpc Serve exited: %v", err)
 		}
@@ -149,8 +166,17 @@ func (cp *ControlPlane) Stop() {
 	if cp.healthServer != nil {
 		cp.healthServer.SetServingStatus(ServiceName, healthpb.HealthCheckResponse_NOT_SERVING)
 	}
+	if cp.sshService != nil {
+		if err := cp.sshService.Stop(); err != nil {
+			log.Printf("[KB] Failed to stop SSH service: %v", err)
+		}
+	}
 	cp.grpc.GracefulStop()
-	os.Remove(ipc.SocketGRPC) // best-effort cleanup so next start doesn't hit a stale file
+	grpcSocketPath := os.Getenv("KB_GRPC_SOCKET")
+	if grpcSocketPath == "" {
+		grpcSocketPath = ipc.SocketGRPC
+	}
+	os.Remove(grpcSocketPath) // best-effort cleanup so next start doesn't hit a stale file
 	cp.store.Close()
 	// Signal the IPC accept loop to stop.
 	if cp.listener != nil {

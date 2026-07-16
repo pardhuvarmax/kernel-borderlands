@@ -804,6 +804,94 @@ func (x *ContainmentResponse) GetSuccess() bool {
 	return false
 }
 
+type Empty struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Empty) Reset() {
+	*x = Empty{}
+	mi := &file_proto_kb_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Empty) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Empty) ProtoMessage() {}
+
+func (x *Empty) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_kb_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Empty.ProtoReflect.Descriptor instead.
+func (*Empty) Descriptor() ([]byte, []int) {
+	return file_proto_kb_proto_rawDescGZIP(), []int{10}
+}
+
+type SystemStats struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	EventsPerSecond float64                `protobuf:"fixed64,1,opt,name=events_per_second,json=eventsPerSecond,proto3" json:"events_per_second,omitempty"`
+	ActiveProcesses uint32                 `protobuf:"varint,2,opt,name=active_processes,json=activeProcesses,proto3" json:"active_processes,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *SystemStats) Reset() {
+	*x = SystemStats{}
+	mi := &file_proto_kb_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SystemStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SystemStats) ProtoMessage() {}
+
+func (x *SystemStats) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_kb_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SystemStats.ProtoReflect.Descriptor instead.
+func (*SystemStats) Descriptor() ([]byte, []int) {
+	return file_proto_kb_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SystemStats) GetEventsPerSecond() float64 {
+	if x != nil {
+		return x.EventsPerSecond
+	}
+	return 0
+}
+
+func (x *SystemStats) GetActiveProcesses() uint32 {
+	if x != nil {
+		return x.ActiveProcesses
+	}
+	return 0
+}
+
 var File_proto_kb_proto protoreflect.FileDescriptor
 
 const file_proto_kb_proto_rawDesc = "" +
@@ -871,7 +959,11 @@ const file_proto_kb_proto_rawDesc = "" +
 	"\x05level\x18\x02 \x01(\x0e2\x14.kb.ContainmentLevelR\x05level\x12\x16\n" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\"/\n" +
 	"\x13ContainmentResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess*1\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\a\n" +
+	"\x05Empty\"d\n" +
+	"\vSystemStats\x12*\n" +
+	"\x11events_per_second\x18\x01 \x01(\x01R\x0feventsPerSecond\x12)\n" +
+	"\x10active_processes\x18\x02 \x01(\rR\x0factiveProcesses*1\n" +
 	"\x04Zone\x12\b\n" +
 	"\x04SAFE\x10\x00\x12\x0e\n" +
 	"\n" +
@@ -883,14 +975,15 @@ const file_proto_kb_proto_rawDesc = "" +
 	"\x06CGROUP\x10\x01\x12\v\n" +
 	"\aSECCOMP\x10\x02\x12\r\n" +
 	"\tNAMESPACE\x10\x03\x12\r\n" +
-	"\tTERMINATE\x10\x042\xd5\x02\n" +
+	"\tTERMINATE\x10\x042\x83\x03\n" +
 	"\x11KernelBorderlands\x123\n" +
 	"\x0fGetProcessState\x12\x0e.kb.PidRequest\x1a\x10.kb.ProcessState\x12/\n" +
 	"\bListZone\x12\x0f.kb.ZoneRequest\x1a\x10.kb.ProcessState0\x01\x12A\n" +
 	"\x0eSetContainment\x12\x16.kb.ContainmentRequest\x1a\x17.kb.ContainmentResponse\x12.\n" +
 	"\fStreamEvents\x12\x0f.kb.EventFilter\x1a\v.kb.KBEvent0\x01\x129\n" +
 	"\x13SubmitAgentDecision\x12\x11.kb.AgentDecision\x1a\x0f.kb.DecisionAck\x12,\n" +
-	"\fStreamAlerts\x12\x0f.kb.EventFilter\x1a\t.kb.Alert0\x01BCZAgithub.com/pardhuvarmax/kernel-borderlands/kb-control-plane/protob\x06proto3"
+	"\fStreamAlerts\x12\x0f.kb.EventFilter\x1a\t.kb.Alert0\x01\x12,\n" +
+	"\x0eGetSystemStats\x12\t.kb.Empty\x1a\x0f.kb.SystemStatsBCZAgithub.com/pardhuvarmax/kernel-borderlands/kb-control-plane/protob\x06proto3"
 
 var (
 	file_proto_kb_proto_rawDescOnce sync.Once
@@ -905,7 +998,7 @@ func file_proto_kb_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_kb_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_kb_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_proto_kb_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_proto_kb_proto_goTypes = []any{
 	(Zone)(0),                   // 0: kb.Zone
 	(ContainmentLevel)(0),       // 1: kb.ContainmentLevel
@@ -919,12 +1012,14 @@ var file_proto_kb_proto_goTypes = []any{
 	(*DecisionAck)(nil),         // 9: kb.DecisionAck
 	(*ContainmentRequest)(nil),  // 10: kb.ContainmentRequest
 	(*ContainmentResponse)(nil), // 11: kb.ContainmentResponse
-	nil,                         // 12: kb.KBEvent.MetadataEntry
+	(*Empty)(nil),               // 12: kb.Empty
+	(*SystemStats)(nil),         // 13: kb.SystemStats
+	nil,                         // 14: kb.KBEvent.MetadataEntry
 }
 var file_proto_kb_proto_depIdxs = []int32{
 	0,  // 0: kb.ProcessState.zone:type_name -> kb.Zone
 	1,  // 1: kb.ProcessState.containment:type_name -> kb.ContainmentLevel
-	12, // 2: kb.KBEvent.metadata:type_name -> kb.KBEvent.MetadataEntry
+	14, // 2: kb.KBEvent.metadata:type_name -> kb.KBEvent.MetadataEntry
 	0,  // 3: kb.ZoneRequest.zone:type_name -> kb.Zone
 	1,  // 4: kb.ContainmentRequest.level:type_name -> kb.ContainmentLevel
 	6,  // 5: kb.KernelBorderlands.GetProcessState:input_type -> kb.PidRequest
@@ -933,14 +1028,16 @@ var file_proto_kb_proto_depIdxs = []int32{
 	8,  // 8: kb.KernelBorderlands.StreamEvents:input_type -> kb.EventFilter
 	5,  // 9: kb.KernelBorderlands.SubmitAgentDecision:input_type -> kb.AgentDecision
 	8,  // 10: kb.KernelBorderlands.StreamAlerts:input_type -> kb.EventFilter
-	2,  // 11: kb.KernelBorderlands.GetProcessState:output_type -> kb.ProcessState
-	2,  // 12: kb.KernelBorderlands.ListZone:output_type -> kb.ProcessState
-	11, // 13: kb.KernelBorderlands.SetContainment:output_type -> kb.ContainmentResponse
-	3,  // 14: kb.KernelBorderlands.StreamEvents:output_type -> kb.KBEvent
-	9,  // 15: kb.KernelBorderlands.SubmitAgentDecision:output_type -> kb.DecisionAck
-	4,  // 16: kb.KernelBorderlands.StreamAlerts:output_type -> kb.Alert
-	11, // [11:17] is the sub-list for method output_type
-	5,  // [5:11] is the sub-list for method input_type
+	12, // 11: kb.KernelBorderlands.GetSystemStats:input_type -> kb.Empty
+	2,  // 12: kb.KernelBorderlands.GetProcessState:output_type -> kb.ProcessState
+	2,  // 13: kb.KernelBorderlands.ListZone:output_type -> kb.ProcessState
+	11, // 14: kb.KernelBorderlands.SetContainment:output_type -> kb.ContainmentResponse
+	3,  // 15: kb.KernelBorderlands.StreamEvents:output_type -> kb.KBEvent
+	9,  // 16: kb.KernelBorderlands.SubmitAgentDecision:output_type -> kb.DecisionAck
+	4,  // 17: kb.KernelBorderlands.StreamAlerts:output_type -> kb.Alert
+	13, // 18: kb.KernelBorderlands.GetSystemStats:output_type -> kb.SystemStats
+	12, // [12:19] is the sub-list for method output_type
+	5,  // [5:12] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -957,7 +1054,7 @@ func file_proto_kb_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_kb_proto_rawDesc), len(file_proto_kb_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

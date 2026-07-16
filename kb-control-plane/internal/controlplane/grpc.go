@@ -147,3 +147,14 @@ func (cp *ControlPlane) SubmitAgentDecision(
 	}
 	return &pb.DecisionAck{Success: true, Message: "executed"}, nil
 }
+
+func (cp *ControlPlane) GetSystemStats(
+	ctx context.Context, req *pb.Empty,
+) (*pb.SystemStats, error) {
+	eps := cp.GetEventsPerSecond()
+	active := uint32(len(cp.store.ListAll()))
+	return &pb.SystemStats{
+		EventsPerSecond: eps,
+		ActiveProcesses: active,
+	}, nil
+}
