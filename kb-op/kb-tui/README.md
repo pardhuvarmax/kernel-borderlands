@@ -15,7 +15,9 @@ agent swarm.
 
 ## TUI Demonstration: `[kbtui-v1]`
 
-![kb-tui demo](assets/kbtui.gif)
+<p align="center">
+  <img src="media/kbtui.gif" alt="KB-TUI Demo">
+</p>
 
 ## Structure
 ```
