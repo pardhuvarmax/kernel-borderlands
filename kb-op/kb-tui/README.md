@@ -13,6 +13,10 @@ agent swarm.
 - Keyboard-driven containment actions with a confirmation modal
 - Graceful offline/demo mode when `/run/kb/kba.sock` is unreachable
 
+## TUI Demonstration: `[kbtui-v1]`
+
+![kb-tui demo](assets/kbtui.gif)
+
 ## Structure
 ```
 kb-op/kb-tui/
