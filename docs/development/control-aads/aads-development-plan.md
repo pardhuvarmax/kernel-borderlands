@@ -12,6 +12,7 @@ The implementation will cover:
 2. **gRPC-over-UDS client**: Implementing a Python gRPC client that connects to the Go Control Plane daemon over local Unix Domain Sockets (`/run/kb/kba.sock`) to pull event streams and submit quarantine decisions.
 3. **Judge, Jury, and Executor (JJE) Consensus Model**: Enabling robust quorum-based decision making where a centralized Judge coordinates dynamic Jury voting pools across the cluster before executing containment.
 4. **Ray RLlib (MARL) Pipeline**: Designing a custom Gymnasium multi-agent environment to train agent policies using RLlib PPO models, allowing the swarm to optimize threat detection and suppress false positives.
+5. **mTLS Swarm Security (Defense-in-Depth)**: Securing inter-agent and inter-node Ray communications with mutual TLS (mTLS) certificates to prevent eavesdropping and payload tampering in distributed scenarios.
 
 ---
 
@@ -357,13 +358,24 @@ Karthik should proceed in the following order to ensure safe integration:
 - Implement the client in `kb-aads/comms/grpc_client.py` and create unit tests.
 - Test connection to the mock UDS socket (e.g., using python `unittest` or `pytest`).
 
-### Phase 3: Ray Swarm Setup
+### Phase 3: Ray Swarm Setup & mTLS Encryption
 - Convert `BaseAgent` into a `@ray.remote` class.
 - Update `RaySwarmOrchestrator` to initialize `ray.init(address="auto")` and manage the swarm.
-- Add local diagnostic commands:
+- **mTLS Security Setup**:
+  To protect agent communications on the network, enable Ray internal TLS by exporting certificate variables:
   ```bash
-  # Start local head node
-  ray start --head --port=6379 --include-dashboard=true
+  # Enable TLS internally in Ray
+  export RAY_USE_TLS=1
+  export RAY_TLS_CA_CERT="/path/to/ca.crt"
+  export RAY_TLS_SERVER_CERT="/path/to/server.crt"
+  export RAY_TLS_SERVER_KEY="/path/to/server.key"
+  export RAY_TLS_CLIENT_CERT="/path/to/client.crt"
+  export RAY_TLS_CLIENT_KEY="/path/to/client.key"
+  ```
+- Add local diagnostic/launch commands:
+  ```bash
+  # Start local head node with TLS environment variables loaded
+  ray start --head --port=6379 --include-dashboard=true --dashboard-host=127.0.0.1
   # Launch the swarm
   python3 main.py
   ```
