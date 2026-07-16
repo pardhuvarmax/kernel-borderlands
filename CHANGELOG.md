@@ -4,7 +4,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ---
 
-## [f4e33e8] - 2026-07-17
+## [d8c6665] - 2026-07-17
 
 ### Added
 - **TUI demonstration media (`kb-op/kb-tui/media/`)**: Added `kbtui.gif` and `kbtui.mp4` showing full demonstrations of the new Rust-based `kb-tui` console in action. [PardhuVarma]
