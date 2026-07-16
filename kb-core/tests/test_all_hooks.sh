@@ -178,35 +178,156 @@ ok "memory_mprotect (write→exec transition via ctypes libc call)"
 pause
 
 # ─────────────────────────────────────────────
-section "TEST 8 — Composite Attack Simulation"
+section "TEST 8 — Privilege & Credential Chain (SAFE -> SUSPICIOUS)"
 # ─────────────────────────────────────────────
-echo "Simulates a realistic chain: exec -> network -> privilege"
-echo "Expect: multiple correlated events from one lineage"
+echo "Simulates: privilege change combined with sensitive credential reads"
+echo "Expect: SAFE -> OBSERVED -> SUSPICIOUS transitions in a single process"
 
-bash -c '
-    echo "  [chain] spawned bash"
-    curl -s -m 3 http://example.com > /dev/null 2>&1
-    echo "  [chain] outbound connection made"
-    cat /etc/passwd > /dev/null 2>&1
-    echo "  [chain] sensitive file touched"
-'
-ok "composite chain (bash -> curl -> cat /etc/passwd)"
+python3 - <<'EOF'
+import time
+import os
+
+print(f"  [Chain A] Running in PID {os.getpid()}")
+
+# 1. Read /etc/shadow (triggers sensitive file access -> transitions to OBSERVED/SUSPICIOUS)
+try:
+    with open("/etc/shadow", "r") as f:
+        _ = f.read(10)
+    print("  [Chain A] Step 1: Read /etc/shadow done")
+except Exception as e:
+    print(f"  [Chain A] Step 1 failed (shadow read): {e}")
+
+time.sleep(1.5)
+
+# 2. Read /etc/sudoers (sensitive file access -> SUSPICIOUS state)
+try:
+    with open("/etc/sudoers", "r") as f:
+        _ = f.read(10)
+    print("  [Chain A] Step 2: Read /etc/sudoers done")
+except Exception as e:
+    print(f"  [Chain A] Step 2 failed (sudoers read): {e}")
+
+time.sleep(1.5)
+EOF
+ok "privilege & credential chain complete"
+pause
+
+# ─────────────────────────────────────────────
+section "TEST 9 — Memory Injection Chain (SUSPICIOUS -> BORDERLANDS -> COMPROMISED)"
+# ─────────────────────────────────────────────
+echo "Simulates: cred file read -> RWX non-zero mapping -> RWX zero mmap"
+echo "Expect: SAFE -> SUSPICIOUS -> BORDERLANDS -> COMPROMISED transitions"
+
+python3 - <<'EOF'
+import mmap
+import time
+import os
+import ctypes
+
+libc = ctypes.CDLL("libc.so.6", use_errno=True)
+PAGESIZE = mmap.PAGESIZE
+
+print(f"  [Chain B] Running in PID {os.getpid()}")
+
+# 1. Read sensitive file (shadow) -> transitions to SUSPICIOUS
+try:
+    with open("/etc/shadow", "r") as f:
+        _ = f.read(10)
+    print("  [Chain B] Step 1: Read /etc/shadow done")
+except Exception as e:
+    print(f"  [Chain B] Step 1 failed (shadow read): {e}")
+
+time.sleep(2)
+
+# 2. Allocate RWX memory at a non-zero address (mprotect with RWX) -> transitions to BORDERLANDS
+try:
+    m = mmap.mmap(-1, PAGESIZE, prot=mmap.PROT_READ | mmap.PROT_WRITE)
+    addr = ctypes.addressof(ctypes.c_char.from_buffer(m))
+    page_addr = addr - (addr % PAGESIZE)
+    # mprotect to PROT_READ | PROT_WRITE | PROT_EXEC (7) at non-zero address
+    ret = libc.mprotect(ctypes.c_void_p(page_addr), ctypes.c_size_t(PAGESIZE), ctypes.c_int(7))
+    if ret == 0:
+        print("  [Chain B] Step 2: Wrote RWX at non-zero address done")
+    else:
+        print(f"  [Chain B] Step 2 mprotect failed: {ctypes.get_errno()}")
+    m.close()
+except Exception as e:
+    print(f"  [Chain B] Step 2 failed: {e}")
+
+time.sleep(2)
+
+# 3. Allocate RWX memory at address 0 (mmap with NULL and RWX) -> transitions to COMPROMISED
+try:
+    m = mmap.mmap(-1, PAGESIZE, prot=mmap.PROT_READ | mmap.PROT_WRITE | mmap.PROT_EXEC)
+    print("  [Chain B] Step 3: Wrote RWX at zero address done")
+    m.close()
+except Exception as e:
+    print(f"  [Chain B] Step 3 failed: {e}")
+
+time.sleep(2)
+EOF
+ok "memory injection chain complete"
+pause
+
+# ─────────────────────────────────────────────
+section "TEST 10 — C2 Outbound Connection Chain (SUSPICIOUS -> BORDERLANDS)"
+# ─────────────────────────────────────────────
+echo "Simulates: cred file read -> outbound connect to suspected C2 port (4444)"
+echo "Expect: SAFE -> SUSPICIOUS -> BORDERLANDS transitions"
+
+# Start a local listener on 4444 in the background so the connect works
+python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 4444)); s.listen(1); s.accept()' &
+LISTENER_PID=$!
+sleep 0.5
+
+python3 - <<'EOF'
+import time
+import os
+import socket
+
+print(f"  [Chain C] Running in PID {os.getpid()}")
+
+# 1. Read sensitive file (shadow) -> transitions to SUSPICIOUS
+try:
+    with open("/etc/shadow", "r") as f:
+        _ = f.read(10)
+    print("  [Chain C] Step 1: Read /etc/shadow done")
+except Exception as e:
+    print(f"  [Chain C] Step 1 failed (shadow read): {e}")
+
+time.sleep(2)
+
+# 2. Outbound connection to port 4444 -> transitions to BORDERLANDS
+try:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect(("127.0.0.1", 4444))
+    print("  [Chain C] Step 2: Connected to C2 port 4444 done")
+    s.close()
+except Exception as e:
+    print(f"  [Chain C] Step 2 failed (connect): {e}")
+
+time.sleep(2)
+EOF
+
+wait "$LISTENER_PID" 2>/dev/null || true
+ok "C2 connection chain complete"
 pause
 
 # ─────────────────────────────────────────────
 section "TEST COMPLETE"
 # ─────────────────────────────────────────────
 echo -e "${GREEN}"
-echo "All 9 event types have been triggered:"
-echo "  1. process_exec"
-echo "  2. process_exit"
-echo "  3. privilege_change"
-echo "  4. file_access"
-echo "  5. network_connect"
-echo "  6. network_bind"
-echo "  7. memory_mmap"
-echo "  8. memory_mprotect"
-echo "  9. (composite chain — multiple types correlated)"
+echo "All hook event types and sequential attack chains have been triggered:"
+echo "  1. process_exec / process_exit"
+echo "  2. privilege_change"
+echo "  3. file_access (sensitive paths floor)"
+echo "  4. network_connect (HTTP/HTTPS)"
+echo "  5. network_bind (listen socket)"
+echo "  6. memory_mmap (RWX anon)"
+echo "  7. memory_mprotect (W^X violation)"
+echo "  8. Chain A: Privilege + Credential (transitions to SUSPICIOUS)"
+echo "  9. Chain B: Memory Injection (transitions to BORDERLANDS/COMPROMISED)"
+echo "  10. Chain C: C2 Connection (transitions to BORDERLANDS)"
 echo -e "${NC}"
-echo "Check Terminal 1 (kbd_sensor) output to confirm all fired."
+echo "Check Terminal 1 (kbd_sensor) and Terminal 2 (kbd/TUI) to verify alerts."
 echo ""
