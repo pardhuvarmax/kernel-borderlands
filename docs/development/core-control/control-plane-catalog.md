@@ -527,8 +527,50 @@ sequenceDiagram
 ```
 Note: steps 6–7 are the piece that doesn't exist yet even after 2.11 alone ships — they're the reason Phase 2 can't complete without Phase 0's audit RPC.
 
+### 5.3 Every socket in the system, and who actually connects to what
+
+Covers all sockets registered in `internal/ipc/sockets.go` plus `kbd`'s two TCP listeners — not just `kb-control-plane`'s own, since the point of this chart is showing which *other* subsystems' clients are live, orphaned, or not yet built. Status colors: green = live/wired, amber = written but not connected to anything real, red = documented but no code exists, or pointing at a stale target.
+
+```mermaid
+flowchart LR
+    subgraph KBD["kbd — Go Control Plane (binds 4 sockets)"]
+        S_IPC["/run/kb/kbd.sock<br/>SocketIPC — telemetry"]
+        S_GRPC["/run/kb/kba.sock<br/>SocketGRPC — API + health"]
+        S_HTTP[":8080<br/>HTTP/SSE"]
+        S_SSH[":2222<br/>SSH"]
+    end
+
+    subgraph CHECKER["kb-checker — Rust (binds 1 socket)"]
+        S_KBC["/run/kb/kbc.sock<br/>SocketCheckerDiag"]
+    end
+
+    Sensor["kbd_sensor (C, kb-core)"] -->|framed telemetry| S_IPC
+
+    TUI["kb-tui (Rust)"] -->|gRPC, live| S_GRPC
+    MCP["kb-mcp (Go)"] -->|gRPC, live| S_GRPC
+    ChkClient["kb-checker (Rust)<br/>liveness + map-integrity checks"] -->|gRPC, live| S_GRPC
+    AADS["kb-aads (Python)<br/>ControlPlaneClient in comms/grpc_client.py"] -.->|written, never called<br/>by any live agent| S_GRPC
+    KBCTL["kbctl (Go)<br/>kb-op/kbctl/ — README only, no source"] -.->|documented against<br/>stale :50051 TCP, not kba.sock| S_GRPC
+
+    Dashboard["kb-dashboard (React/TS)"] -->|HTTP + SSE, live| S_HTTP
+    Operator(["Remote operator"]) -->|ssh -p 2222, live<br/>see §1.11| S_SSH
+
+    NoClient["? — no confirmed client"] -.->|CheckerStatus.get_status exists,<br/>only referenced as a UI label string<br/>in kb-dashboard, never dialed| S_KBC
+
+    style S_IPC fill:#1f4e3d,stroke:#2e8b6f,color:#fff
+    style S_GRPC fill:#1f4e3d,stroke:#2e8b6f,color:#fff
+    style S_HTTP fill:#1f4e3d,stroke:#2e8b6f,color:#fff
+    style S_SSH fill:#1f4e3d,stroke:#2e8b6f,color:#fff
+    style S_KBC fill:#4e3d1f,stroke:#8b6f2e,color:#fff
+    style AADS fill:#4e3d1f,stroke:#8b6f2e,color:#fff
+    style KBCTL fill:#4e1f1f,stroke:#8b2e2e,color:#fff
+    style NoClient fill:#3a3a3a,stroke:#888,color:#aaa,stroke-dasharray: 5 5
+```
+
+**Reading this**: `kba.sock` is the one socket everyone actually wants — 3 live clients (`kb-tui`, `kb-mcp`, `kb-checker`) plus one written-but-orphaned client (`kb-aads` — code exists, no agent calls it, see the "AADS" question above) and one documented-but-nonexistent client (`kbctl` — `kb-op/kbctl/` is a README with no source, and that README itself is stale, describing the pre-migration `:50051` TCP endpoint instead of `kba.sock`). `kbc.sock` is the mirror-image problem: a real bound socket with a real RPC (`CheckerStatus.get_status`) and **no client at all** — `kb-dashboard` only prints its path as a label, it doesn't dial it. None of this is `kb-control-plane` work to fix (`kb-aads` is out of Teju's scope per the prior discussion, `kbctl` is Rupa's per its README, `kbc.sock`'s missing client is `kb-op`/`kb-checker` territory) — this chart exists to make that ownership boundary visible, not to assign new work against it.
+
 ---
 
 ## Changelog
 
-- **2026-07-23**: Initial catalog compiled. Fixed the stale TCP-port health check in `http.go` (§1.10) as part of this pass. Added §2.11 (decided, external OpenSSH migration) and §2.12 (CIS/step-ca implementation plan) with full hardening/rollout detail; added Part 4 (sequencing plan showing 2.10 and 2.13 are superseded rather than independently fixed, and 2.9 bundles opportunistically into 2.1's work) and Part 5 (dependency graph + target-state connection flow diagrams).
+- **2026-07-23**: Initial catalog compiled. Fixed the stale TCP-port health check in `http.go` (§1.10) as part of this pass. Added §2.11 (decided, external OpenSSH migration) and §2.12 (CIS/step-ca implementation plan) with full hardening/rollout detail; added Part 4 (sequencing plan showing 2.10 and 2.13 are superseded rather than independently fixed, and 2.9 bundles opportunistically into 2.1's work) and Part 5 (dependency graph, target-state connection flow, and full socket/client inventory diagrams).
