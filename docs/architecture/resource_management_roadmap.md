@@ -19,6 +19,7 @@ The project's own documentation points toward **SOC-monitored server/endpoint-fl
 - `operator_interfaces_spec.md`: `kb-dashboard`'s stated user is explicitly "Security Operations Center (SOC) Analysts" — a fleet-monitoring role.
 - `kb-aads/swarm/orchestrator.py` assumes an *existing* Ray cluster (`ray.init(address="auto", ...)`), not a local single-node instance — a server-fleet assumption baked into the code, not just the docs.
 - `kernel_borderlands_specification.md`'s own illustrative SSH example uses the hostname `kb-server`, not `kb-laptop`/`kb-workstation`.
+- `docs/index.html` (the project landing page) states the target explicitly, as its very first headline stat: **"<3% Runtime overhead on standard server workloads (target)"** — the workload class is named directly, not inferred, and the label is honestly qualified as a *target*, not a measured/achieved result. There is currently no benchmark harness anywhere in this repo (`scripts/`, `kb-core/` — checked, nothing matching `*bench*`/`*perf*` exists) that measures overhead against this number, so it's an aspiration with no verification infrastructure behind it yet, consistent with `kb-core_system_requirements.md` §3's finding that no per-hook profiling data exists at all. (The page also has ambient decorative background text reading "overhead 2.8%" near this stat — that's stylistic flavor text, not a data-table entry, and shouldn't be read as a real measured value.)
 
 None of this *rules out* running on a laptop — it's just not what the architecture was calibrated around. This session tested exactly that (a laptop-class VM host), which is what surfaced the tunability gap in the first place.
 
@@ -79,6 +80,13 @@ Tunability closes most of the gap, but not all of it — two costs are structura
 - **Depends on**: Phases 1-2 existing, so the guidance describes real, working tiers rather than aspirational ones.
 - **What it does**: turns `kb-core_system_requirements.md` §5's tier table into customer-facing pre-install documentation, so hardware expectations (including realistic fan/thermal behavior under Balanced/Max tiers) are set before someone installs, not discovered afterward via a support ticket.
 
+## Phase 7 — Benchmark harness to verify the stated `<3%` overhead target
+- **Owner**: Karthik (primary — "Testing & Attack Simulation" / `scripts` subsystem lead per `kb-team.md`, the closest existing match to building and running a benchmark suite), with Pardhu (collaborator — `kb-core`, needed to interpret what's actually being measured against each hook).
+- **Depends on**: Nothing technical for an initial baseline — today's fixed Max-tier footprint can be benchmarked as-is, right now, without waiting on any other phase. Becomes more valuable once Phase 1 ships, since it can then validate each of the Min/Recommended/Balanced/Max tiers separately rather than just the single fixed configuration that exists today.
+- **What it does**: builds an actual measurement harness — representative "standard server workload" test scenarios, instrumented before/after `kbd_sensor` is attached, comparing latency/throughput/CPU against a no-sensor baseline — to produce a real number that can be checked against the landing page's `<3%` claim, instead of that claim remaining permanently unverified. Per-hook latency breakdowns (matching what §3 of `kb-core_system_requirements.md` currently can only describe qualitatively) would be a natural output of the same harness.
+- **Why this matters as its own phase, not just "nice to have"**: `docs/index.html` states this number as the project's literal first headline stat. A published, customer-facing performance claim with zero backing measurement is a real credibility gap independent of whether the number turns out to be accurate — right now there's no way to know either way.
+- **Acceptance criteria**: a repeatable benchmark script (not a one-off manual measurement) that reports overhead as a percentage against a defined baseline workload, checked into `scripts/`, runnable in CI so regressions are caught automatically rather than discovered on the landing page's next audit.
+
 ---
 
 ## Ownership at a glance
@@ -91,8 +99,9 @@ Tunability closes most of the gap, but not all of it — two costs are structura
 | 4 — SQLite retention/rotation | **Teju**, `kb-control-plane` | Named owner, `kb-team.md` Primary Maintainer. Fully independent — no dependency on Phases 1-3 |
 | 5 — Pre-flight validation | **Karthik** (primary, `scripts`) + Pardhu (collaborator) | Same inferred-not-declared caveat as Phase 2 |
 | 6 — Customer-facing hardware docs | **Pardhu** (primary — it's `kb-core`'s own content) + Rupa (collaborator — presentation/UI-UX) | Inferred from Responsibility Model's "docs is each Primary Maintainer's job for their own subsystem" — no dedicated docs/marketing role exists in `kb-team.md` |
+| 7 — Benchmark harness for the `<3%` target | **Karthik** (primary, `scripts`/"Testing & Attack Simulation") + Pardhu (collaborator) | Same inferred-not-declared caveat as Phases 2/5. Independently startable today, no dependency on any other phase for an initial baseline |
 
-All six phases now have a proposed owner. Three of six (Phases 1, 3, 4) are named, formally-declared Primary Maintainers per `kb-team.md`. The other three (Phases 2, 5, 6) are inferred from the closest matching existing subsystem ownership, since no "installer/packaging" or "docs/marketing" role formally exists in this repo — these should be treated as proposed defaults, not confirmed assignments, until whoever plans the org's work signs off on them. See each phase's full write-up above for the detailed reasoning behind each assignment.
+All seven phases now have a proposed owner. Three (Phases 1, 3, 4) are named, formally-declared Primary Maintainers per `kb-team.md`. The other four (Phases 2, 5, 6, 7) are inferred from the closest matching existing subsystem ownership, since no "installer/packaging," "docs/marketing," or dedicated "benchmarking" role formally exists in this repo — these should be treated as proposed defaults, not confirmed assignments, until whoever plans the org's work signs off on them. See each phase's full write-up above for the detailed reasoning behind each assignment.
 
 ---
 
@@ -100,26 +109,27 @@ All six phases now have a proposed owner. Three of six (Phases 1, 3, 4) are name
 
 ```mermaid
 flowchart TD
-    P1["Phase 1 — Runtime tunability<br/>Pardhu, kb-core<br/>PREREQUISITE FOR EVERYTHING ELSE"]
-    P2["Phase 2 — Auto-detect + safe default tier<br/>Installer owner (unassigned)"]
-    P3["Phase 3 — Thermal/load-reactive throttling<br/>Pardhu + kb-checker owner (unassigned)"]
-    P5["Phase 5 — Pre-flight validation<br/>Installer owner (unassigned)"]
-    P6["Phase 6 — Customer-facing hardware docs<br/>Docs owner (unassigned)"]
+    P1["Phase 1 — Runtime tunability<br/>Pardhu, kb-core<br/>PREREQUISITE FOR MOST OF THE REST"]
+    P2["Phase 2 — Auto-detect + safe default tier<br/>Karthik + Rupa, Pardhu (proposed)"]
+    P3["Phase 3 — Thermal/load-reactive throttling<br/>Pardhu (kb-core + kb-checker, both)"]
+    P5["Phase 5 — Pre-flight validation<br/>Karthik + Pardhu (proposed)"]
+    P6["Phase 6 — Customer-facing hardware docs<br/>Pardhu + Rupa (proposed)"]
     P4["Phase 4 — SQLite retention/rotation<br/>Teju, kb-control-plane<br/>INDEPENDENT — no dependency on P1-P3"]
+    P7["Phase 7 — Benchmark harness for &lt;3% target<br/>Karthik + Pardhu (proposed)<br/>INDEPENDENT — can baseline today"]
 
     P1 --> P2
     P1 --> P3
     P2 --> P6
     P5 -.->|can run in parallel with any phase| P1
     P4 -.->|fully independent, can ship anytime| P1
+    P7 -.->|independent baseline now,<br/>more useful once P1 ships| P1
 
     style P1 fill:#4e1f1f,stroke:#8b2e2e,color:#fff
     style P4 fill:#1f4e3d,stroke:#2e8b6f,color:#fff
+    style P7 fill:#1f4e3d,stroke:#2e8b6f,color:#fff
 ```
 
-**Two immediately-actionable, low-dependency starting points** if this roadmap gets picked up: Phase 4 (SQLite retention — fully independent, `kb-control-plane`-only) and the single highest-impact item inside Phase 1 (`BPF_F_NO_PREALLOC` + `LRU_HASH` conversion for `kb_syscall_counts` — eliminates most of the fixed memory cost on its own, before the rest of Phase 1's runtime-config work is done).
-
-- **Update**: the paragraph that previously stood here listed Phases 2, 5, 6, and Phase 3's `kb-checker` half as unassigned ownership gaps. Corrected in the "Ownership at a glance" table above, after checking `docs/project/kb-team.md`: `kb-checker` has a named Primary Maintainer (Pardhu Varma), and Phases 2/5/6 now have proposed (if inferred-rather-than-declared) owners. See that table and each phase's Owner line for current detail.
+**Three immediately-actionable, low-dependency starting points** if this roadmap gets picked up: Phase 4 (SQLite retention — fully independent, `kb-control-plane`-only), Phase 7 (benchmark harness — can measure today's fixed footprint as a baseline before any other phase lands), and the single highest-impact item inside Phase 1 (`BPF_F_NO_PREALLOC` + `LRU_HASH` conversion for `kb_syscall_counts` — eliminates most of the fixed memory cost on its own, before the rest of Phase 1's runtime-config work is done).
 
 ---
 
@@ -128,3 +138,4 @@ flowchart TD
 - **2026-07-23**: Initial roadmap, derived from `kb-core_system_requirements.md`'s analysis and this session's live-testing findings (real sensor run, confirmed always-on systemd design, confirmed no runtime tunability exists).
 - **2026-07-23**: Added "Intended deployment model" section (SOC/fleet-oriented, workstation-vs-medium/old-laptop verdict) and the graduated Phase 1+2 hardware-safety table. Added "Ownership at a glance" summary table consolidating each phase's owner (or ownership gap) for quick reference alongside the existing detailed per-phase Owner lines.
 - **2026-07-23**: Checked `docs/project/kb-team.md` (hadn't been consulted before this pass) — corrected `kb-checker`'s ownership from "TBD" to Pardhu Varma (its actual named Primary Maintainer), which also simplified Phase 3 from a two-person coordination concern to one person's cross-subsystem design call. Assigned proposed owners to Phases 2, 5, and 6 based on the closest matching existing subsystem ownership (`scripts` for 2/5, `kb-core`'s own docs responsibility for 6), flagged explicitly as inferred defaults pending confirmation, not formal declarations.
+- **2026-07-24**: Verified `docs/index.html`'s landing-page stat block — "<3% Runtime overhead on standard server workloads (target)" — as a third independent confirmation of the server/fleet-oriented deployment model, and confirmed no benchmark harness exists anywhere in the repo to back that number. Added this as evidence in "Intended deployment model" and added **Phase 7 — Benchmark harness for the `<3%` target**, with an owner, sequencing entry, and ownership-table row. Fixed a stale mermaid diagram that still showed pre-correction "unassigned" owner labels from before `kb-team.md` was checked.
