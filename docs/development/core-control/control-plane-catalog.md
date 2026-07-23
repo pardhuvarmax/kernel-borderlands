@@ -600,7 +600,12 @@ flowchart LR
     style KBCTL fill:#4e1f1f,stroke:#8b2e2e,color:#fff
 ```
 
-**Reading this**: `kba.sock` is the one socket everyone actually wants — 3 live clients (`kb-tui`, `kb-mcp`, `kb-checker`) plus one written-but-orphaned client (`kb-aads` — code exists, no agent calls it, see the "AADS" question above) and one documented-but-nonexistent client (`kbctl` — `kb-op/kbctl/` is a README with no source, and that README itself is stale, describing the pre-migration `:50051` TCP endpoint instead of `kba.sock`). `kbc.sock` used to be the mirror-image problem — a real bound socket with a real RPC and no client — until `kbd` itself was wired up as its client (§1.13): `internal/checkerclient/` dials `kb-checker`'s `GetStatus()` from `http.go`'s `/api/services` handler, replacing the `isProcessRunning("kb-checker")` proxy that only checked whether the process existed, not whether the watchdog considered itself healthy. `kb-aads` and `kbctl` remain out of `kb-control-plane` scope (`kb-aads` is out of Teju's scope per the prior discussion, `kbctl` is Rupa's per its README) — this chart exists to make that ownership boundary visible, not to assign new work against it.
+**Reading this**:
+- `kba.sock` is the one socket everyone actually wants — 3 live clients: `kb-tui`, `kb-mcp`, `kb-checker`.
+- Plus one written-but-orphaned client: `kb-aads` — code exists, no agent calls it (see the "AADS" question above).
+- Plus one documented-but-nonexistent client: `kbctl` — `kb-op/kbctl/` is a README with no source, and that README itself is stale, describing the pre-migration `:50051` TCP endpoint instead of `kba.sock`.
+- `kbc.sock` used to be the mirror-image problem — a real bound socket with a real RPC and no client — until `kbd` itself was wired up as its client (§1.13): `internal/checkerclient/` dials `kb-checker`'s `GetStatus()` from `http.go`'s `/api/services` handler, replacing the `isProcessRunning("kb-checker")` proxy that only checked whether the process existed, not whether the watchdog considered itself healthy.
+- `kb-aads` and `kbctl` remain out of `kb-control-plane` scope (`kb-aads` is out of Teju's scope per the prior discussion, `kbctl` is Rupa's per its README) — this chart exists to make that ownership boundary visible, not to assign new work against it.
 
 ---
 
