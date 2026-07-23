@@ -13,6 +13,7 @@ import (
 	"time"
 
 	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/checkerclient"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 )
 
@@ -268,7 +269,11 @@ func (s *HTTPServer) handleServices(w http.ResponseWriter, r *http.Request) {
 	}
 
 	checkerStatus := "offline"
-	if isProcessRunning("kb-checker") {
+	checkerSocketPath := os.Getenv("KB_CHECKER_SOCKET")
+	if checkerSocketPath == "" {
+		checkerSocketPath = ipc.SocketCheckerDiag
+	}
+	if resp, err := checkerclient.GetStatus(r.Context(), checkerSocketPath, 200*time.Millisecond); err == nil && resp.Healthy {
 		checkerStatus = "ok"
 	}
 
@@ -294,7 +299,7 @@ func (s *HTTPServer) handleServices(w http.ResponseWriter, r *http.Request) {
 	services := []map[string]string{
 		{"name": "kb-core (eBPF Sensor)", "desc": "Ring 0 syscall hooks", "status": coreStatus},
 		{"name": "kbd (Go Control Plane)", "desc": "/run/kb/kba.sock", "status": "ok"},
-		{"name": "kb-checker (Rust Watchdog)", "desc": "Hard fallback containment", "status": checkerStatus},
+		{"name": "kb-checker (Rust Watchdog)", "desc": "/run/kb/kbc.sock", "status": checkerStatus},
 		{"name": "AADS Agent Swarm", "desc": "ZeroMQ + Ray consensus", "status": aadsStatus},
 		{"name": "gRPC Health Service", "desc": "Standard grpc_health_v1", "status": grpcStatus},
 		{"name": "SQLite L2 Store", "desc": "WAL journal mode", "status": dbStatus},

@@ -1,0 +1,22 @@
+// Local copy of kb-checker/proto/checker.proto, with go_package added so
+// kb-control-plane can generate a Go client stub. kb-checker (Rust) is the
+// canonical owner of this contract — if it changes there, this copy needs
+// to be updated to match (same pattern as kb.proto's separately-owned
+// C/Go wire structs, just one level up at the proto layer).
+syntax = "proto3";
+
+package checker;
+
+option go_package = "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto/checker";
+
+message StatusRequest {}
+
+message StatusResponse {
+    bool healthy = 1;
+    string last_checked = 2;
+    repeated string errors = 3;
+}
+
+service CheckerStatus {
+    rpc GetStatus(StatusRequest) returns (StatusResponse);
+}

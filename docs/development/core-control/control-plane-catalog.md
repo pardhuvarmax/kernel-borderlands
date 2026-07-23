@@ -221,6 +221,40 @@ Important nuance: `kb-tui` itself does **not** talk to this SSH server at all on
 ### 1.12 Policy engine
 - **Where**: `internal/policy/policy.go`. Loads `policy.yaml`, exposes per-`comm` `AutoTerminate` overrides (checked in `OnZoneTransition` before deciding cgroup-throttle vs. auto-terminate on `BORDERLANDS` entry) and the sensitive-paths list. Threshold fields (`SuspiciousThresh`/`BorderlandsThresh`) are parsed but intentionally unused on the Go side — zone classification moved fully to `kb-core`'s `kb_scoring.c` and arrives pre-computed; the fields are kept parseable so an operator's existing `policy.yaml` doesn't silently break.
 
+### 1.13 `kbd` as a real client of `kb-checker`'s diagnostic socket (`kbc.sock`) — added 2026-07-23
+- **Why**: `/api/services` (§1.10) already tried to report `kb-checker`'s status, but faked it with `isProcessRunning("kb-checker")` — a `/proc` scan for a process by that name, which only proves the binary is alive, not that the watchdog considers itself healthy. `kb-checker` already computes the real answer internally (JIT-signature audits, heartbeat liveness) and exposes it over its own socket; `kbd` just wasn't asking. Same shape of bug as the `:50051` TCP proxy fixed earlier in this same file (§1.10) for the gRPC status tile.
+- **Where**: new package `internal/checkerclient/checkerclient.go`, wired into `internal/controlplane/http.go`'s `handleServices`.
+```go
+// internal/checkerclient/checkerclient.go
+func GetStatus(ctx context.Context, socketPath string, timeout time.Duration) (*checkerpb.StatusResponse, error) {
+	conn, err := grpc.DialContext(dialCtx, "unix:"+socketPath,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", socketPath)
+		}),
+		grpc.WithBlock(),
+	)
+	// ...
+	client := checkerpb.NewCheckerStatusClient(conn)
+	return client.GetStatus(callCtx, &checkerpb.StatusRequest{})
+}
+```
+```go
+// internal/controlplane/http.go, handleServices
+checkerStatus := "offline"
+checkerSocketPath := os.Getenv("KB_CHECKER_SOCKET")
+if checkerSocketPath == "" {
+	checkerSocketPath = ipc.SocketCheckerDiag
+}
+if resp, err := checkerclient.GetStatus(r.Context(), checkerSocketPath, 200*time.Millisecond); err == nil && resp.Healthy {
+	checkerStatus = "ok"
+}
+```
+- **Proto contract**: `kb-checker/proto/checker.proto` is the canonical definition (Rust-owned); `kb-control-plane/proto/checker/checker.proto` is a local copy with `go_package` added so Go stubs can be generated (`protoc --go_out --go-grpc_out`) — same pattern as wire structs being independently maintained on both sides of a language boundary elsewhere in this project (`kbd-contracts.md`). If `kb-checker` changes `checker.proto`, this copy needs to be updated to match; it is not auto-synced.
+- **Behavior on failure**: any dial/RPC error (checker down, socket missing, timeout) is treated as `"offline"`, same as the existing gRPC/DB checks in this handler — `kb-checker` being unreachable is itself the unhealthy signal, not something to surface as a request error.
+- Also updated §5.3's socket chart — `kbc.sock` now shows a live edge from `kbd` instead of "no confirmed client."
+
 ---
 
 # Part 2 — Open Gaps
@@ -555,19 +589,18 @@ flowchart LR
     Dashboard["kb-dashboard (React/TS)"] -->|HTTP + SSE, live| S_HTTP
     Operator(["Remote operator"]) -->|ssh -p 2222, live<br/>see §1.11| S_SSH
 
-    NoClient["? — no confirmed client"] -.->|CheckerStatus.get_status exists,<br/>only referenced as a UI label string<br/>in kb-dashboard, never dialed| S_KBC
+    KBD_Client["kbd itself<br/>internal/checkerclient/<br/>(dialed from http.go handleServices)"] -->|gRPC GetStatus, live<br/>added 2026-07-23, see §1.13| S_KBC
 
     style S_IPC fill:#1f4e3d,stroke:#2e8b6f,color:#fff
     style S_GRPC fill:#1f4e3d,stroke:#2e8b6f,color:#fff
     style S_HTTP fill:#1f4e3d,stroke:#2e8b6f,color:#fff
     style S_SSH fill:#1f4e3d,stroke:#2e8b6f,color:#fff
-    style S_KBC fill:#4e3d1f,stroke:#8b6f2e,color:#fff
+    style S_KBC fill:#1f4e3d,stroke:#2e8b6f,color:#fff
     style AADS fill:#4e3d1f,stroke:#8b6f2e,color:#fff
     style KBCTL fill:#4e1f1f,stroke:#8b2e2e,color:#fff
-    style NoClient fill:#3a3a3a,stroke:#888,color:#aaa,stroke-dasharray: 5 5
 ```
 
-**Reading this**: `kba.sock` is the one socket everyone actually wants — 3 live clients (`kb-tui`, `kb-mcp`, `kb-checker`) plus one written-but-orphaned client (`kb-aads` — code exists, no agent calls it, see the "AADS" question above) and one documented-but-nonexistent client (`kbctl` — `kb-op/kbctl/` is a README with no source, and that README itself is stale, describing the pre-migration `:50051` TCP endpoint instead of `kba.sock`). `kbc.sock` is the mirror-image problem: a real bound socket with a real RPC (`CheckerStatus.get_status`) and **no client at all** — `kb-dashboard` only prints its path as a label, it doesn't dial it. None of this is `kb-control-plane` work to fix (`kb-aads` is out of Teju's scope per the prior discussion, `kbctl` is Rupa's per its README, `kbc.sock`'s missing client is `kb-op`/`kb-checker` territory) — this chart exists to make that ownership boundary visible, not to assign new work against it.
+**Reading this**: `kba.sock` is the one socket everyone actually wants — 3 live clients (`kb-tui`, `kb-mcp`, `kb-checker`) plus one written-but-orphaned client (`kb-aads` — code exists, no agent calls it, see the "AADS" question above) and one documented-but-nonexistent client (`kbctl` — `kb-op/kbctl/` is a README with no source, and that README itself is stale, describing the pre-migration `:50051` TCP endpoint instead of `kba.sock`). `kbc.sock` used to be the mirror-image problem — a real bound socket with a real RPC and no client — until `kbd` itself was wired up as its client (§1.13): `internal/checkerclient/` dials `kb-checker`'s `GetStatus()` from `http.go`'s `/api/services` handler, replacing the `isProcessRunning("kb-checker")` proxy that only checked whether the process existed, not whether the watchdog considered itself healthy. `kb-aads` and `kbctl` remain out of `kb-control-plane` scope (`kb-aads` is out of Teju's scope per the prior discussion, `kbctl` is Rupa's per its README) — this chart exists to make that ownership boundary visible, not to assign new work against it.
 
 ---
 
