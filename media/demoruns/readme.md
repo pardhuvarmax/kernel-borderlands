@@ -12,6 +12,8 @@ This directory contains records of end-to-end execution runs and telemetry captu
 
 The primary file in this folder, [`kbrun.mp4`](file:///home/sicmundus/Desktop/Dev/kbworkspaces/project/kernel-borderlands/media/demoruns/kbrun.mp4), is an end-to-end pipeline recording demonstrating how the system detects and traces telemetry events using the live hook verification suite.
 
+[kbtui](https://github.com/user-attachments/assets/6b899472-8873-4265-85af-b41e258fbc40)
+
 > [!NOTE]
 > **Hardened Offline-First Architecture**: Kernel Borderlands does not expose or bind any network ports for its internal operations. All communications between subsystems (such as the sensor loader to the daemon, and the daemon to the operator console) are strictly localized to Unix Domain Sockets (UDS) under `/run/kb/`.
 
