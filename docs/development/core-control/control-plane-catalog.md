@@ -175,7 +175,7 @@ ws, err := wish.NewServer(
 ```
 `0.0.0.0:2222` is the daemon's one deliberate network-facing port, and it exists specifically *because* `kb-tui`'s own gRPC client only ever dials the local UDS socket and has no remote-connect capability of its own (see `kb-op/kb-tui/src/grpc.rs`) — SSH is the only way a remote operator reaches the TUI at all. Any threat-model discussion of `kbd`'s attack surface needs to center on port 2222, not the UDS socket.
 
-**By design, confirmed**: collapsing the entire remote-access surface down to this one port (rather than, say, gRPC also being reachable over TCP, or a separate dashboard-auth path) is an intentional threat-space minimization decision, not an oversight — one network listener to secure/monitor/firewall instead of several. Worth preserving as an explicit invariant if this area gets touched later: **don't add a second network-facing listener** to `kbd` without a strong reason: it directly undoes this minimization.
+- **By design, confirmed**: collapsing the entire remote-access surface down to this one port (rather than, say, gRPC also being reachable over TCP, or a separate dashboard-auth path) is an intentional threat-space minimization decision, not an oversight — one network listener to secure/monitor/firewall instead of several. Worth preserving as an explicit invariant if this area gets touched later: **don't add a second network-facing listener** to `kbd` without a strong reason: it directly undoes this minimization.
 
 **Concentration is a double-edged design choice, not a free win — evaluate honestly.** Fewer listeners means less to secure *and* means all remote-access risk sits behind one implementation. Two things pull in opposite directions here:
 
@@ -460,7 +460,7 @@ if tuiPath == "" {
 ```
 - **Why it matters**: The first fallback is an absolute path that only resolves on this dev machine, and it points at a Cargo **debug** build, not a release binary. Ship this as-is to any other host and every SSH session either silently falls through to `$PATH` lookup (works only if someone manually installed `kb-tui` there) or fails outright with "kb-tui binary not found." Because `kb-control-plane` (Go) and `kb-tui` (Rust) are two separately-built subsystems glued together only by this file path, there's currently no build- or install-time contract that keeps them in sync — nothing fails at compile time if `kb-tui` moves, gets renamed, or isn't built yet; it fails at SSH-login time, at runtime, for whoever tries to connect next.
 
-**Better ways to do this** (roughly increasing effort, pick based on how `kb-control-plane` and `kb-op` actually get deployed together):
+- **Better ways to do this** (roughly increasing effort, pick based on how `kb-control-plane` and `kb-op` actually get deployed together):
 
 1. **Fixed install path convention, no dev-path fallback.** Standardize on one system location both subsystems' build/install tooling target — e.g. `/usr/local/bin/kb-tui` or `/opt/kernel-borderlands/bin/kb-tui` — matching how `kbd` itself would be installed. Drop the hardcoded absolute dev path entirely; keep only `KB_TUI_PATH` env var (for overrides) and the fixed install path (for the common case). Fail loudly and specifically ("kb-tui not found at /opt/.../bin/kb-tui or $KB_TUI_PATH — is kb-op installed?") instead of silently trying three guesses. Cheapest fix, and the most consistent with how `dbPath`/`policyPath` are already handled in `cmd/kbd/main.go` (explicit, defaulted, overridable — not path-sniffed).
 
@@ -600,7 +600,7 @@ flowchart LR
     style KBCTL fill:#4e1f1f,stroke:#8b2e2e,color:#fff
 ```
 
-**Reading this**:
+- **Reading this**:
 - `kba.sock` is the one socket everyone actually wants — 3 live clients: `kb-tui`, `kb-mcp`, `kb-checker`.
 - Plus one written-but-orphaned client: `kb-aads` — code exists, no agent calls it (see the "AADS" question above).
 - Plus one documented-but-nonexistent client: `kbctl` — `kb-op/kbctl/` is a README with no source, and that README itself is stale, describing the pre-migration `:50051` TCP endpoint instead of `kba.sock`.

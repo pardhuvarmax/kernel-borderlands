@@ -1,10 +1,10 @@
 # kb-core — System Requirements & Resource Footprint
 
-**Component**: `kb-core` (Ring 0 eBPF sensor + userspace loader/bridge, `kbd_sensor`)
-**Owner**: Pardhu (Lead Kernel Space Engineer, `kb-core` subsystem, per `docs/reports/kb-core/corev1-enhancements.md`)
-**Status**: Documents the actual current, fixed footprint. The tier table below is a *target* structure for future tunability — **none of it exists yet**. As shipped today there is exactly one tier: whatever the compiled `#define`s produce, on every install, regardless of hardware.
-**Written**: 2026-07-23, based on direct inspection of `kb-core/ebpf/kbd_sensor.bpf.c` and `kb-core/userspace/sensor/kbd_sensor.c` (map definitions, hook list, rate-limiter logic) — not estimated from documentation, measured from source.
-**On the project's "zero-overhead" claim**: `kernel_borderlands_specification.md` §1 describes KB as a "zero-overhead threat detection... platform." This doc's footprint numbers below (§2-§3) don't contradict that — they're answering a different question. "Zero-overhead" in eBPF is the conventional claim about *per-hook latency on the traced operation itself* (a single `open()`/`mprotect()` call completes in near-negligible extra time versus older instrumentation like `ptrace`), which nothing here disputes and this doc never measured. What's documented below is *aggregate system-wide resource cost* from having many hooks continuously active — a separate property. A hook can be individually near-instant and the platform can still meaningfully load a CPU or grow memory/disk over time when it's this many hooks, this broadly scoped, running this continuously. Read the two claims as complementary, not conflicting.
+- **Component**: `kb-core` (Ring 0 eBPF sensor + userspace loader/bridge, `kbd_sensor`)
+- **Owner**: Pardhu (Lead Kernel Space Engineer, `kb-core` subsystem, per `docs/reports/kb-core/corev1-enhancements.md`)
+- **Status**: Documents the actual current, fixed footprint. The tier table below is a *target* structure for future tunability — **none of it exists yet**. As shipped today there is exactly one tier: whatever the compiled `#define`s produce, on every install, regardless of hardware.
+- **Written**: 2026-07-23, based on direct inspection of `kb-core/ebpf/kbd_sensor.bpf.c` and `kb-core/userspace/sensor/kbd_sensor.c` (map definitions, hook list, rate-limiter logic) — not estimated from documentation, measured from source.
+- **On the project's "zero-overhead" claim**: `kernel_borderlands_specification.md` §1 describes KB as a "zero-overhead threat detection... platform." This doc's footprint numbers below (§2-§3) don't contradict that — they're answering a different question. "Zero-overhead" in eBPF is the conventional claim about *per-hook latency on the traced operation itself* (a single `open()`/`mprotect()` call completes in near-negligible extra time versus older instrumentation like `ptrace`), which nothing here disputes and this doc never measured. What's documented below is *aggregate system-wide resource cost* from having many hooks continuously active — a separate property. A hook can be individually near-instant and the platform can still meaningfully load a CPU or grow memory/disk over time when it's this many hooks, this broadly scoped, running this continuously. Read the two claims as complementary, not conflicting.
 
 ---
 
@@ -34,7 +34,7 @@ All figures from `kbd_sensor.bpf.c`'s actual map definitions, not estimates from
 
 Userspace (`kbd_sensor.c`) adds a fixed `delta_buf[KB_ENTROPY_MAX_MAP_ITER]` static array (`KB_ENTROPY_MAX_MAP_ITER = 50000`, 16 bytes/entry ≈ 800KB) — small relative to the kernel-side map, not a significant factor.
 
-**Not covered above (separate subsystem — `kb-control-plane`, owner Teju, see its own catalog doc for the full write-up)**: `kbd`'s L1 `sync.Map` process-state cache grows with distinct tracked PIDs and currently has no eviction path for exited processes. Detailed here anyway, since disk footprint is part of "what hardware does this system need," which is this doc's actual subject regardless of which subsystem owns the fix.
+- **Not covered above (separate subsystem — `kb-control-plane`, owner Teju, see its own catalog doc for the full write-up)**: `kbd`'s L1 `sync.Map` process-state cache grows with distinct tracked PIDs and currently has no eviction path for exited processes. Detailed here anyway, since disk footprint is part of "what hardware does this system need," which is this doc's actual subject regardless of which subsystem owns the fix.
 
 ### 2.5 SQLite retention/rotation gap (`kb-control-plane`, not `kb-core` — included here for the disk-sizing picture)
 
@@ -46,9 +46,9 @@ Schema, verified from `kb-control-plane/internal/store/schema.go`:
 | `zone_transitions` | **Unbounded** — `id INTEGER PRIMARY KEY AUTOINCREMENT`, append-only | ~110-150B/row (`comm` TEXT + 2 indexes: `idx_zt_pid`, `idx_zt_ts`) | Grows every zone crossing, forever. No row ever deleted. |
 | `audit_log` | **Unbounded** — `id INTEGER PRIMARY KEY AUTOINCREMENT`, append-only | ~280-350B/row (`prev_hash`/`entry_hash` are 64-char hex SHA-256 strings each) | Grows on every containment/policy/agent-decision action, forever. Deleting old rows isn't even safe without special handling — the hash chain (§1.5 of the `kb-control-plane` catalog) means removing a row breaks every subsequent hash unless rotation is chain-aware (e.g. archive-and-checkpoint with a new genesis hash, not a bare `DELETE`). |
 
-**Why it matters for system requirements specifically**: the two append-only tables are the actual long-run disk-growth driver on any deployment. There is currently no retention policy, no archival job, no `VACUUM`/checkpoint schedule, and no config for "keep N days" — `kbd` will happily grow `state.db` indefinitely for as long as it runs. On a low-end box (the Min/Recommended tiers below, which tend to also have the smallest disks — SBCs, small VPS instances), this is the more pressing long-term constraint compared to the BPF memory footprint in §2, which is at least fixed and bounded; disk growth is not.
+- **Why it matters for system requirements specifically**: the two append-only tables are the actual long-run disk-growth driver on any deployment. There is currently no retention policy, no archival job, no `VACUUM`/checkpoint schedule, and no config for "keep N days" — `kbd` will happily grow `state.db` indefinitely for as long as it runs. On a low-end box (the Min/Recommended tiers below, which tend to also have the smallest disks — SBCs, small VPS instances), this is the more pressing long-term constraint compared to the BPF memory footprint in §2, which is at least fixed and bounded; disk growth is not.
 
-**What it would take to fix (`kb-control-plane` work, not `kb-core`)**: a time- or size-based rotation job that archives old `zone_transitions`/`audit_log` rows out of the live `state.db` (e.g. to a separate cold-storage file or export), designed so the hash chain in the archived segment remains independently verifiable and the live table starts a fresh, documented genesis hash rather than silently truncating history. Out of scope for this doc to design in full — flagged here so it's part of the hardware-sizing picture, with the real fix tracked on `kb-control-plane`'s side.
+- **What it would take to fix (`kb-control-plane` work, not `kb-core`)**: a time- or size-based rotation job that archives old `zone_transitions`/`audit_log` rows out of the live `state.db` (e.g. to a separate cold-storage file or export), designed so the hash chain in the archived segment remains independently verifiable and the live table starts a fresh, documented genesis hash rather than silently truncating history. Out of scope for this doc to design in full — flagged here so it's part of the hardware-sizing picture, with the real fix tracked on `kb-control-plane`'s side.
 
 ## 3. CPU / Thermal Footprint (qualitative — no per-hook benchmarks exist yet)
 
@@ -88,7 +88,7 @@ Combines `kb-core`'s BPF footprint (§2), the SQLite growth risk (§2.5, `kb-con
 | **Kernel** | §4 baseline, no exceptions | §4 baseline | §4 baseline | §4 baseline |
 | **Network** | None required (`kba.sock`/`kbd.sock`/`kbc.sock` are all UDS, per `kb-control-plane`'s catalog §1.1/§5.3) — only SSH (`:2222`) is network-facing, and that's optional/operator-access only | Same | Same | Same |
 
-**Bottom line on disk**: this is the one axis in the whole spec that genuinely has **no ceiling at any tier** until `kb-control-plane` builds the retention/rotation job described in §2.5. A Min-tier box with a small disk is the one most likely to actually run out of space first, purely because it started with less headroom — not because it does anything wrong.
+- **Bottom line on disk**: this is the one axis in the whole spec that genuinely has **no ceiling at any tier** until `kb-control-plane` builds the retention/rotation job described in §2.5. A Min-tier box with a small disk is the one most likely to actually run out of space first, purely because it started with less headroom — not because it does anything wrong.
 
 ---
 
@@ -103,7 +103,7 @@ These tiers describe what *would* need to be true for `kb-core` to run well acro
 | **Balanced** | 10,240 (today's default) | As today, but `BPF_F_NO_PREALLOC` to avoid full preallocation | Full hook set | On | Default (`KB_ENTROPY_SCAN_EVERY_N_POLLS = 10`) — today's actual behavior |
 | **Max** | 10,240+ (raise if needed) | As today | Full hook set | On | Frequent (e.g. every 5 polls), most aggressive |
 
-**What it would take to make this real** (not scoped or started):
+- **What it would take to make this real** (not scoped or started):
 1. Turn `KB_MAX_PROCESSES` and the hook-attach set into runtime config (env vars read in `kbd_sensor.c`'s `main()`, alongside the existing `KBD_SOCKET_PATH` pattern) instead of compile-time constants.
 2. Add `BPF_F_NO_PREALLOC` to `kb_syscall_counts` (and ideally move it to `LRU_HASH` like `kb_rate_limit_lru_map` already is) so kernel memory scales with actual usage instead of the theoretical maximum — this alone would eliminate most of the ~40-50MB fixed cost regardless of which tier a box targets.
 3. Make `attach_ssl_uprobes()` conditional on a flag, since TLS uprobe attachment is one of the more expensive per-hit hooks and isn't relevant to every deployment (e.g. a box with no TLS-terminating workloads).
