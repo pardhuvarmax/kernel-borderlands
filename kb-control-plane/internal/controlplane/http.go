@@ -26,6 +26,7 @@ func (cp *ControlPlane) StartHTTPServer(addr string) error {
 	server := &HTTPServer{cp: cp}
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/", server.handleIndex)
 	mux.HandleFunc("/api/processes", server.handleProcesses)
 	mux.HandleFunc("/api/alerts", server.handleAlerts)
 	mux.HandleFunc("/api/logs", server.handleLogs)
@@ -57,6 +58,37 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// handleIndex serves a minimal info page at "/" so a browser or curl hitting
+// the bare address gets something useful instead of Go's default
+// "404 page not found" — this is registered as ServeMux's catch-all pattern,
+// so anything not matching a more specific route also lands here; genuine
+// unknown paths still get a real 404 rather than silently rendering the
+// index for typos.
+func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"service": "kbd — Kernel Borderlands Control Plane",
+		"endpoints": []map[string]string{
+			{"path": "/api/processes", "desc": "List tracked processes and their zone/score"},
+			{"path": "/api/alerts", "desc": "Recent BORDERLANDS-zone alerts"},
+			{"path": "/api/logs", "desc": "Audit log entries"},
+			{"path": "/api/services", "desc": "Subsystem health (kb-core, kb-checker, AADS, gRPC, DB)"},
+			{"path": "/api/isolate", "desc": "POST — contain a PID"},
+			{"path": "/api/restore", "desc": "POST — clear containment for a PID"},
+			{"path": "/api/events", "desc": "SSE — live event stream"},
+			{"path": "/api/metrics", "desc": "Live throughput metrics"},
+		},
+		"grpc_socket": ipc.SocketGRPC,
+	})
 }
 
 func (s *HTTPServer) handleProcesses(w http.ResponseWriter, r *http.Request) {
