@@ -1,5 +1,7 @@
 # Behavior Engine Architecture & Implementation Report
 
+**Status:** Completed — implemented in `kb-core/userspace/behavior/` (`kb_behavior.c`, `kb_rules.c`) and `kb-core/include/kb_behavior.h`.
+
 The scoring engine in Kernel Borderlands has been updated from a simple arithmetic weighted-average risk score to a robust, sequence-aware **Behavior Engine**. This ensures that the detection mechanism is harder to evade, explains its reasoning clearly, matches sequential attack chains, and maintains backward compatibility with the existing Go control plane.
 
 ## 1. Core Architecture

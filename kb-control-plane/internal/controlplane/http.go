@@ -247,8 +247,8 @@ func isProcessRunning(name string) bool {
 	return false
 }
 
-func isPortOpen(addr string) bool {
-	conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+func isSocketOpen(path string) bool {
+	conn, err := net.DialTimeout("unix", path, 100*time.Millisecond)
 	if err != nil {
 		return false
 	}
@@ -277,8 +277,12 @@ func (s *HTTPServer) handleServices(w http.ResponseWriter, r *http.Request) {
 		aadsStatus = "ok"
 	}
 
+	grpcSocketPath := os.Getenv("KB_GRPC_SOCKET")
+	if grpcSocketPath == "" {
+		grpcSocketPath = ipc.SocketGRPC
+	}
 	grpcStatus := "offline"
-	if isPortOpen("127.0.0.1:50051") {
+	if isSocketOpen(grpcSocketPath) {
 		grpcStatus = "ok"
 	}
 

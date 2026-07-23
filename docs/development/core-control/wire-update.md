@@ -1,3 +1,5 @@
+**Status:** Completed — `StartTimeNs` is in `wireZoneTransition` (`wire.go`), version check is at 3, and the reuse guard is enforced in `ControlPlane.OnZoneTransition` via `store.VerifyStartTime` before containment.
+
 This is a wire-format change on my side, so your Go structs are now out of sync again. Concretely, you need to:
 
 **1. Update `ZoneTransition` struct in `wire.go`** — add the new field in the right spot:

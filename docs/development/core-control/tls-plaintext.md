@@ -1,5 +1,7 @@
 # eBPF TLS Plaintext Payload Extraction
 
+**Status:** Completed — implemented in `kb-core/ebpf/kbd_sensor.bpf.c`.
+
 To overcome the blind spot of encrypted network transport (TLS/SSL) without introducing heavy proxy components (like Envoy or MitM proxying with custom certificates), we have implemented a high-performance, distro-agnostic **eBPF Plaintext TLS Inspector** inside the `kb-core` unified sensor.
 
 ---

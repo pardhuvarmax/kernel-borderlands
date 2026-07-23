@@ -1,5 +1,7 @@
 # Dynamic Rule Delivery System
 
+**Status:** Completed — implemented in `kb-control-plane/internal/ipc/rules.go` and `kb-control-plane/config/rules.yaml`.
+
 We have designed and implemented a **Dynamic Rule Delivery System** to ensure Kernel Borderlands is never blind to new attacks. Analysts can now add or edit attack-chain rules in a human-readable YAML configuration file, which the Go control plane dynamically parses, serializes into a packed binary format, and delivers to the C sensor at startup or upon connection.
 
 ---

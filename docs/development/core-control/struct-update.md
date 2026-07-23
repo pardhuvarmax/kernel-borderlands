@@ -1,5 +1,7 @@
 **Struct update — before you finalize `wire.go`:**
 
+**Status:** Completed and superseded — `syscall_entropy_lifetime` is live in `kb-control-plane/internal/ipc/wire.go`. Note wire version has since moved to v3 (see `ipc-v3-wiring.md`); this note's "bumped to 2" is historical.
+
 `kb_wire_process_state` grew by one field since you last read it: added `double syscall_entropy_lifetime`, sitting between `ema_score` and `zone`. New size is **128 bytes** (not 120, not the spec's 122).
 
 ```c

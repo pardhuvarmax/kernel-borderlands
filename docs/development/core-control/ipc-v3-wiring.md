@@ -1,5 +1,7 @@
 ## Implement IPC v3 Wire Protocol Integration
 
+**Status:** Completed — `WireVersion = 3` in `kb-control-plane/internal/ipc/wire.go` matches `KB_WIRE_VERSION` in `kb-core/userspace/bridge/kb_bridge.h`. Note: the Go-side code samples below (inline `cgroupThrottle`/`sigkill`, TODO stubs for SECCOMP/NAMESPACE) are superseded — current `internal/enforcement/enforce.go` forwards all containment levels generically to the C sensor over the wire instead.
+
 From my `kb_bridge.c` v3:
 
 ```

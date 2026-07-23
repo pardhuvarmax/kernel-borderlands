@@ -1,5 +1,7 @@
 # In-Context Hijacking Mitigation Report
 
+**Status:** Completed — implemented in `kb-core/ebpf/kbd_sensor.bpf.c` (`bprm_check_security`, `file_mprotect`, `commit_creds` kprobe, `security_capable` kprobe).
+
 To detect and contain adversaries who exploit vulnerabilities (such as buffer overflows or remote code execution) and attempt to hijack a process while remaining within its normal execution context, we have implemented **four new security mitigation hooks** in `kb-core`. 
 
 These cover the highest-value injection and privilege probing patterns identified in the project documentation.

@@ -1,11 +1,12 @@
 # Engineering Task: kba.sock gRPC Unix Domain Socket Binding
 **Target Developer**: Teju (Go Control Plane Lead)  
 **Context**: Boot Sequence & Security Watchdog Integration  
+**Status:** Completed — implemented in `kb-control-plane/internal/controlplane/controlplane.go` (`listenUnix`), no TCP fallback.
 
 ---
 
 ## 1. Objective
-To secure communications between the Go Control Plane (`kbd`), the Rust Safety Watchdog (`kb-checker`), and the Ray Swarm agent (`kbd-agent`), the control plane must bind its gRPC server to a Unix Domain Socket (UDS) located at `/run/kb/kba.sock` instead of (or in addition to) listening on TCP port `:50051`. 
+To secure communications between the Go Control Plane (`kbd`), the Rust Safety Watchdog (`kb-checker`), and the Ray Swarm agent (`kbd-agent`), the control plane must bind its gRPC server to a Unix Domain Socket (UDS) located at `/run/kb/kba.sock`. There is no TCP fallback — UDS is the only transport, everywhere, including local/dev environments.
 
 This eliminates network exposure, implements local filesystem group access control, and allows standard systemd boot sequencing.
 
@@ -16,89 +17,84 @@ This eliminates network exposure, implements local filesystem group access contr
 The gRPC server listener is currently defined in `kb-control-plane/internal/controlplane/controlplane.go` under the `Start()` method. The following changes must be implemented:
 
 ### Step A: Update `controlplane.go` Imports
-Ensure `os` and `syscall` packages are imported for handling socket file removals and permission modifications:
+Ensure `os` is imported for handling socket file removals and permission modifications:
 ```go
 import (
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"syscall"
 	// other imports...
 )
 ```
 
-### Step B: Modify `Start()` to Bind Unix Socket
-Replace the TCP listener binding with a Unix socket listener binding in `kb-control-plane/internal/controlplane/controlplane.go#L71`:
+### Step B: Bind Unix Socket in `Start()`
+`kb-control-plane/internal/controlplane/controlplane.go` binds the gRPC server to a UDS via a dedicated `listenUnix` helper. The socket path defaults to `ipc.SocketGRPC` (`/run/kb/kba.sock`) and can be overridden with the `KB_GRPC_SOCKET` env var (used by tests and local dev). There is **no TCP fallback** — if the UDS bind fails, `Start()` returns an error:
 
 ```go
-// Start initiates the IPC listener and the gRPC server
 func (cp *ControlPlane) Start() error {
-	// 1. Start the userspace C sensor IPC listener
-	go func() {
-		if err := ipc.NewListener(cp).Listen(); err != nil {
-			log.Fatalf("[KB] IPC: %v", err)
-		}
-	}()
+	// ...
 
-	// 2. Bind gRPC Server to Unix Domain Socket
-	socketPath := "/run/kb/kba.sock"
-	
-	// Clean up existing socket file if left over from previous crash
-	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
-		log.Printf("[KB] Warning: failed to remove old socket file %s: %v", socketPath, err)
+	grpcSocketPath := os.Getenv("KB_GRPC_SOCKET")
+	if grpcSocketPath == "" {
+		grpcSocketPath = ipc.SocketGRPC
 	}
-
-	lis, err := net.Listen("unix", socketPath)
+	lis, err := listenUnix(grpcSocketPath)
 	if err != nil {
-		// Fallback to TCP port :50051 if UDS path is unavailable (for local testing/macOS development)
-		log.Printf("[KB] UDS bind failed: %v. Falling back to TCP :50051", err)
-		lis, err = net.Listen("tcp", ":50051")
-		if err != nil {
-			return err
-		}
-	} else {
-		// Apply safe permissions (0660) for service group access
-		if err := os.Chmod(socketPath, 0660); err != nil {
-			log.Printf("[KB] Warning: failed to chmod socket %s: %v", socketPath, err)
-		}
+		return fmt.Errorf("grpc uds listen: %w", err)
 	}
 
 	cp.grpc = grpc.NewServer()
+	registerHealthService(cp.grpc, cp.healthServer)
 	pb.RegisterKernelBorderlandsServer(cp.grpc, cp)
-	
+
 	go func() {
-		if lis.Addr().Network() == "unix" {
-			log.Printf("[KB] gRPC listening on Unix Domain Socket: %s", socketPath)
-		} else {
-			log.Println("[KB] gRPC listening on TCP :50051")
+		log.Println("[KB] gRPC on unix://" + grpcSocketPath)
+		if err := cp.grpc.Serve(lis); err != nil {
+			log.Printf("[KB] grpc Serve exited: %v", err)
 		}
-		cp.grpc.Serve(lis)
 	}()
 
 	log.Println("[KB] Control plane ready")
 	return nil
 }
-```
 
-### Step C: Update `Stop()` for Clean Shutdown
-Ensure the socket file is unlinked when the control plane is stopped gracefully in `kb-control-plane/internal/controlplane/controlplane.go#L86`:
-
-```go
-// Stop stops the gRPC server and cleans up database handles
-func (cp *ControlPlane) Stop() {
-	cp.grpc.GracefulStop()
-	cp.store.Close()
-	
-	// Clean up socket file
-	socketPath := "/run/kb/kba.sock"
-	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
-		log.Printf("[KB] Failed to clean up UDS file %s: %v", socketPath, err)
-	} else {
-		log.Printf("[KB] Cleaned up Unix socket %s", socketPath)
+// listenUnix binds a UDS listener at path, clearing any stale socket file
+// left behind by a previous run, and sets 0660 permissions.
+func listenUnix(path string) (net.Listener, error) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("removing stale socket %s: %w", path, err)
 	}
+	lis, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o660); err != nil {
+		lis.Close()
+		return nil, fmt.Errorf("chmod socket %s: %w", path, err)
+	}
+	return lis, nil
 }
 ```
+
+### Step C: Clean Shutdown in `Stop()`
+The socket file is unlinked when the control plane stops gracefully:
+
+```go
+func (cp *ControlPlane) Stop() {
+	// ...
+	cp.grpc.GracefulStop()
+	grpcSocketPath := os.Getenv("KB_GRPC_SOCKET")
+	if grpcSocketPath == "" {
+		grpcSocketPath = ipc.SocketGRPC
+	}
+	os.Remove(grpcSocketPath) // best-effort cleanup so next start doesn't hit a stale file
+	cp.store.Close()
+	// ...
+}
+```
+
+Any code that checks whether the gRPC service is reachable (e.g. dashboard health widgets) must dial the UDS path, not a TCP port — see `isSocketOpen` in `kb-control-plane/internal/controlplane/http.go`.
 
 ---
 
