@@ -17,11 +17,11 @@
 - VMware/VirtualBox/QEMU
 - Snapshot capability for repeatable experiments
 
-**GPU**
+**GPU** (dev team only — for training. Not required to run the product; customer deployments are inference-only and run fine on CPU. See [`docs/development/control-aads/aads-intelligence-roadmap.md`](../development/control-aads/aads-intelligence-roadmap.md)'s GPU discussion.)
 - University HPC preferred
 - Fallback: Google Colab Pro / RunPod
 - Minimum: 8GB VRAM for QLoRA fine-tuning
-- Target models: Phi-3 Mini / Qwen2.5 3B / Mistral 7B
+- Target models: Phi-3 Mini / Qwen2.5 3B / Mistral 7B — tool-calling capability is now a selection criterion (Hunter is agentic, not single-shot; see roadmap), which wasn't accounted for when this list was first written. Qwen2.5 is the current likely front-runner on that axis specifically.
 
 ---
 
@@ -93,7 +93,7 @@ PyTorch 2.x
 
 **Agent Communication**
 ```
-ZeroMQ / Ray Actors (event bus & messaging)
+Ray Actors (event bus & messaging — ZeroMQ was dropped in favor of this; see below)
 Protocol Buffers (message serialization)
 ```
 
@@ -138,11 +138,12 @@ Label studio or custom labeling tool
 ## 3. Event Bus & Infrastructure
 
 ```
-ZeroMQ (agent-to-agent messaging bus)
-Redis (shared state / pheromone trails)
+Ray Actors (agent-to-agent messaging — no separate ZeroMQ bus; superseded by the Ray-only design, confirmed by Karthik)
 SQLite 3.x
 Docker + Docker Compose (local dev)
 ```
+
+**Redis, deliberately removed from this list**: was previously listed here for "shared state / pheromone trails." This is disallowed by the system's own no-TCP-fallback constraint (`kba_uds_binding_spec.md`, `kb-checker/README.md` — UDS-only, everywhere, including local/dev) since Redis in its default configuration listens on a TCP port. Shared mutable swarm state instead uses a dedicated Ray actor (`SwarmMemory`/`SwarmRegistry` pattern) or routes through `kb-control-plane`'s existing UDS-based storage — see [`ray-shared-mutable-state.md`](../development/control-aads/ray-shared-mutable-state.md) for the full reasoning and rejection of Redis specifically.
 
 ---
 
@@ -243,19 +244,17 @@ Weights & Biases (ML training)
 ```
 gRPC (primary)
 Protocol Buffers v3
-Unix socket (local) or TCP (distributed)
+Unix Domain Socket only — no TCP, including distributed/cluster deployments
 ```
+Corrected: this previously listed "TCP (distributed)" as an option. That contradicts a confirmed, load-bearing system invariant — `kba_uds_binding_spec.md` and `kb-checker/README.md` are explicit and unconditional that there is no TCP fallback anywhere in this system, including local/dev and distributed deployments. `kb-aads` connects to `kb-control-plane` over `/run/kb/kba.sock` regardless of whether the Ray swarm is single-node or clustered.
 
 **AADS Internal**
 ```
-ZeroMQ pub/sub topics:
-  - role-changes
-  - agent-updates
-  - consensus-events
-  - health-checks
-  - anomaly-alerts
-Ray Actor Remote Methods (direct agent messaging)
+Ray Actor Remote Methods (direct agent messaging — role-changes, agent-updates,
+consensus-events, health-checks, and anomaly-alerts all route through actor
+calls, not a separate ZeroMQ pub/sub bus)
 ```
+Corrected: this previously listed a ZeroMQ pub/sub topic list. Superseded by the Ray-only design (confirmed by Karthik) — see `docs/development/control-aads/ray-integration-walkthrough.md`. `anomaly-alerts`/`health-checks` specifically now map onto JJE's courthouse oversight function (`AgentState.anomaly_score`, per-agent liveness/error-rate monitoring) — see `aads-intelligence-roadmap.md`.
 
 **Dashboard ↔ Backend**
 ```
