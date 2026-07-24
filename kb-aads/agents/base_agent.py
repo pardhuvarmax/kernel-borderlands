@@ -26,10 +26,16 @@ class AgentState:
     status: AgentStatus = AgentStatus.INITIALIZING
     uptime: int = 0
     anomaly_score: float = 0.0
+    last_action: str = ""
 
-@ray.remote
 class BaseAgent:
-    """Ray Actor base class for distributed swarm agents."""
+    """
+    Base class for distributed swarm agents. Deliberately NOT @ray.remote
+    here — Ray actor classes cannot be subclassed (ActorClassInheritanceException).
+    Each concrete role subclass (HunterAgent, PatrollerAgent, JudgeAgent, ...)
+    applies @ray.remote itself. For roles with no dedicated subclass, use
+    RemoteBaseAgent below.
+    """
     def __init__(self, agent_id: str, role: AgentRole):
         self.state = AgentState(agent_id=agent_id, role=role)
         self.running = False
@@ -73,5 +79,10 @@ class BaseAgent:
             "role": self.state.role.value,
             "status": self.state.status.value,
             "uptime": self.state.uptime,
-            "anomaly_score": self.state.anomaly_score
+            "anomaly_score": self.state.anomaly_score,
+            "last_action": self.state.last_action
         }
+
+
+# Generic actor for roles with no dedicated subclass (e.g. IDLE).
+RemoteBaseAgent = ray.remote(BaseAgent)

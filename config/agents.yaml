@@ -1,0 +1,29 @@
+# Swarm composition for kb-aads. Loaded by kb-aads/main.py at startup.
+#
+# ray:
+#   mode: local  -> ray.init() with no address, starts a single-node head
+#                    in-process. Use for dev/single-node runs.
+#   mode: cluster -> ray.init(address="auto"), joins an existing head node
+#                     started separately via `ray start --head`. Use for
+#                     the SOC/fleet deployment model (see
+#                     docs/architecture/resource_management_roadmap.md).
+ray:
+  mode: local
+
+# JUDGE/JURY/EXECUTOR are not counts like the others: one Judge and one
+# Executor are spawned as long-lived actors; the Jury pool is spawned
+# dynamically per consensus round (see docs/development/control-aads/
+# ray-integration-walkthrough.md §5B) and is not configured here.
+# Keys must match agents.base_agent.AgentRole values exactly (singular) —
+# they're passed straight to AgentRole(role_name).
+swarm:
+  patroller: 2
+  hunter: 2
+  healer: 1
+  containment: 1
+
+jury:
+  pool_size: 5
+
+control_plane:
+  grpc_socket: /run/kb/kba.sock

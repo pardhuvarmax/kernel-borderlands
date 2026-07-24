@@ -1,6 +1,8 @@
 from .base_agent import BaseAgent, AgentRole, AgentStatus
 import asyncio
+import ray
 
+@ray.remote
 class HunterAgent(BaseAgent):
     """
     Hunter agents investigate suspicious processes.

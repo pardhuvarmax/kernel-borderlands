@@ -1,6 +1,8 @@
 from .base_agent import BaseAgent, AgentRole
+import ray
 
 
+@ray.remote
 class ContainmentAgent(BaseAgent):
     """
     Containment agents isolate malicious processes.

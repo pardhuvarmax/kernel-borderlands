@@ -8,7 +8,7 @@ and coordinates threat response.
 - `swarm/`     — Swarm orchestration and management
 - `consensus/` — Quorum and voting system
 - `marl/`      — Multi-agent reinforcement learning
-- `comms/`     — ZeroMQ/Ray communication layer
+- `comms/`     — gRPC (UDS) client to kb-control-plane; inter-agent messaging is native Ray actor calls, not a separate message bus
 - `tests/`     — Tests
 
 ## Agent Roles

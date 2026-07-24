@@ -1,5 +1,15 @@
 import asyncio
-from swarm.orchestrator import SwarmOrchestrator
+import os
+import yaml
+from swarm.orchestrator import RaySwarmOrchestrator
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "agents.yaml")
+
+
+def load_config(path: str = CONFIG_PATH) -> dict:
+    with open(path) as f:
+        return yaml.safe_load(f)
+
 
 async def main():
     print("╔══════════════════════════════════════════╗")
@@ -7,16 +17,13 @@ async def main():
     print("║   Kernel Borderlands                     ║")
     print("╚══════════════════════════════════════════╝")
 
-    orchestrator = SwarmOrchestrator()
+    cfg = load_config()
+    orchestrator = RaySwarmOrchestrator(ray_mode=cfg.get("ray", {}).get("mode", "local"))
 
-    config = {
-        "patrollers": 2,
-        "hunters": 2,
-        "healers": 1,
-        "containment": 1
-    }
-
-    await orchestrator.start_swarm(config)
+    await orchestrator.start_swarm(
+        cfg["swarm"],
+        grpc_socket=cfg.get("control_plane", {}).get("grpc_socket", "/run/kb/kba.sock"),
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())

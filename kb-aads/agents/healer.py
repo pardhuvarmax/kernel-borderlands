@@ -1,6 +1,8 @@
 from .base_agent import BaseAgent, AgentRole
+import ray
 
 
+@ray.remote
 class HealerAgent(BaseAgent):
     """
     Healer agents recover compromised systems and restore normal operation.

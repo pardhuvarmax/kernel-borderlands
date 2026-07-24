@@ -1,5 +1,7 @@
 from .base_agent import BaseAgent, AgentRole
+import ray
 
+@ray.remote
 class PatrollerAgent(BaseAgent):
     """
     Patroller agents monitor baseline process behavior.
