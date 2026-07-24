@@ -89,7 +89,7 @@ Contains protocol specifications and implementation notes for communication betw
 
 ### `docs/development/control-aads/`
 
-Documents integration between the Kernel Borderlands control plane and Agentic AI Defense Swarm (AADS), including development notes and exfiltration detection architecture.
+Documents integration between the Kernel Borderlands control plane and Agentic AI Defense Swarm (AADS): the Ray actor migration walkthrough, the AADS intelligence roadmap (RL/LLM assignment per agent role and JJE's sub-agent oversight design), a proposal for shared mutable swarm state, development notes, and exfiltration detection architecture.
 
 ### `docs/development/adr/`
 
