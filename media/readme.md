@@ -29,9 +29,9 @@ While this root folder houses global demo runs, individual subsystems may mainta
 
 | Path / Reference | Type | Subsystem | Description |
 | :--- | :--- | :--- | :--- |
-| [`media/demoruns/kbrun.mp4`](file:///home/sicmundus/Desktop/Dev/kbworkspaces/project/kernel-borderlands/media/demoruns/kbrun.mp4) | Video (`.mp4`) | Root/Integration | End-to-end telemetry and verification run showing Kernel Sensor startup, Control Plane activation, `kb-tui` visual console monitoring, and sequential telemetry events/attack chain testing via `test_all_hooks.sh`. |
-| [`kb-op/kb-tui/media/kbtui.gif`](file:///home/sicmundus/Desktop/Dev/kbworkspaces/project/kernel-borderlands/kb-op/kb-tui/media/kbtui.gif) | Animation (`.gif`) | Operator TUI | Quick preview of the Rust/Ratatui-based terminal management interface, demonstrating system telemetry loops and active alerts. |
-| [`kb-op/kb-tui/media/kbtui.mp4`](file:///home/sicmundus/Desktop/Dev/kbworkspaces/project/kernel-borderlands/kb-op/kb-tui/media/kbtui.mp4) | Video (`.mp4`) | Operator TUI | Full-length high-quality recording of the TUI console, showing state management, policies, and process lists. |
+| [`media/demoruns/kbrun.mp4`](demoruns/kbrun.mp4) | Video (`.mp4`) | Root/Integration | End-to-end telemetry and verification run showing Kernel Sensor startup, Control Plane activation, `kb-tui` visual console monitoring, and sequential telemetry events/attack chain testing via `test_all_hooks.sh`. |
+| [`kb-op/kb-tui/media/kbtui.gif`](../kb-op/kb-tui/media/kbtui.gif) | Animation (`.gif`) | Operator TUI | Quick preview of the Rust/Ratatui-based terminal management interface, demonstrating system telemetry loops and active alerts. |
+| [`kb-op/kb-tui/media/kbtui.mp4`](../kb-op/kb-tui/media/kbtui.mp4) | Video (`.mp4`) | Operator TUI | Full-length high-quality recording of the TUI console, showing state management, policies, and process lists. |
 | [System Banner / Logo](https://github.com/user-attachments/assets/ba4fdc53-151c-4477-b146-bc37b6859749) | Image (`.png`) | Global | High-resolution project logo depicting the "Ring 0 Defense Ring" concept, used as a header in project READMEs. |
 
 ---
