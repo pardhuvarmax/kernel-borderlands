@@ -32,6 +32,13 @@
 // pre-existing landmine, not touched here. 6 is the first genuinely
 // unused value; see kb-control-plane/internal/ipc/sensitive_paths.go.
 #define KB_WIRE_MSG_SENSITIVE_PATHS  6
+// CPM (docs/features/CPM.md §7.4) operator-pushed protected-executable
+// registry additions — same frame shape as KB_WIRE_MSG_SENSITIVE_PATHS
+// (count + fixed 64-byte zero-padded path keys). C-side receiver only;
+// kb-control-plane has no sender for this yet (open follow-up, tracked
+// in kb-core/README.md), so in practice no frame with this msg_type
+// exists on the wire today.
+#define KB_WIRE_MSG_CPM_PROTECTED_EXEC  7
 
 #pragma pack(push, 1)
 struct kb_wire_header {
@@ -86,6 +93,13 @@ int kb_bridge_send_zone_transition(int fd, uint32_t pid, uint64_t start_time_ns,
 int kb_bridge_send_process_exit(int fd, uint32_t pid, uint64_t exit_time_ns, uint32_t exit_code);
 
 #define KB_BRIDGE_DEFAULT_SOCK   "/run/kb/kbd.sock"
+// KB_BRIDGE_CONTROL_SOCK carries every Go -> sensor control push
+// (containment commands, sensitive-path/rules pushes) — split from
+// KB_BRIDGE_DEFAULT_SOCK (telemetry-only, sensor -> Go) so a
+// telemetry-volume burst can never stall or kill delivery of containment
+// commands. See kb-control-plane/internal/ipc/sockets.go's SocketIPC
+// comment for the failure mode this split exists to avoid.
+#define KB_BRIDGE_CONTROL_SOCK   "/run/kb/kbct.sock"
 #define KB_BRIDGE_RETRY_MIN_MS   100
 #define KB_BRIDGE_RETRY_MAX_MS   5000
 

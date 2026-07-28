@@ -1,28 +1,47 @@
+# NOTE: updated for the kbd.sock/kbct.sock split (see kb_bridge.h's
+# KB_BRIDGE_CONTROL_SOCK comment and docs/development/core-control/
+# control-plane-catalog.md §5.3). kbd_sensor now reads containment commands
+# from control_fd (kbct.sock) exclusively — bridge_fd (kbd.sock) is
+# telemetry-only, write-only from the sensor's side. This script used to
+# bind only kbd.sock and send containment commands there; post-split that
+# would connect fine but every send_containment_cmd() call would go out on
+# a connection kbd_sensor never reads for that purpose — silently doing
+# nothing rather than erroring. Fixed by binding both sockets, same
+# pattern as tests/test_cpm.py.
+
 import socket
 import os
 import struct
 import sys
 import time
 
-# Socket path for the control plane UDS
-sock_path = os.getenv("KBD_SOCKET_PATH", "/var/run/kbd.sock")
+telemetry_sock_path = os.getenv("KBD_SOCKET_PATH", "/run/kb/kbd.sock")
+control_sock_path = os.getenv("KBD_CONTROL_SOCKET_PATH", "/run/kb/kbct.sock")
 
-if os.path.exists(sock_path):
-    try:
-        os.remove(sock_path)
-    except OSError as e:
-        print(f"Could not remove existing socket {sock_path}: {e}")
 
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.bind(sock_path)
-s.listen(1)
+def _fresh_listener(path):
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError as e:
+            print(f"Could not remove existing socket {path}: {e}")
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.bind(path)
+    sock.listen(1)
+    return sock
 
-print(f"Mock Control Plane listening on {sock_path}...")
-print("Please run kbd_sensor now (e.g., KBD_SOCKET_PATH={sock_path} sudo ./build/kbd_sensor)")
+
+telemetry_listener = _fresh_listener(telemetry_sock_path)
+control_listener = _fresh_listener(control_sock_path)
+
+print(f"Mock Control Plane listening on {telemetry_sock_path} (telemetry) and {control_sock_path} (control)...")
+print("Please run kbd_sensor now (e.g., sudo ./build/kbd_sensor)")
 
 try:
-    conn, _ = s.accept()
-    print("kbd_sensor connected.")
+    telemetry_conn, _ = telemetry_listener.accept()
+    print("kbd_sensor connected (telemetry).")
+    conn, _ = control_listener.accept()
+    print("kbd_sensor connected (control) — containment commands go out on this one.")
 except KeyboardInterrupt:
     print("\nExiting.")
     sys.exit(0)
@@ -65,6 +84,9 @@ except KeyboardInterrupt:
     pass
 finally:
     conn.close()
-    s.close()
-    if os.path.exists(sock_path):
-        os.remove(sock_path)
+    telemetry_conn.close()
+    control_listener.close()
+    telemetry_listener.close()
+    for p in (control_sock_path, telemetry_sock_path):
+        if os.path.exists(p):
+            os.remove(p)

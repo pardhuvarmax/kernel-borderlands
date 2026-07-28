@@ -22,6 +22,9 @@
 #include "../../include/kb_rules.h"
 #include "../bridge/kb_bridge.h"
 #include <fcntl.h>
+#include <dirent.h>
+#include <limits.h>
+#include <sys/types.h>
 
 // Timestamp source for sends not triggered by a live kb_unified_event
 static uint64_t now_ns(void)
@@ -121,8 +124,16 @@ static struct kb_window_ema *window_ema_slot(uint32_t pid)
 struct kb_delta_entry { uint64_t key; uint64_t delta; };
 static struct kb_delta_entry delta_buf[KB_ENTROPY_MAX_MAP_ITER];
 
+// bridge_fd (kbd.sock): telemetry only, sensor -> Go, one direction.
+// control_fd (kbct.sock): every Go -> sensor control push (containment
+// commands, sensitive-path/rules pushes). Split so a telemetry-volume
+// burst on bridge_fd can never stall or kill delivery of containment
+// commands on control_fd — see KB_BRIDGE_CONTROL_SOCK's comment in
+// kb_bridge.h for the failure mode this avoids.
 static int   bridge_fd = -1;
 static char  bridge_sock_path[108] = KB_BRIDGE_DEFAULT_SOCK;
+static int   control_fd = -1;
+static char  control_sock_path[108] = KB_BRIDGE_CONTROL_SOCK;
 
 static void make_fd_nonblocking(int fd)
 {
@@ -139,6 +150,16 @@ static void bridge_ensure_connected(void)
     bridge_fd = kb_bridge_try_connect(bridge_sock_path);
     if (bridge_fd >= 0) {
         make_fd_nonblocking(bridge_fd);
+    }
+}
+
+static void control_ensure_connected(void)
+{
+    if (control_fd >= 0)
+        return;
+    control_fd = kb_bridge_try_connect(control_sock_path);
+    if (control_fd >= 0) {
+        make_fd_nonblocking(control_fd);
     }
 }
 
@@ -560,6 +581,281 @@ static int read_sensitive_paths_from_bridge(int fd, struct kbd_sensor_bpf *skel)
     return apply_sensitive_paths_frame(buf, payload_len, skel);
 }
 
+// ── CPM (Critical Process Module) — docs/features/CPM.md ──
+//
+// Deliberate deviation from CPM.md §5.4's cpm_classify(), worth stating
+// once, here: the spec sketches the classifier as in-kernel eBPF C
+// operating on a live struct task_struct. In this codebase, containment
+// is not decided synchronously in-kernel — kb-control-plane (Go) decides
+// it and pushes a kb_wire_containment_cmd over the UDS bridge, and
+// handle_incoming_containment_cmd() below is the sole place that ever
+// writes a new entry into contained_pids_map. That function is the real
+// "last gate before enforcement" (§4.2) in this codebase, so the
+// classifier lives here in userspace C instead, gating the same map
+// write the spec describes gating. The eBPF-side building blocks the
+// spec calls for (protected_pids_map, the exec()-time registration hook,
+// exit-time de-registration) are implemented in kbd_sensor.bpf.c exactly
+// as specified — only this final decision function's location differs,
+// to match where the actual choke point is.
+
+enum cpm_decision {
+    CPM_ALLOW,
+    CPM_REJECT_KERNEL_THREAD,
+    CPM_REJECT_PID1,
+    CPM_REJECT_PROTECTED_PID,
+    CPM_REJECT_PROTECTED_EXEC,
+};
+
+static const char *cpm_decision_reason(enum cpm_decision d)
+{
+    switch (d) {
+        case CPM_REJECT_KERNEL_THREAD:  return "Kernel Thread";
+        case CPM_REJECT_PID1:           return "Critical Operating System Process (PID 1)";
+        case CPM_REJECT_PROTECTED_PID:  return "Protected PID";
+        case CPM_REJECT_PROTECTED_EXEC: return "Protected Executable";
+        default:                        return "Allowed";
+    }
+}
+
+// task->mm == NULL (§3.2/§5.4) has no userspace equivalent pointer to
+// read. A kernel thread has no /proc/<pid>/exe link, so readlink() on it
+// fails — the standard userspace-visible signal for "this task has no
+// associated mm", structural rather than name-based per §3.2's rationale.
+static int cpm_is_kernel_thread(pid_t pid)
+{
+    char link_path[64];
+    char target[PATH_MAX];
+    snprintf(link_path, sizeof(link_path), "/proc/%d/exe", (int)pid);
+    ssize_t n = readlink(link_path, target, sizeof(target) - 1);
+    return n < 0;
+}
+
+// Re-resolves the canonical exec path for an already-running PID. Used by
+// the protected-exec re-check below, the /proc reconciliation scan
+// (§7.1 item 3), and CPM audit logging. Returns 0 and fills path on
+// success, -1 if unresolvable (process exited mid-check, permission
+// denied, etc.) — callers must treat -1 as "can't confirm", not "not
+// protected".
+static int cpm_resolve_exec_path(pid_t pid, char *path, size_t path_len)
+{
+    char link_path[64];
+    snprintf(link_path, sizeof(link_path), "/proc/%d/exe", (int)pid);
+    ssize_t n = readlink(link_path, path, path_len - 1);
+    if (n < 0) return -1;
+    path[n] = '\0';
+    return 0;
+}
+
+static int cpm_exec_path_is_protected(struct kbd_sensor_bpf *skel, pid_t pid)
+{
+    char path[PATH_MAX];
+    if (cpm_resolve_exec_path(pid, path, sizeof(path)) != 0)
+        return 0;
+
+    char key[64] = {0};
+    strncpy(key, path, sizeof(key) - 1);
+
+    int map_fd = bpf_map__fd(skel->maps.protected_exec_paths_map);
+    if (map_fd < 0) return 0;
+
+    __u8 val;
+    return bpf_map_lookup_elem(map_fd, key, &val) == 0;
+}
+
+// §5.4's classifier, adapted to userspace per the file-header note above.
+// Checks ordered cheapest/most-structural first, exactly as spec'd —
+// first match short-circuits, no further checks run.
+static enum cpm_decision cpm_classify(struct kbd_sensor_bpf *skel, pid_t pid)
+{
+    if (cpm_is_kernel_thread(pid))
+        return CPM_REJECT_KERNEL_THREAD;
+
+    if (pid == 1)
+        return CPM_REJECT_PID1;
+
+    int pids_fd = bpf_map__fd(skel->maps.protected_pids_map);
+    if (pids_fd >= 0) {
+        __u8 val;
+        __u32 upid = (__u32)pid;
+        if (bpf_map_lookup_elem(pids_fd, &upid, &val) == 0)
+            return CPM_REJECT_PROTECTED_PID;
+    }
+
+    // §5.5 race-safety net: a process that just exec'd a protected binary
+    // may not have landed in protected_pids_map yet if the exec
+    // tracepoint hasn't been processed relative to this containment
+    // command arriving. Re-check the live exec path directly instead of
+    // trusting the map alone — CPM_ALLOW is never returned on this race.
+    if (cpm_exec_path_is_protected(skel, pid))
+        return CPM_REJECT_PROTECTED_EXEC;
+
+    return CPM_ALLOW;
+}
+
+// §3.3/§7.1 item 2: register kbd_sensor's own PID unconditionally, before
+// the bridge even connects — this doesn't depend on
+// protected_exec_paths_map, since this process already exec'd before any
+// hook could have caught it.
+static void cpm_register_self(struct kbd_sensor_bpf *skel)
+{
+    int map_fd = bpf_map__fd(skel->maps.protected_pids_map);
+    if (map_fd < 0) {
+        fprintf(stderr, "[CPM] Failed to get protected_pids_map fd for self-registration\n");
+        return;
+    }
+    __u32 pid = (__u32)getpid();
+    __u8 one = 1;
+    if (bpf_map_update_elem(map_fd, &pid, &one, BPF_ANY) != 0) {
+        fprintf(stderr, "[CPM] Failed to self-register kbd_sensor PID %u\n", pid);
+    } else {
+        printf("[CPM] Self-registered kbd_sensor PID %u as protected (Sensor Self-Protection)\n", pid);
+    }
+}
+
+// §7.1 item 3: scan already-running processes at startup and pre-register
+// any whose canonical exec path matches the (already-populated) floor
+// registry, so protection isn't delayed until their next restart.
+static void cpm_reconcile_running_processes(struct kbd_sensor_bpf *skel)
+{
+    int pids_fd = bpf_map__fd(skel->maps.protected_pids_map);
+    if (pids_fd < 0) return;
+
+    DIR *proc = opendir("/proc");
+    if (!proc) {
+        fprintf(stderr, "[CPM] Failed to open /proc for startup reconciliation scan\n");
+        return;
+    }
+
+    struct dirent *ent;
+    __u8 one = 1;
+    int registered = 0;
+    while ((ent = readdir(proc)) != NULL) {
+        char *end;
+        long pid = strtol(ent->d_name, &end, 10);
+        if (*end != '\0' || pid <= 0) continue; // not a /proc/<pid> directory
+
+        if (cpm_exec_path_is_protected(skel, (pid_t)pid)) {
+            __u32 upid = (__u32)pid;
+            if (bpf_map_update_elem(pids_fd, &upid, &one, BPF_ANY) == 0)
+                registered++;
+        }
+    }
+    closedir(proc);
+    printf("[CPM] Startup reconciliation: pre-registered %d already-running protected process(es)\n", registered);
+}
+
+// Compiled-in floor (§3.1/§5.2). Sibling-subsystem binaries (kbd,
+// kb-checker, kbctl) are deliberately NOT listed here — their install
+// paths aren't documented anywhere in this repo, and guessing wrong would
+// silently fail to protect them while appearing to. kbd_sensor protects
+// itself via cpm_register_self() instead, which doesn't depend on this
+// registry.
+static void populate_protected_exec_paths(struct kbd_sensor_bpf *skel)
+{
+    int map_fd = bpf_map__fd(skel->maps.protected_exec_paths_map);
+    if (map_fd < 0) {
+        fprintf(stderr, "[CPM] Failed to get file descriptor for protected_exec_paths_map\n");
+        return;
+    }
+
+    const char *paths[] = {
+        "/usr/lib/systemd/systemd",
+        "/lib/systemd/systemd",
+        "/usr/lib/systemd/systemd-logind",
+        "/lib/systemd/systemd-logind",
+        "/usr/lib/systemd/systemd-udevd",
+        "/lib/systemd/systemd-udevd",
+        "/usr/bin/dbus-daemon",
+        "/usr/bin/NetworkManager",
+        "/usr/sbin/NetworkManager",
+    };
+    __u8 one = 1;
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        char key[64] = {0};
+        strncpy(key, paths[i], sizeof(key) - 1);
+        int err = bpf_map_update_elem(map_fd, key, &one, BPF_ANY);
+        if (err) {
+            fprintf(stderr, "[CPM] Failed to add protected executable %s: %d\n", paths[i], err);
+        } else {
+            printf("[CPM] Registered protected executable: %s\n", paths[i]);
+        }
+    }
+}
+
+#define KB_CPM_PROTECTED_EXEC_KEY_SIZE 64
+#define KB_CPM_PROTECTED_EXEC_MAX_PAYLOAD (8 + 64 * KB_CPM_PROTECTED_EXEC_KEY_SIZE)
+
+// Validates and merges an operator-pushed protected-exec frame (§7.4)
+// into protected_exec_paths_map, on top of the compiled-in floor above.
+// Same shape/validation as apply_sensitive_paths_frame().
+static int apply_cpm_protected_exec_frame(const char *buf, uint32_t payload_len, struct kbd_sensor_bpf *skel)
+{
+    if (payload_len < 8) return -1;
+    uint16_t magic = *(const uint16_t *)buf;
+    uint8_t version = buf[2];
+    uint8_t msg_type = buf[3];
+    if (magic != KB_WIRE_MAGIC || version != KB_WIRE_VERSION || msg_type != KB_WIRE_MSG_CPM_PROTECTED_EXEC) {
+        return -1;
+    }
+
+    uint32_t count = *(const uint32_t *)(buf + 4);
+    size_t expected_size = 8 + (size_t)count * KB_CPM_PROTECTED_EXEC_KEY_SIZE;
+    if (payload_len < expected_size) return -1;
+
+    int map_fd = bpf_map__fd(skel->maps.protected_exec_paths_map);
+    if (map_fd < 0) {
+        fprintf(stderr, "apply_cpm_protected_exec_frame: failed to get protected_exec_paths_map fd\n");
+        return -1;
+    }
+
+    __u8 one = 1;
+    for (uint32_t i = 0; i < count; i++) {
+        char key[KB_CPM_PROTECTED_EXEC_KEY_SIZE] = {0};
+        memcpy(key, buf + 8 + (size_t)i * KB_CPM_PROTECTED_EXEC_KEY_SIZE, KB_CPM_PROTECTED_EXEC_KEY_SIZE);
+        key[KB_CPM_PROTECTED_EXEC_KEY_SIZE - 1] = '\0';
+        int err = bpf_map_update_elem(map_fd, key, &one, BPF_ANY);
+        if (err) {
+            fprintf(stderr, "[CPM] Failed to add operator-pushed protected executable %s: %d\n", key, err);
+        } else {
+            printf("[CPM] Registered operator-pushed protected executable: %s\n", key);
+        }
+    }
+    return 0;
+}
+
+// Non-blocking runtime check for an operator-pushed protected-exec frame
+// (msg_type KB_WIRE_MSG_CPM_PROTECTED_EXEC), mirrored on
+// handle_incoming_containment_cmd's MSG_PEEK/MSG_DONTWAIT pattern rather
+// than read_sensitive_paths_from_bridge's one-shot blocking startup read.
+// Unlike sensitive_paths (which kbd guarantees sending once at connect —
+// see that function's comment), kb-control-plane has no sender for this
+// msg_type yet, so a blocking startup read here would just burn the
+// SO_RCVTIMEO deadline on every run for a frame that never arrives.
+// Checked opportunistically during the main poll loop instead: a no-op
+// today, ready the moment a Go-side sender exists. Only consumes the
+// frame if it recognizes the msg_type, so it never steals a
+// containment-cmd frame meant for handle_incoming_containment_cmd.
+static void read_cpm_protected_exec_from_bridge(int fd, struct kbd_sensor_bpf *skel)
+{
+    uint32_t length = 0;
+    ssize_t n = recv(fd, &length, 4, MSG_PEEK | MSG_DONTWAIT);
+    if (n < 4) return;
+    if (length < 8 || length > KB_CPM_PROTECTED_EXEC_MAX_PAYLOAD) return;
+
+    char pkt_buf[4 + KB_CPM_PROTECTED_EXEC_MAX_PAYLOAD];
+    ssize_t peek_sz = recv(fd, pkt_buf, 4 + length, MSG_PEEK | MSG_DONTWAIT);
+    if (peek_sz < (ssize_t)(4 + length)) return;
+
+    uint8_t msg_type = (uint8_t)pkt_buf[4 + 3];
+    if (msg_type != KB_WIRE_MSG_CPM_PROTECTED_EXEC) return; // not ours; leave for other readers
+
+    recv(fd, pkt_buf, 4 + length, MSG_DONTWAIT);
+    apply_cpm_protected_exec_frame(pkt_buf + 4, length, skel);
+}
+
+// Only ever called with control_fd (see main()'s poll loop) — resets that
+// global specifically on a dead connection, not bridge_fd, so the two
+// connections' reconnect tracking never cross-contaminate.
 static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
 {
     uint32_t length = 0;
@@ -567,12 +863,12 @@ static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return;
         close(fd);
-        bridge_fd = -1;
+        control_fd = -1;
         return;
     }
     if (n == 0) {
         close(fd);
-        bridge_fd = -1;
+        control_fd = -1;
         return;
     }
     if (n < 4) return;
@@ -613,6 +909,23 @@ static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
                 printf("[SENSOR] Cleared containment for PID %u (Reason: %.64s)\n", pid, cmd->reason);
             }
         } else {
+            /* CPM gate (docs/features/CPM.md): every write that would ADD
+             * containment passes through cpm_classify() first — releasing
+             * containment (level == 0, above) is never gated, only its
+             * addition is. A rejection is logged and the map write is
+             * skipped entirely; the process remains fully monitored, just
+             * not contained (§8's "monitoring never stops"). */
+            enum cpm_decision decision = cpm_classify(skel, (pid_t)pid);
+            if (decision != CPM_ALLOW) {
+                char exec_path[PATH_MAX];
+                if (cpm_resolve_exec_path((pid_t)pid, exec_path, sizeof(exec_path)) != 0) {
+                    strncpy(exec_path, "unresolvable", sizeof(exec_path) - 1);
+                    exec_path[sizeof(exec_path) - 1] = '\0';
+                }
+                printf("[CPM] Containment Prevented\nPID: %u\nExec: %s\nReason: %s\n",
+                       pid, exec_path, cpm_decision_reason(decision));
+                return;
+            }
             if (bpf_map_update_elem(map_fd, &pid, &level, BPF_ANY) != 0) {
                 fprintf(stderr, "[SENSOR] update_elem failed for PID %u with level %u: %s\n", pid, level, strerror(errno));
             } else {
@@ -1128,6 +1441,13 @@ int main(void)
     int err;
 
     signal(SIGINT, handle_sigint);
+    // write() to bridge_fd/control_fd after the Go peer has closed its end
+    // raises SIGPIPE, whose default disposition kills the whole process —
+    // not just that one send call. Under bursty telemetry load this could
+    // take down BOTH connections at once via signal, regardless of which
+    // fd triggered it, undoing the point of splitting them in the first
+    // place. Ignore it and let write()'s normal -1/EPIPE return handle it.
+    signal(SIGPIPE, SIG_IGN);
     kb_scoring_init();
     kb_evidence_init();
     kb_behavior_init();
@@ -1139,16 +1459,29 @@ int main(void)
             sizeof(bridge_sock_path) - 1);
         bridge_sock_path[sizeof(bridge_sock_path) - 1] = '\0';
     }
+    const char *env_ctrl_sock = getenv("KBD_CONTROL_SOCKET_PATH");
+    if (env_ctrl_sock && env_ctrl_sock[0] != '\0') {
+        strncpy(control_sock_path,
+            env_ctrl_sock,
+            sizeof(control_sock_path) - 1);
+        control_sock_path[sizeof(control_sock_path) - 1] = '\0';
+    }
 
     bridge_fd = kb_bridge_try_connect(bridge_sock_path);
     if (bridge_fd < 0) {
-        fprintf(stderr, "kbd_sensor: bridge not connected yet (%s) — will retry on events\n",
+        fprintf(stderr, "kbd_sensor: telemetry bridge not connected yet (%s) — will retry on events\n",
                 bridge_sock_path);
+    }
+
+    control_fd = kb_bridge_try_connect(control_sock_path);
+    if (control_fd < 0) {
+        fprintf(stderr, "kbd_sensor: control channel not connected yet (%s) — will retry\n",
+                control_sock_path);
     } else {
-        if (read_rules_from_bridge(bridge_fd) < 0) {
+        if (read_rules_from_bridge(control_fd) < 0) {
             fprintf(stderr, "kbd_sensor: failed to read rules from control plane, using default compiled rules\n");
         }
-        // NOTE: bridge_fd is deliberately left blocking (with the
+        // NOTE: control_fd is deliberately left blocking (with the
         // connect-time SO_RCVTIMEO deadline from kb_bridge.c) until after
         // read_sensitive_paths_from_bridge() runs below, post-skeleton-load.
         // Switching to non-blocking here first would race that later read
@@ -1179,16 +1512,29 @@ int main(void)
 
     populate_sensitive_paths(skel);
 
+    // CPM (docs/features/CPM.md): populate the protected-executable
+    // floor, self-register this sensor process, and reconcile
+    // already-running protected processes — all before BPF programs
+    // attach below, so no containment command can race ahead of
+    // protection being in place. Order matters: the reconciliation scan
+    // depends on protected_exec_paths_map already being populated.
+    populate_protected_exec_paths(skel);
+    cpm_register_self(skel);
+    cpm_reconcile_running_processes(skel);
+
     // Merge in any operator-supplied additions from policy.yaml's
     // sensitive_paths (see kb-control-plane/internal/policy/policy.go),
     // pushed once by kbd right after accepting this connection. Must run
     // after populate_sensitive_paths() — the map doesn't exist until the
-    // skeleton above is loaded. bridge_fd < 0 (no control plane yet) just
+    // skeleton above is loaded. control_fd < 0 (no control plane yet) just
     // means the compiled-in floor above stands alone, same as always.
-    if (bridge_fd >= 0) {
-        if (read_sensitive_paths_from_bridge(bridge_fd, skel) < 0) {
+    if (control_fd >= 0) {
+        if (read_sensitive_paths_from_bridge(control_fd, skel) < 0) {
             fprintf(stderr, "kbd_sensor: no additional sensitive paths from control plane, using compiled-in floor only\n");
         }
+        make_fd_nonblocking(control_fd);
+    }
+    if (bridge_fd >= 0) {
         make_fd_nonblocking(bridge_fd);
     }
 
@@ -1218,8 +1564,10 @@ int main(void)
         if (err == -EINTR) { err = 0; break; }
         if (err < 0) break;
 
-        if (bridge_fd >= 0) {
-            handle_incoming_containment_cmd(bridge_fd, skel);
+        control_ensure_connected();
+        if (control_fd >= 0) {
+            read_cpm_protected_exec_from_bridge(control_fd, skel);
+            handle_incoming_containment_cmd(control_fd, skel);
         }
 
         if (++poll_count >= KB_ENTROPY_SCAN_EVERY_N_POLLS) {
@@ -1232,6 +1580,7 @@ int main(void)
 
 cleanup:
     kb_bridge_close(bridge_fd);
+    kb_bridge_close(control_fd);
     ring_buffer__free(rb);
     kbd_sensor_bpf__destroy(skel);
     return err < 0 ? -err : 0;

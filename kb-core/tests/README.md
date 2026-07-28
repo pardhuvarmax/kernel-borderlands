@@ -27,3 +27,14 @@ Integration script that triggers all 9 telemetry event types sequentially to che
         ./tests/test_all_hooks.sh
         ```
 *   **VFS and Hook Validation**: Triggers process execs, file accesses on `/etc/shadow` and `/etc/passwd`, outbound curls, raw socket binds, anonymous RWX maps, and `mprotect` W^X transitions.
+
+### 3. CPM (Critical Process Module) Verification (`test_cpm.py`)
+Mock Control Plane driver that sends `kb_wire_containment_cmd` frames over a fake `kbd.sock` to verify `cpm_classify()`'s gate in `handle_incoming_containment_cmd()` (see [`docs/features/CPM.md`](../../docs/features/CPM.md)).
+*   **Usage**:
+    1.  Terminal 1: `sudo KBD_SOCKET_PATH=/var/run/kbd.sock ./build/kbd_sensor`
+    2.  Terminal 2: `sudo python3 tests/test_cpm.py`
+*   **Verifies**:
+    -   PID 1 is rejected (`CPM_REJECT_PID1`).
+    -   A kernel thread (PID 2 / `kthreadd`) is rejected (`CPM_REJECT_KERNEL_THREAD`).
+    -   `kbd_sensor`'s own PID is rejected (`CPM_REJECT_PROTECTED_PID`, via startup self-registration).
+    -   An ordinary unprotected process is still accepted and contained normally (regression check that CPM doesn't over-block), confirmed via `bpftool map dump name contained_pids_map` showing only that PID.

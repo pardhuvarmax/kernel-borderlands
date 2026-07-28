@@ -128,6 +128,33 @@ struct {
     __type(value, __u32);   // Containment Level
 } contained_pids_map SEC(".maps");
 
+// ── CPM (Critical Process Module) — see docs/features/CPM.md ──
+// protected_pids_map's *existence* of a key is what matters (§5.1); value
+// is a sentinel. Sized for critical infra + sensor components, not total
+// process count. Entries are added at exec() time (kb_handle_exec, §5.3)
+// and removed at exit (kb_handle_exit, §7.3) to prevent PID-reuse from
+// inheriting protection. Userspace also inserts directly at startup for
+// self-protection and the /proc reconciliation scan (§7.1).
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 2048);
+    __type(key,   __u32);   // PID
+    __type(value, __u8);    // 1 = protected
+} protected_pids_map SEC(".maps");
+
+// Protected executable registry (§5.2): same key shape as
+// kb_sensitive_paths (fixed 64-byte, zero-padded, exact-match string
+// keys) — compiled-in floor populated by populate_protected_exec_paths(),
+// with room for an operator-pushed overlay via
+// KB_WIRE_MSG_CPM_PROTECTED_EXEC (not yet sent by kb-control-plane; see
+// kb-core/README follow-up note).
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 64);
+    __type(key, char[64]);
+    __type(value, __u8);
+} protected_exec_paths_map SEC(".maps");
+
 struct kb_token_bucket {
     __u64 last_time;
     __u64 tokens;
@@ -242,6 +269,21 @@ int kb_handle_exec(struct trace_event_raw_sched_process_exec *ctx)
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_PROCESS_EXEC);
     bpf_ringbuf_submit(e, 0);
+
+    // CPM registration path (docs/features/CPM.md §5.3): if this exec's
+    // path matches the protected executable registry, mark the new PID
+    // protected before it can ever be evaluated for containment. Buffer
+    // is zero-initialized so bpf_probe_read_kernel_str's NUL-termination
+    // leaves the remainder zero-padded — required for exact-match lookup
+    // against the zero-padded keys populate_protected_exec_paths() wrote
+    // (same requirement as is_sensitive_kernel_path's path_buf).
+    char path_buf[64] = {};
+    unsigned short fname_off = ctx->__data_loc_filename & 0xffff;
+    bpf_probe_read_kernel_str(path_buf, sizeof(path_buf), (char *)ctx + fname_off);
+    if (bpf_map_lookup_elem(&protected_exec_paths_map, path_buf)) {
+        __u8 one = 1;
+        bpf_map_update_elem(&protected_pids_map, &pid, &one, BPF_ANY);
+    }
     return 0;
 }
 
@@ -255,6 +297,11 @@ int kb_handle_exit(struct trace_event_raw_sched_process_template *ctx)
     kb_fill_common(e, pid, KB_EVT_PROCESS_EXIT);
     e->syscall_nr = BPF_CORE_READ(task, exit_code);
     bpf_ringbuf_submit(e, 0);
+
+    // CPM de-registration (§7.3): drop protection the instant the process
+    // exits, so a later, unrelated process reusing this PID never
+    // inherits it. No-op if the PID was never protected.
+    bpf_map_delete_elem(&protected_pids_map, &pid);
     return 0;
 }
 
