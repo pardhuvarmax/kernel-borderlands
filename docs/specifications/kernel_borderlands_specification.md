@@ -62,7 +62,7 @@ A React dashboard using Tailwind CSS and Vite. It provides a visual dashboard fo
 A standardized Model Context Protocol (MCP) server integration, exposing tools, resources, and custom prompts to external AI assistants, swarms, and workspace clients.
 
 #### 7. `kb-aads` (Autonomous Swarm)
-The Decision Support Swarm. Written in Python, it runs multiple independent agent containers (Patroller, Hunter, Healer, Containment) communicating over ZeroMQ and Ray Actor channels to execute cluster-wide voting consensus on threat containment.
+The Decision Support Swarm. Written in Python, it runs multiple independent agent actors (Patroller, Hunter, Healer, Containment) communicating over Ray Actor remote-method calls to execute cluster-wide voting consensus on threat containment. **Corrected**: this section previously said "ZeroMQ and Ray Actor channels" — checked against actual `kb-aads` source (no `import zmq` anywhere) and the Ray-only pivot documented in `docs/development/control-aads/aads-intelligence-roadmap.md`; ZeroMQ was dropped before this was implemented and never built.
 
 ---
 
@@ -171,7 +171,7 @@ kernel-borderlands/
 └── kb-aads/                                   # Python MARL Agent Swarm
     ├── README.md                              # Swarm setup documentation
     ├── main.py                                # Swarm daemon entrypoint
-    ├── comms/                                 # ZeroMQ & Ray consensus pipelines
+    ├── comms/                                 # gRPC client to kb-control-plane (ControlPlaneClient) — corrected, was "ZeroMQ & Ray consensus pipelines"; no ZeroMQ exists in this directory, and Ray actor code lives in swarm/ and consensus/, not here
     ├── consensus/                             # Swarm voting and quorum engines
     ├── swarm/                                 # Swarm runtime managers
     ├── agents/                                # Agent files (Patroller, Hunter, Healer, Containment)
@@ -760,7 +760,7 @@ service KernelBorderlands {
 }
 ```
 
-The Python AADS swarm communicates over ZeroMQ and Ray Actor consensus pipelines, coordinating threat assessments across multiple nodes:
+The Python AADS swarm communicates over Ray Actor consensus pipelines, coordinating threat assessments across multiple nodes. **Corrected**: previously said "ZeroMQ and Ray Actor" — no ZeroMQ exists in `kb-aads` (see the correction on this doc's §7 above). **Also worth flagging while checking this section against code**: the sequence below, and the bullet list after it, describe an intended end-to-end flow that isn't actually wired up yet as of this writing — `docs/development/control-aads/kb-events-swarm-ingestion-gap.md` documents, with code citations, that nothing currently consumes `StreamEvents`/`StreamAlerts` at all (Patroller/Hunter's described behavior below is aspirational, not live), and that Hunter's actual code (`agents/hunter.py`) reacts to zone transitions arriving via `StreamEvents`, not `StreamAlerts` as the bullet below claims — read that doc for the verified current state before treating this section as describing running behavior:
 
 ```mermaid
 sequenceDiagram
@@ -785,7 +785,7 @@ sequenceDiagram
 *   **Patroller Agent**: Continuously polls baseline statistics from `StreamEvents` to build normal behavior thresholds.
 *   **Hunter Agent**: Monitors `StreamAlerts`. When an anomaly is detected, it queries historical SQLite data to verify.
 *   **Healer Agent**: Analyzes event sequences to detect false-positives (e.g. valid backup actions matching suspicious execution sequences).
-*   **Consensus Engine**: Swarms execute a local voting protocol over ZeroMQ topics. If a quorum of agents votes `COMPROMISED`, the Executor Agent triggers `EnforceContainment` with a `TERMINATE` payload.
+*   **Consensus Engine**: Swarms execute a local voting protocol over Ray Actor remote-method calls (corrected — not ZeroMQ topics, see above). If a quorum of agents votes `COMPROMISED`, the Executor Agent triggers `EnforceContainment` with a `TERMINATE` payload.
 
 ---
 
@@ -1113,11 +1113,12 @@ Bubble Tea Elm-architecture structs.
 
 This appendix documents the internal agent implementations inside `kb-aads`.
 
-*   `class ConsensusEngine`
-    -   *Description*: Implements Python ZeroMQ-based quorum voting protocols.
+*   `class JudgeAgent` / `class JuryAgent` (`kb-aads/consensus/jje.py`)
+    -   *Description*: **Corrected against actual source** — no `ConsensusEngine` class exists in the codebase, and there is no ZeroMQ anywhere in `kb-aads` (see the corrections earlier in this document). Quorum voting is implemented as two Ray actor classes instead.
     -   *Methods*:
-        -   `def submit_alert(self, alert_event)`: Publishes telemetry anomalies to the `kb-alerts` ZeroMQ channel.
-        -   `def process_votes(self)`: Listens on the `kb-votes` ZeroMQ channel to process agent consensus. If quorum matches, it instantiates executor commands.
+        -   `JudgeAgent.coordinate_consensus(self, alert_payload: dict)`: Orchestrates a consensus round — spawns `JuryAgent` actors, collects votes.
+        -   `JuryAgent.evaluate_and_vote(self, alert_payload: dict) -> dict`: A single jury actor's vote on one alert.
+    -   Votes/decisions are Ray remote-method calls between actors, not messages on a pub/sub channel — there is no `kb-alerts`/`kb-votes` topic anywhere in the code.
 
 ---
 

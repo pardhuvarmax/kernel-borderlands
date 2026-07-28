@@ -1,5 +1,10 @@
 # Implement CPM (Critical Process Module) in kb-core
 
+**Status: Implemented and verified live** (this doc was the implementation plan; kept as
+the implementation record — see the Verification section's post-implementation update for
+what changed after this was written). `docs/features/CPM.md` remains the design spec this
+implements; `docs/features/README.md`'s catalog links both.
+
 ## Context
 
 `docs/features/CPM.md` is a design spec (Status: Design Specification) for an authorization
@@ -112,20 +117,33 @@ No `Makefile` changes needed — `kbd_sensor` is already a build target compilin
 
 ## Verification
 
+**Update, post-implementation:** a later pass in the same session split `kbd.sock` into
+telemetry-only (`kbd.sock`) and control (`kbct.sock`) sockets (see
+`docs/development/core-control/control-plane-catalog.md` §5.3) — `kbd_sensor` now reads
+containment commands from `kbct.sock` exclusively, not `kbd.sock`. `tests/test_cpm.py`
+(written for this verification, see below) has been updated to bind both sockets
+accordingly; the steps below reflect the current (post-split) reality, not the
+single-socket design this feature was originally verified against.
+
 1. `cd kb-core && make clean && make` — confirms the eBPF verifier accepts the new map
    lookups/updates in `kb_handle_exec`/`kb_handle_exit`, and the userspace side compiles
    clean.
-2. Runtime check using the existing mock-control-plane test harness
-   (`tests/test_restore_ipc.py`, already sends `kb_wire_containment_cmd` frames over a fake
-   `kbd.sock`): run `sudo ./build/kbd_sensor`, then drive the mock harness (or a small ad hoc
-   variant of it) to send a containment command for PID 1 and for `kbd_sensor`'s own PID —
-   confirm both are rejected with `[CPM] Containment Prevented` log lines and **no** entry
-   appears in `contained_pids_map` (`sudo bpftool map dump name contained_pids_map`).
+2. Runtime check using `tests/test_cpm.py` (the mock control-plane driver written for this
+   verification — binds both `kbd.sock` and `kbct.sock`, sends `kb_wire_containment_cmd`
+   frames over the control connection): run `sudo ./build/kbd_sensor`, then
+   `sudo python3 tests/test_cpm.py` — confirm PID 1, a kernel thread, and `kbd_sensor`'s own
+   PID are all rejected with `[CPM] Containment Prevented` log lines and **no** entry appears
+   in `contained_pids_map` for them (the script dumps the map by ID at the end, since the
+   map's real name is truncated past `bpftool`'s 15-char limit — see the script's own
+   comments).
 3. Send a containment command for an ordinary unprotected PID (e.g. a `sleep 100 &`
    background process) — confirm it's still accepted and enforced as before (regression
-   check that CPM doesn't over-block).
+   check that CPM doesn't over-block). `test_cpm.py` does this as its 4th case.
 4. `tests/test_all_hooks.sh` — general regression pass to confirm the exec/exit hook
    additions haven't broken existing telemetry on those two tracepoints.
+
+All of the above has been run live end-to-end (not just read through) — see
+`tests/README.md`'s CPM entry for the confirmed pass/fail per case.
 
 ## Explicit follow-up (not done this pass, to hand off cleanly)
 

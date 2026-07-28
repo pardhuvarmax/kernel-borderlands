@@ -1,5 +1,14 @@
 # KB Wire Protocol — kbd_sensor → kbd daemon
 
+**Known stale beyond this pass's fix (flagging, not fully correcting here — out of
+scope for this pass, worth its own rewrite):** `version = 1` below is outdated —
+`kb_bridge.h`'s current `KB_WIRE_VERSION` is `3`, `ProcessState` doesn't include the
+`start_time_ns` field the v3 bump added (see `wire-update.md`), and this doc only
+documents `msg_type` 1/2 — it's silent on `ContainmentCmd` (5), `ProcessExit` (4), and
+`SensitivePaths` (6), all of which exist in `kb_bridge.h` today. Only the Socket Path
+section below has been corrected as part of this pass (it was directly affected by the
+kbd.sock/kbct.sock split); the rest predates that and was already out of date before it.
+
 **format :** 
 
 ```
@@ -69,10 +78,20 @@ Total: 2+1+1+4+4+4+8+8 = 32 bytes
   2 = BORDERLANDS
 
 ## Socket Path
-  /var/run/kbd.sock
-  Single long-lived connection from kbd_sensor.
+  /run/kb/kbd.sock  (not /var/run/kbd.sock — corrected)
+  Telemetry only (this doc's scope: ProcessState + ZoneTransition, both
+  sensor -> kbd). As of the kbd.sock/kbct.sock split (see
+  docs/development/core-control/control-plane-catalog.md §5.3),
+  kbd_sensor holds a SECOND, separate long-lived connection to
+  /run/kb/kbct.sock for the reverse direction (containment commands,
+  sensitive-path pushes) — out of this doc's scope by its own title, but
+  worth knowing this is no longer the only connection kbd_sensor holds.
   On disconnect: kbd_sensor reconnects automatically on next event.
-  On kbd restart: kbd_sensor detects EPIPE and reconnects.
+  Ignores SIGPIPE (signal(SIGPIPE, SIG_IGN) in kbd_sensor.c's main())
+  rather than relying on a delivered EPIPE-triggering signal to reconnect
+  — a write() to a closed connection now just returns -1/EPIPE like any
+  other error instead of killing the process, and reconnect logic (via
+  bridge_ensure_connected()) picks it up from there.
 
 - refer these files :
     - [bridge files](../../kb-core/userspace/bridge)

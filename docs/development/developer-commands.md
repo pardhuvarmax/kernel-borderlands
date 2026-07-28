@@ -24,7 +24,7 @@ This document contains the most commonly used build, test, and runtime commands 
   ```bash
   cd kb-control-plane && go build -o bin/kbd cmd/kbd/main.go
   ```
-- **Run Daemon (Accesses `/run/kb/kbd.sock`)**:
+- **Run Daemon (binds `/run/kb/kbd.sock` telemetry + `/run/kb/kbct.sock` control + `/run/kb/kba.sock` gRPC)**:
   ```bash
   go run cmd/kbd/main.go
   ```

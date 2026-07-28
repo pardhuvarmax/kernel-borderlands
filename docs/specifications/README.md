@@ -16,7 +16,7 @@ This directory houses the authoritative technical specifications, design documen
 
 ### 3. [Safety & Integrity Design Spec](safety_integrity_design_spec.md)
 * **Filename**: `safety_integrity_design_spec.md`
-* **Purpose**: Outlines active verification loops executed by the `kb-checker` Safety Engine. Covers cryptographically checking active kernel eBPF bytecode signatures, gRPC socket checks over `/run/kb/kbd.sock`, and Ray cluster container consensus audits.
+* **Purpose**: Outlines active verification loops executed by the `kb-checker` Safety Engine. Covers cryptographically checking active kernel eBPF bytecode signatures, gRPC socket checks over `/run/kb/kba.sock` (corrected — the spec itself says `kba.sock`, not `kbd.sock`; `kbd.sock` is a raw telemetry pipe, never gRPC), and Ray cluster container consensus audits.
 
 ### 4. [Operator Interfaces Spec](operator_interfaces_spec.md)
 * **Filename**: `operator_interfaces_spec.md`

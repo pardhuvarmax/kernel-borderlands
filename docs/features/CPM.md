@@ -2,7 +2,7 @@
 
 **Version:** 2.0
 **Component:** Kernel Behaviour Sensor (KBS)
-**Status:** Design Specification (Expanded)
+**Status:** Implemented and verified live in `kb-core` — see [`cpm-implementation.md`](cpm-implementation.md) for what was built, the one deliberate deviation from this spec's literal text, and what was verified. This document remains the design source of truth for CPM's intended behavior; the implementation doc records how it was actually realized.
 
 ---
 

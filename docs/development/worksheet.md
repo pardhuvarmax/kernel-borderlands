@@ -30,6 +30,8 @@ Before implementing the tasks outlined below, the development team must align on
 ### Context & Design Overview
 In the initial development phase, the Go Control Plane acted as a passive receiver. To close the control loop, we implement a feedback channel. When an operator triggers a containment override (e.g. `SECCOMP` or `NAMESPACE` isolation), the Go daemon writes a command structure down the UDS socket. The C loader reads this packet and updates a BPF map.
 
+**Update, after this task shipped:** the diagram below shows the socket as it existed when this task was implemented — `kbd.sock` carrying both telemetry and this feedback write. A later pass split that into `kbd.sock` (telemetry only) and a new `kbct.sock` (this feedback write now goes here instead) — see `docs/development/core-control/control-plane-catalog.md` §5.3. Kept the diagram as originally written below since this is a completed-task record, not a live spec; substitute `kbct.sock` for `kbd.sock` mentally when reading it against current code.
+
 ```text
   [Operator / CLI / AI]
            │ (gRPC)

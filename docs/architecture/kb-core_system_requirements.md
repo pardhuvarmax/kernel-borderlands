@@ -86,7 +86,7 @@ Combines `kb-core`'s BPF footprint (§2), the SQLite growth risk (§2.5, `kb-con
 | **Disk — initial** | <100MB (`state.db` schema + WAL overhead) | <100MB | <100MB | <100MB |
 | **Disk — ongoing growth** | **No safe answer today** — §2.5's retention gap means this is unbounded on every tier alike. A rough planning number: at ~300B/audit-row and ~130B/zone-transition-row, every 100K combined events ≈ **~40MB**. Actual event rate is workload-dependent (idle dev box measured `events_per_second: 10.7`, §1.13-adjacent metrics — but zone transitions and audit entries are far rarer than raw events, so this doesn't translate directly to a per-day number without real production data). | Same growth mechanism, same lack of a cap | Same | Same, just reached faster given higher event volume |
 | **Kernel** | §4 baseline, no exceptions | §4 baseline | §4 baseline | §4 baseline |
-| **Network** | None required (`kba.sock`/`kbd.sock`/`kbc.sock` are all UDS, per `kb-control-plane`'s catalog §1.1/§5.3) — only SSH (`:2222`) is network-facing, and that's optional/operator-access only | Same | Same | Same |
+| **Network** | None required (`kba.sock`/`kbd.sock`/`kbct.sock`/`kbc.sock` are all UDS, per `kb-control-plane`'s catalog §1.1/§5.3) — only SSH (`:2222`) is network-facing, and that's optional/operator-access only | Same | Same | Same |
 
 - **Bottom line on disk**: this is the one axis in the whole spec that genuinely has **no ceiling at any tier** until `kb-control-plane` builds the retention/rotation job described in §2.5. A Min-tier box with a small disk is the one most likely to actually run out of space first, purely because it started with less headroom — not because it does anything wrong.
 
