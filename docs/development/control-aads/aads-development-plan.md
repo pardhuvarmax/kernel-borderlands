@@ -208,40 +208,68 @@ class BaseAgent:
 ```
 
 ### 4. `kb-aads/swarm/orchestrator.py` `[MODIFY]`
-Convert to a Ray Swarm Orchestrator managing remote actors — **local mode by default**, with cluster mode as an explicit opt-in for later.
+Convert to a Ray Swarm Orchestrator managing remote actors — **local mode by default**, with cluster mode as an explicit opt-in for later. This snippet reflects the actual current implementation (not a simplified illustration): note `ROLE_CLASSES` routes each role to its concrete agent class rather than always instantiating the generic `BaseAgent`, since Ray forbids subclassing an actor-decorated class (`@ray.remote` must go on the leaf class — see file 3's note); `RemoteBaseAgent` is the fallback for undecorated roles (e.g. `IDLE`). `Executor` and `Judge` are spawned as singletons in `start_swarm` because JJE consensus needs one gateway back to `kb-control-plane`, not one per agent — Jury actors are spawned dynamically per round inside `JudgeAgent.coordinate_consensus` (`consensus/jje.py`), not here.
 ```python
 import ray
 import asyncio
-from agents.base_agent import BaseAgent, AgentRole
+from agents.base_agent import RemoteBaseAgent, AgentRole
+from agents.hunter import HunterAgent
+from agents.patroller import PatrollerAgent
+from agents.healer import HealerAgent
+from agents.containment import ContainmentAgent
+from agents.executor import ExecutorAgent
+from consensus.jje import JudgeAgent
+
+ROLE_CLASSES = {
+    AgentRole.HUNTER: HunterAgent,
+    AgentRole.PATROLLER: PatrollerAgent,
+    AgentRole.HEALER: HealerAgent,
+    AgentRole.CONTAINMENT: ContainmentAgent,
+}
+
 
 class RaySwarmOrchestrator:
-    """Manages remote agent actors — local (single-node) by default, cluster mode opt-in."""
+    """Connects to (or starts) a Ray runtime and manages remote agent actors."""
+
     def __init__(self, ray_mode: str = "local"):
         if ray_mode == "cluster":
-            # Future/opt-in: connect to an existing multi-node Ray cluster
+            # Join an existing head node started via `ray start --head`.
             ray.init(address="auto", ignore_reinit_error=True)
         else:
-            # Current default: everything in-process on this machine, no network hop
+            # Single-node dev: starts a local head in-process, no
+            # external `ray start` step required.
             ray.init(ignore_reinit_error=True)
+
         self.agents = {}
         self.agent_counter = 0
+        self.judge = None
+        self.executor = None
 
     def spawn_agent(self, role: AgentRole):
         self.agent_counter += 1
         agent_id = f"agent-{self.agent_counter}"
-        
-        # Deploy as remote Ray Actor
-        agent_actor = BaseAgent.remote(agent_id, role)
+
+        agent_cls = ROLE_CLASSES.get(role)
+        agent_actor = agent_cls.remote(agent_id) if agent_cls else RemoteBaseAgent.remote(agent_id, role)
+
         self.agents[agent_id] = agent_actor
         return agent_actor
 
-    async def start_swarm(self, config: dict):
+    async def start_swarm(self, config: dict, grpc_socket: str = "/run/kb/kba.sock"):
+        # Executor and Judge are singletons — JJE consensus routes through
+        # one gateway back to kb-control-plane. Jury actors are spawned
+        # dynamically per round by JudgeAgent.coordinate_consensus (see
+        # consensus/jje.py), not here.
+        self.executor = ExecutorAgent.remote("executor-1", socket_path=grpc_socket)
+        self.judge = JudgeAgent.remote("judge-1", self.executor)
+        self.agents["executor-1"] = self.executor
+        self.agents["judge-1"] = self.judge
+
         for role_name, count in config.items():
             role = AgentRole(role_name)
             for _ in range(count):
                 self.spawn_agent(role)
-        
-        # Trigger start lifecycle on all remote actors concurrently
+
         await asyncio.gather(*[
             agent.start.remote() for agent in self.agents.values()
         ])
