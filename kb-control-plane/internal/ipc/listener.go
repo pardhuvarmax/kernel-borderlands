@@ -38,15 +38,17 @@ func (l *Listener) getSensitivePaths() []string {
 	return l.sensitivePaths
 }
 
-// NewListener creates a Listener that will bind to the UDS path from
-// GetSocketPath() when Listen() is called. The handler is stored now so it
-// can be passed to NewReader per connection without a separate setter call.
-// The socket is NOT bound yet — that happens inside Listen() — so NewListener
-// is safe to call in tests and during initialisation even when the socket
-// directory does not yet exist.
-func NewListener(h MessageHandler) (*Listener, error) {
+// NewListener creates a Listener that will bind to path when Listen() is
+// called. The handler is stored now so it can be passed to NewReader per
+// connection without a separate setter call. The socket is NOT bound yet —
+// that happens inside Listen() — so NewListener is safe to call in tests
+// and during initialisation even when the socket directory does not yet
+// exist. Callers pass GetSocketPath() or GetControlSocketPath() (or an
+// explicit override) — see ControlPlane.New() for the two production
+// instances (telemetry vs. control) this is used to build.
+func NewListener(path string, h MessageHandler) (*Listener, error) {
 	return &Listener{
-		path:    GetSocketPath(),
+		path:    path,
 		conns:   make(map[net.Conn]bool),
 		Done:    make(chan struct{}),
 		handler: h,

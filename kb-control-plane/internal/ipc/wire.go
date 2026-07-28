@@ -24,6 +24,15 @@ func GetSocketPath() string {
     return DefaultSocketPath
 }
 
+// GetControlSocketPath returns the path for the Go -> sensor control
+// channel (SocketControl), mirroring GetSocketPath's env-override pattern.
+func GetControlSocketPath() string {
+    if p := os.Getenv("KB_CONTROL_SOCKET_PATH"); p != "" {
+        return p
+    }
+    return SocketControl
+}
+
 type KBZone uint32
 const (
     ZoneSafe        KBZone = 0

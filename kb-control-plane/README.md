@@ -13,14 +13,14 @@ To handle high-throughput system events without adding I/O latency:
 *   **Cold-Start Recovery**: Rebuilds L1 memory state from L2 SQLite database upon daemon restart to preserve context.
 
 ### 2. IPC Wire Protocol (Unix Domain Socket Bridge)
-Communicates with `kbd_sensor` over `/run/kb/kbd.sock` (formerly `/var/run/kbd.sock`):
+Communicates with `kbd_sensor` over **two** Unix sockets, split by direction — `/run/kb/kbd.sock` (telemetry, sensor → Go, one-way) and `/run/kb/kbct.sock` (control pushes — containment commands, sensitive-path pushes — Go → sensor, one-way). Split so a telemetry-volume burst can never stall or kill containment delivery; see `docs/development/core-control/control-plane-catalog.md` §5.3. (Formerly one socket, `/var/run/kbd.sock`, carrying both directions.)
 *   **Header Magic**: `0x4B42` (Little Endian).
 *   **Wire Version**: `3`.
 *   **Packed Structural Layouts**:
     -   `ProcessState` $\to$ Exactly **128 bytes** (LE, Packed).
     -   `ZoneTransition` $\to$ Exactly **40 bytes** (LE, Packed).
     -   `kb_wire_attack_rule` $\to$ Exactly **220 bytes** (LE, Packed).
-*   **Dynamic Rules Handshake**: On connection start, Go compiles `rules.yaml` and transmits them over the bridge to dynamically update the C sensor's behavior rules list.
+*   **Dynamic Rules Handshake**: `internal/ipc/rules.go`'s `SendRulesPayload` implements this (compiles `rules.yaml`, transmits over the bridge) but is grep-confirmed to have zero production callers — not currently wired into the connection-start flow despite existing. The sensitive-paths push (a separate, simpler mechanism — `SendSensitivePaths`) *is* live on every connection start, over `kbct.sock`.
 
 ### 3. Hardened SSH Service
 A secure, network-facing SSH console service embedded in the `kbd` daemon:

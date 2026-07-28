@@ -5,8 +5,25 @@ package ipc
 const (
 	// SocketIPC — bound by kbd (Go). Binary telemetry pipe carrying raw
 	// framed eBPF events from kbd_sensor (C) to the Go control plane.
-	// NOT gRPC. See Task 1.
+	// NOT gRPC. Telemetry-only, one direction (sensor -> Go) — Go never
+	// writes back on this connection. See Task 1.
+	//
+	// Containment/sensitive-path/rules pushes used to also go out over
+	// this same connection (Go -> sensor) until they were split onto
+	// SocketControl below: a burst of telemetry could fill this
+	// connection's send buffer, get misread as a dead connection, and
+	// take the containment-command path down as collateral damage even
+	// though nothing was wrong with delivering containment commands.
+	// See docs/development/core-control/control-plane-catalog.md §5.3.
 	SocketIPC = "/run/kb/kbd.sock"
+
+	// SocketControl — bound by kbd (Go). Every Go -> sensor control push:
+	// containment commands (SendContainmentCmd), sensitive-path pushes,
+	// and (if ever revived) the rules push. Split out from SocketIPC so a
+	// telemetry-volume burst on the sensor -> Go direction can never
+	// stall or kill delivery of containment commands — see SocketIPC's
+	// comment above for why this split exists.
+	SocketControl = "/run/kb/kbct.sock"
 
 	// SocketGRPC — bound by kbd (Go). General-purpose gRPC socket:
 	// client registrations, enforcer/containment directives (the main

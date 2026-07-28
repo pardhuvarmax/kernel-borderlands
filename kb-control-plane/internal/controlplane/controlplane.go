@@ -39,8 +39,15 @@ type ControlPlane struct {
 	enforcer     *enforcement.Enforcer
 	policy       *policy.Engine
 	grpc         *grpc.Server
-	listener     *ipc.Listener // created once in New(), used in Start()
-	sshService   *ssh.Service
+	// telemetryListener (SocketIPC, kbd.sock) and controlListener
+	// (SocketControl, kbct.sock) are both created once in New() and
+	// started in Start(). Split so a telemetry-volume burst on the
+	// sensor -> Go direction can never stall or kill delivery of
+	// containment commands (Go -> sensor) — see SocketIPC's comment in
+	// internal/ipc/sockets.go for the failure mode this avoids.
+	telemetryListener *ipc.Listener
+	controlListener   *ipc.Listener
+	sshService        *ssh.Service
 
 	// comm cache — pid → comm (populated by ProcessState messages)
 	commCache sync.Map
@@ -103,15 +110,30 @@ func New(dbPath, policyPath string) (*ControlPlane, error) {
 	// The UDS socket is NOT bound here — binding happens inside Listen(), which
 	// is called by Start(). This keeps New() safe to call in test environments
 	// where /run/kb/ may not exist.
-	listener, err := ipc.NewListener(cp)
+	//
+	// Two listeners: telemetryListener (kbd.sock) only ever receives from
+	// the sensor via cp's MessageHandler methods below; controlListener
+	// (kbct.sock) is the one actually used to push containment commands
+	// and sensitive-path additions out to the sensor. cp is registered as
+	// the MessageHandler on both, but controlListener's ReadLoop will just
+	// block on reads since the sensor never writes anything back on that
+	// connection — same idle-until-close behavior telemetryListener
+	// already tolerates today, just on the other side.
+	telemetryListener, err := ipc.NewListener(ipc.GetSocketPath(), cp)
 	if err != nil {
-		return nil, fmt.Errorf("ipc listener: %w", err)
+		return nil, fmt.Errorf("ipc telemetry listener: %w", err)
 	}
-	cp.listener = listener
-	listener.SetSensitivePaths(p.SensitivePaths())
+	cp.telemetryListener = telemetryListener
 
-	// Enforcer routes containment commands to the C sensor via the listener.
-	cp.enforcer = enforcement.NewEnforcer(listener)
+	controlListener, err := ipc.NewListener(ipc.GetControlSocketPath(), cp)
+	if err != nil {
+		return nil, fmt.Errorf("ipc control listener: %w", err)
+	}
+	cp.controlListener = controlListener
+	controlListener.SetSensitivePaths(p.SensitivePaths())
+
+	// Enforcer routes containment commands to the C sensor via the control listener.
+	cp.enforcer = enforcement.NewEnforcer(controlListener)
 
 	return cp, nil
 }
@@ -122,10 +144,15 @@ func (cp *ControlPlane) Start() error {
 		return fmt.Errorf("ssh service start: %w", err)
 	}
 
-	// Use the listener constructed in New() — do NOT call NewListener again.
+	// Use the listeners constructed in New() — do NOT call NewListener again.
 	go func() {
-		if err := cp.listener.Listen(); err != nil {
-			log.Fatalf("[KB] IPC: %v", err)
+		if err := cp.telemetryListener.Listen(); err != nil {
+			log.Fatalf("[KB] IPC telemetry: %v", err)
+		}
+	}()
+	go func() {
+		if err := cp.controlListener.Listen(); err != nil {
+			log.Fatalf("[KB] IPC control: %v", err)
 		}
 	}()
 
@@ -179,9 +206,12 @@ func (cp *ControlPlane) Stop() {
 	}
 	os.Remove(grpcSocketPath) // best-effort cleanup so next start doesn't hit a stale file
 	cp.store.Close()
-	// Signal the IPC accept loop to stop.
-	if cp.listener != nil {
-		close(cp.listener.Done)
+	// Signal both IPC accept loops to stop.
+	if cp.telemetryListener != nil {
+		close(cp.telemetryListener.Done)
+	}
+	if cp.controlListener != nil {
+		close(cp.controlListener.Done)
 	}
 }
 
