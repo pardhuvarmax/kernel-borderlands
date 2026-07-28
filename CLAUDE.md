@@ -80,12 +80,12 @@ cd kb-op/kb-dashboard && npm run dev
 
 ## Architecture
 
-Data flow: `kb-core` (Ring 0 eBPF) → UDS `/run/kb/kbd.sock` → `kb-control-plane` (`kbd`) → gRPC (UDS)/WebSockets → operator interfaces (`kb-tui`, `kb-dashboard`, `kbctl`, `kb-mcp`) and `kb-aads`. `kb-checker` runs independently, watchdogging the rest over its own UDS sockets.
+Data flow: `kb-core` (Ring 0 eBPF) → UDS `/run/kb/kbd.sock` → `kb-control-plane` (`kbd`) → gRPC (UDS)/WebSockets → operator interfaces (`kb-tui`, `kb-dashboard`, `kbctl`, `kb-mcp`) and `kb-aads`. `kbd` pushes containment/sensitive-path commands back down to `kb-core` over a separate `/run/kb/kbct.sock`, not `kbd.sock` — see the socket topology bullet below for why. `kb-checker` runs independently, watchdogging the rest over its own UDS sockets.
 
 Load-bearing references — read before touching cross-subsystem behavior:
 - **Wire/event contract (kb-core ↔ kb-control-plane)**: [docs/architecture/kbd-contracts.md](docs/architecture/kbd-contracts.md), [docs/development/core-control/wire-protocol.md](docs/development/core-control/wire-protocol.md). Packed LE structs (`ProcessState`=128B, `ZoneTransition`=40B, `kb_wire_attack_rule`=220B) and locked `event_type` values — C and Go sides must change together.
 - **Kernel hook points**: [docs/architecture/hookpoints.md](docs/architecture/hookpoints.md).
-- **Socket topology & boot order**: [docs/architecture/boot_sequence_spec.md](docs/architecture/boot_sequence_spec.md), [docs/development/core-control/kba_uds_binding_spec.md](docs/development/core-control/kba_uds_binding_spec.md). Sockets under `/run/kb/`: `kbd.sock` (telemetry), `kba.sock` (gRPC enforcement IPC), `kbc.sock` (kb-checker diagnostics).
+- **Socket topology & boot order**: [docs/architecture/boot_sequence_spec.md](docs/architecture/boot_sequence_spec.md), [docs/development/core-control/kba_uds_binding_spec.md](docs/development/core-control/kba_uds_binding_spec.md). Sockets under `/run/kb/`: `kbd.sock` (telemetry, sensor → Go, one direction), `kbct.sock` (control: containment/sensitive-path pushes, Go → sensor — split from `kbd.sock` so a telemetry burst can never stall or kill containment delivery, see `internal/ipc/sockets.go`'s `SocketIPC` comment), `kba.sock` (gRPC enforcement IPC), `kbc.sock` (kb-checker diagnostics).
 - **Storage design (L1 sync.Map / L2 SQLite WAL)**: [docs/development/adr/ADR-1.md](docs/development/adr/ADR-1.md); other ADRs in [docs/development/adr/](docs/development/adr/).
 - **BPF LSM setup**: [docs/architecture/enabling-bpf-lsm.md](docs/architecture/enabling-bpf-lsm.md). 
 - **Cross-kernel portability (BTF/CO-RE)**: [docs/architecture/cross-kernel-portability.md](docs/architecture/cross-kernel-portability.md).
