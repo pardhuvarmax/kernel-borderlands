@@ -587,7 +587,8 @@ flowchart LR
     TUI["kb-tui (Rust)"] -->|gRPC, live| S_GRPC
     MCP["kb-mcp (Go)"] -->|gRPC, live| S_GRPC
     ChkClient["kb-checker (Rust)<br/>liveness + map-integrity checks"] -->|gRPC, live| S_GRPC
-    AADS["kb-aads (Python)<br/>ControlPlaneClient in comms/grpc_client.py"] -.->|written, never called<br/>by any live agent| S_GRPC
+    AADS_EXEC["kb-aads (Python)<br/>ExecutorAgent, agents/executor.py"] -->|submit_decision, live<br/>reachable via swarm/orchestrator.py -&gt; main.py| S_GRPC
+    AADS_STREAM["kb-aads (Python)<br/>ControlPlaneClient.stream_events/<br/>stream_alerts, comms/grpc_client.py"] -.->|written, never called<br/>by any live agent —<br/>no live kb-events path exists at all,<br/>see comms/README.md's corrected version| S_GRPC
     KBCTL["kbctl (Go)<br/>kb-op/kbctl/ — README only, no source"] -.->|documented against<br/>stale :50051 TCP, not kba.sock| S_GRPC
 
     Dashboard["kb-dashboard (React/TS)"] -->|HTTP + SSE, live| S_HTTP
@@ -601,14 +602,15 @@ flowchart LR
     style S_HTTP fill:#1f4e3d,stroke:#2e8b6f,color:#fff
     style S_SSH fill:#1f4e3d,stroke:#2e8b6f,color:#fff
     style S_KBC fill:#1f4e3d,stroke:#2e8b6f,color:#fff
-    style AADS fill:#4e3d1f,stroke:#8b6f2e,color:#fff
+    style AADS_EXEC fill:#1f4e3d,stroke:#2e8b6f,color:#fff
+    style AADS_STREAM fill:#4e3d1f,stroke:#8b6f2e,color:#fff
     style KBCTL fill:#4e1f1f,stroke:#8b2e2e,color:#fff
 ```
 
 - **Reading this**:
 - `kbd.sock`/`kbct.sock` are a pair, not two independent sockets — both exist only for `kbd_sensor`'s connection, split by direction (telemetry in, control out) rather than by client identity the way the other sockets are.
-- `kba.sock` is the one socket everyone actually wants — 3 live clients: `kb-tui`, `kb-mcp`, `kb-checker`.
-- Plus one written-but-orphaned client: `kb-aads` — code exists, no agent calls it (see the "AADS" question above).
+- `kba.sock` is the one socket everyone actually wants — 4 live clients: `kb-tui`, `kb-mcp`, `kb-checker`, and (as of this pass) `kb-aads`'s `ExecutorAgent` — `submit_decision` is reachable live via `swarm/orchestrator.py` → `main.py`, correcting the previous single "written, never called" edge, which conflated it with the still-genuinely-dead `stream_events`/`stream_alerts` half.
+- `stream_events`/`stream_alerts` (`ControlPlaneClient` in `comms/grpc_client.py`) remain written-but-orphaned — zero callers outside `tests/test_grpc_client.py`. There is **no live path for `kb-events` to reach the swarm at all** today — `kb-aads/comms/README.md` used to claim a ZeroMQ pub/sub fallback, but that predates the Ray-only pivot documented in `aads-intelligence-roadmap.md` and was never actually built (no `import zmq` anywhere in `kb-aads` source); the README has been corrected accordingly. This is a real open gap worth its own tracking, separate from the coupling risk below. **Landmine if the gap gets closed via this gRPC path**: `ControlPlaneClient` opens one `grpc.Channel` per instance and both RPC families share it — a future streaming consumer sharing `ExecutorAgent`'s existing client instance would multiplex a continuous inbound stream and `submit_decision`'s request/response over one socket, and a stalled consume loop could delay `submit_decision`'s response on that same connection. Same class of coupling as the `kbd.sock`/`kbct.sock` split above, just gRPC/HTTP2 instead of raw framing. The fix is cheap here — a separate `ControlPlaneClient` instance for the stream consumer, not a socket-level change — and is already noted directly on `stream_events`/`stream_alerts` in `grpc_client.py`.
 - Plus one documented-but-nonexistent client: `kbctl` — `kb-op/kbctl/` is a README with no source, and that README itself is stale, describing the pre-migration `:50051` TCP endpoint instead of `kba.sock`.
 - `kbc.sock` used to be the mirror-image problem — a real bound socket with a real RPC and no client — until `kbd` itself was wired up as its client (§1.13): `internal/checkerclient/` dials `kb-checker`'s `GetStatus()` from `http.go`'s `/api/services` handler, replacing the `isProcessRunning("kb-checker")` proxy that only checked whether the process existed, not whether the watchdog considered itself healthy.
 - `kb-aads` and `kbctl` remain out of `kb-control-plane` scope (`kb-aads` is out of Teju's scope per the prior discussion, `kbctl` is Rupa's per its README) — this chart exists to make that ownership boundary visible, not to assign new work against it.
