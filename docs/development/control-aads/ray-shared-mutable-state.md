@@ -73,6 +73,8 @@ r.hincrby(f"votes:{event_id}", jury_id, 1)
 
 Independent of the transport issue, it also loses Ray's in-memory/zero-copy latency advantage for this data — round-trips go to Redis instead of between actors, plus it's a new daemon to run, monitor, and secure that nothing else in this repo currently depends on. Note: Ray runs its own internal Redis-based GCS for cluster metadata — using that instance directly for application data is not advisable regardless of the above.
 
+**Clarification — does Ray itself put a network surface on the current dev setup?** No, not as currently configured. `kb-aads` runs Ray in **local mode** (`ray.init(ignore_reinit_error=True)`, no `address=`, `config/agents.yaml`'s `ray.mode: local` — see `swarm/orchestrator.py`). In local mode, everything — actors, the Plasma object store, the scheduler, and Ray's own internal GCS — runs in one process tree on one machine and communicates over local sockets, not a routable network interface; there's no separate node to talk to. `orchestrator.py` does have an `address="auto"` **cluster-mode** branch for future multi-node use, and that mode *does* involve real inter-node network traffic (including to Ray's internal Redis-based GCS mentioned above) — but that's not what's deployed or exercised today. Either way, this is orthogonal to the KB↔AADS boundary: that leg is UDS-only regardless of Ray's mode (`docs/getting-started/requirements.md` §7, `kba_uds_binding_spec.md`) — Ray's networking (or lack of it) never substitutes for or touches that socket.
+
 ---
 
 ## Recommendation (proposed, not decided)

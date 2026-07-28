@@ -2,17 +2,21 @@
 
 This document outlines the design architecture and step-by-step implementation plan for **Karthik (AADS Swarm Lead)** to build out the Autonomous Agentic Defense System (AADS) inside `kb-aads`.
 
+**Current target: single-node, local-mode Ray — not a cluster.** This doc's original framing (below) was written around an eventual multi-node Ray cluster, and some content (Phase 3's mTLS setup, `ray.init(address="auto")`) is written for that future state. What's actually built and running today (`config/agents.yaml`'s `ray.mode: local`, `swarm/orchestrator.py`) is `ray.init(ignore_reinit_error=True)` with no `address=` — everything in one process tree on one machine, no network interface between agents at all. Multi-node cluster mode is real future scope (the `orchestrator.py` `ray_mode == "cluster"` branch exists for it), but it's not needed for current dev and is explicitly stretch/post-release scope per `docs/project/kbgoal2yrs.md`. Sections below are marked accordingly — see [`ray-shared-mutable-state.md`](./ray-shared-mutable-state.md)'s clarification note for the fuller local-vs-cluster explanation.
+
 ---
 
 ## 🎯 Goal Description
-The purpose of this project is to scale the current AADS prototype from a single-process `asyncio`-based loop to a distributed, multi-agent swarm running on a **Ray Cluster**. The swarm will evaluate high-velocity kernel telemetry in real-time and coordinate out-of-band threat responses. 
+The purpose of this project is to scale the current AADS prototype from a single-process `asyncio`-based loop to a multi-agent swarm running on Ray — **single-node/local mode for now**, with a distributed **Ray Cluster** as later, optional scope. The swarm will evaluate high-velocity kernel telemetry in real-time and coordinate out-of-band threat responses. 
 
 The implementation will cover:
-1. **Ray Actor Swarm Migration**: Decorating local agent classes into Ray remote actors to bypass python's GIL and achieve sub-millisecond inter-agent communication using Apache Arrow shared memory.
+1. **Ray Actor Swarm Migration**: Decorating local agent classes into Ray remote actors to bypass python's GIL and achieve sub-millisecond inter-agent communication using the local Plasma object store (shared memory within one machine — see the correction note on Apache Arrow below).
 2. **gRPC-over-UDS client**: Implementing a Python gRPC client that connects to the Go Control Plane daemon over local Unix Domain Sockets (`/run/kb/kba.sock`) to pull event streams and submit quarantine decisions.
-3. **Judge, Jury, and Executor (JJE) Consensus Model**: Enabling robust quorum-based decision making where a centralized Judge coordinates dynamic Jury voting pools across the cluster before executing containment.
+3. **Judge, Jury, and Executor (JJE) Consensus Model**: Enabling robust quorum-based decision making where a centralized Judge coordinates a dynamic Jury voting pool before executing containment. (Original wording said "across the cluster" — not accurate for single-node scope; the Jury pool runs as local Ray actors on the same machine.)
 4. **Ray RLlib (MARL) Pipeline**: Designing a custom Gymnasium multi-agent environment to train agent policies using RLlib PPO models, allowing the swarm to optimize threat detection and suppress false positives.
-5. **mTLS Swarm Security (Defense-in-Depth)**: Securing inter-agent and inter-node Ray communications with mutual TLS (mTLS) certificates to prevent eavesdropping and payload tampering in distributed scenarios.
+5. **mTLS Swarm Security (Defense-in-Depth)** — **deferred, cluster-mode-only scope**: securing inter-agent and inter-node Ray communications with mutual TLS (mTLS) certificates only matters once there's an actual network hop between Ray nodes to protect. In single-node/local mode there is no such network surface — see Phase 3 below for the corrected scope.
+
+**Correction**: item 1 above originally said "Apache Arrow shared memory." Ray's Plasma object store uses the Arrow columnar format internally for some object types, but the mechanism being described here is Plasma (Ray's shared-memory object store), not Arrow itself — Arrow is an implementation detail of Plasma's serialization, not the shared-memory layer being invoked.
 
 ---
 
@@ -204,17 +208,21 @@ class BaseAgent:
 ```
 
 ### 4. `kb-aads/swarm/orchestrator.py` `[MODIFY]`
-Convert to Ray Swarm Orchestrator connecting to the cluster and managing remote actors.
+Convert to a Ray Swarm Orchestrator managing remote actors — **local mode by default**, with cluster mode as an explicit opt-in for later.
 ```python
 import ray
 import asyncio
 from agents.base_agent import BaseAgent, AgentRole
 
 class RaySwarmOrchestrator:
-    """Connects to the Ray Cluster and manages remote agent actors."""
-    def __init__(self):
-        # Auto-connect to existing cluster running on host
-        ray.init(address="auto", ignore_reinit_error=True)
+    """Manages remote agent actors — local (single-node) by default, cluster mode opt-in."""
+    def __init__(self, ray_mode: str = "local"):
+        if ray_mode == "cluster":
+            # Future/opt-in: connect to an existing multi-node Ray cluster
+            ray.init(address="auto", ignore_reinit_error=True)
+        else:
+            # Current default: everything in-process on this machine, no network hop
+            ray.init(ignore_reinit_error=True)
         self.agents = {}
         self.agent_counter = 0
 
@@ -358,11 +366,25 @@ Karthik should proceed in the following order to ensure safe integration:
 - Implement the client in `kb-aads/comms/grpc_client.py` and create unit tests.
 - Test connection to the mock UDS socket (e.g., using python `unittest` or `pytest`).
 
-### Phase 3: Ray Swarm Setup & mTLS Encryption
-- Convert `BaseAgent` into a `@ray.remote` class.
-- Update `RaySwarmOrchestrator` to initialize `ray.init(address="auto")` and manage the swarm.
-- **mTLS Security Setup**:
-  To protect agent communications on the network, enable Ray internal TLS by exporting certificate variables:
+### Phase 3: Ray Swarm Setup — single-node/local mode
+
+**Current scope: local mode only.** No cluster, no network hop between agents, no mTLS needed.
+
+- Convert `BaseAgent`'s concrete subclasses into `@ray.remote` classes (note: `@ray.remote` goes on each leaf agent class, not on `BaseAgent` itself — Ray forbids subclassing an actor-decorated class; see `agents/base_agent.py`/`hunter.py`/`patroller.py`/etc. for the working pattern).
+- `RaySwarmOrchestrator` defaults to `ray.init(ignore_reinit_error=True)` — no `address=` — and manages the swarm entirely within one process tree on one machine.
+- Launch commands:
+  ```bash
+  cd kb-aads
+  python3 main.py
+  ```
+  `main.py` reads `config/agents.yaml`'s `ray.mode: local` and passes it through — no separate `ray start --head` step needed for local mode; `ray.init()` bootstraps everything itself.
+
+### Phase 3.5 (deferred, cluster-mode-only — not current scope): multi-node Ray + mTLS
+
+Only relevant if/when AADS moves to a real multi-node deployment — explicitly stretch/post-release per `docs/project/kbgoal2yrs.md`, not needed for current single-machine dev or for the 4-1/4-2 timeline's must-have scope. Kept here so the plan isn't lost, not as a near-term to-do:
+
+- Update `RaySwarmOrchestrator` to support `ray.init(address="auto")` for joining an existing cluster (`ray_mode == "cluster"`, see Phase 3's orchestrator snippet above).
+- **mTLS Security Setup** — only meaningful once there's an actual inter-node network hop to protect:
   ```bash
   # Enable TLS internally in Ray
   export RAY_USE_TLS=1
@@ -372,13 +394,12 @@ Karthik should proceed in the following order to ensure safe integration:
   export RAY_TLS_CLIENT_CERT="/path/to/client.crt"
   export RAY_TLS_CLIENT_KEY="/path/to/client.key"
   ```
-- Add local diagnostic/launch commands:
+- Start a head node explicitly (not needed in local mode, where `ray.init()` bootstraps everything itself):
   ```bash
-  # Start local head node with TLS environment variables loaded
   ray start --head --port=6379 --include-dashboard=true --dashboard-host=127.0.0.1
-  # Launch the swarm
   python3 main.py
   ```
+- **Open question, not resolved by this doc**: `kba_uds_binding_spec.md`/`kb-checker/README.md` state no-TCP-fallback "everywhere, including distributed deployments" — but Ray's inter-node cluster transport is TCP-based (UDS can't cross machines), so multi-node Ray inherently introduces the kind of network/TCP surface that invariant otherwise claims doesn't exist anywhere in the system. Whether that invariant is meant to scope only the KB↔AADS boundary (leaving Ray's own inter-node transport as a separate, mTLS-mitigated exception) or whether it should block multi-node Ray entirely as currently worded needs a decision from whoever owns that invariant before this phase is picked up.
 
 ### Phase 4: Quorum Consensus (JJE) Development
 - Write `JuryAgent` and `JudgeAgent` classes.
@@ -402,8 +423,8 @@ pytest tests/
 ```
 
 ### Manual Verification Checklist
-1. **Ray Cluster Diagnostic API**:
-   Validate that the Ray head node dashboard and API jobs are healthy:
+1. **Ray Diagnostic API** (works the same in local mode — no cluster required):
+   Validate that the Ray dashboard and API jobs are healthy:
    ```bash
    curl http://localhost:8265/api/jobs
    ```

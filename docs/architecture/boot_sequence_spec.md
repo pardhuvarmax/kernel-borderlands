@@ -6,11 +6,12 @@ This document defines the boot-time initialization sequence, socket ownership bo
 
 ## 1. Architectural Sockets & Files
 
-The Kernel Borderlands system relies on three primary Unix Domain Sockets (UDS) located in the `/run/kb/` runtime directory. The ownership, permission bounds, and creators are strictly defined as follows:
+The Kernel Borderlands system relies on Unix Domain Sockets (UDS) located in the `/run/kb/` runtime directory. The ownership, permission bounds, and creators are strictly defined as follows:
 
 | Socket/File Path | Owner | Group | Permissions | Binding Process | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `/run/kb/kbd.sock` | `root` | `root` | `0660` | `kbd` (Go Control Plane) | Binary telemetry pipe for eBPF events from `kbd_sensor` to Go. |
+| `/run/kb/kbd.sock` | `root` | `root` | `0660` | `kbd` (Go Control Plane) | Binary telemetry pipe for eBPF events from `kbd_sensor` to Go. One direction — Go never writes back on this connection. |
+| `/run/kb/kbct.sock` | `root` | `root` | `0660` | `kbd` (Go Control Plane) | Control push channel, Go → `kbd_sensor`: containment commands, sensitive-path pushes. Split from `kbd.sock` so a telemetry-volume burst can never stall or kill containment delivery. |
 | `/run/kb/kba.sock` | `root` | `root` | `0660` | `kbd` (Go Control Plane) | gRPC IPC socket for client registrations and enforcer directives. |
 | `/run/kb/kbc.sock` | `root` | `root` | `0660` | `kb-checker` (Rust) | gRPC IPC socket for health diagnostic reporting to TUIs/CLIs. |
 | `/run/kb/kb-checker.pid` | `root` | `root` | `0600` | `kb-checker` (Rust) | File lock preventing duplicate active safety daemons. |
@@ -31,7 +32,7 @@ sequenceDiagram
     Note over Systemd, AADS: Phase 1: Core Control Plane Boot
     Systemd->>KBD: Start kbd.service
     activate KBD
-    KBD->>KBD: Create /run/kb/kbd.sock & kba.sock
+    KBD->>KBD: Create /run/kb/kbd.sock, kbct.sock & kba.sock
     KBD->>Kernel: Load & attach unified eBPF sensors (kbd_sensor)
     activate Kernel
     KBD-->>Systemd: Notify readiness (sd_notify)
@@ -56,7 +57,7 @@ sequenceDiagram
 
 ### Phase 1: Core Control Plane Boot
 1. **Service Launch**: Systemd starts the Go control plane daemon (`kbd.service`).
-2. **Socket Setup**: `kbd` creates the `/run/kb/` directory (if not present) and binds the `kbd.sock` and `kba.sock` UNIX domain sockets.
+2. **Socket Setup**: `kbd` creates the `/run/kb/` directory (if not present) and binds the `kbd.sock`, `kbct.sock`, and `kba.sock` UNIX domain sockets.
 3. **eBPF Loading**: `kbd` invokes `kb-core-loader` to compile, load, and attach `kbd_sensor.bpf.c` tracepoints and LSM hooks to the kernel.
 4. **Readiness Signal**: `kbd` sends a readiness notification (`sd_notify`) back to Systemd, indicating that the IPC sockets are fully open and ready.
 
@@ -90,7 +91,7 @@ sequenceDiagram
     *   `systemd` takes control, reads unit configurations, and mounts runtime directory partitions (including the in-memory `/run/kb/` tmpfs).
 *   **`T+4.50s` — Phase 1: Go Control Plane (`kbd.service`) Spawns**:
     *   Systemd starts the Go Control Plane daemon (`kbd`).
-    *   `kbd` creates the `/run/kb/` directory and binds `/run/kb/kbd.sock` (telemetry loop) and `/run/kb/kba.sock` (client gRPC gateway).
+    *   `kbd` creates the `/run/kb/` directory and binds `/run/kb/kbd.sock` (telemetry loop, sensor → Go), `/run/kb/kbct.sock` (control push channel, Go → sensor), and `/run/kb/kba.sock` (client gRPC gateway).
 *   **`T+5.00s` — eBPF Hook Deployment**:
     *   `kbd` compiles and loads `kbd_sensor.bpf.o` into kernel memory.
     *   LSM file open hooks (`lsm/file_open`) and process event tracepoints (`tp/sched/sched_process_exec`, `tp/sched/sched_process_exit`) attach to their respective kernel probes.

@@ -565,10 +565,13 @@ Note: steps 6–7 are the piece that doesn't exist yet even after 2.11 alone shi
 
 Covers all sockets registered in `internal/ipc/sockets.go` plus `kbd`'s two TCP listeners — not just `kb-control-plane`'s own, since the point of this chart is showing which *other* subsystems' clients are live, orphaned, or not yet built. Status colors: green = live/wired, amber = written but not connected to anything real, red = documented but no code exists, or pointing at a stale target.
 
+**Update (this pass): `SocketIPC`/`kbd.sock` used to also carry the reverse direction** (Go → sensor containment commands, sensitive-path pushes) multiplexed onto the same connection as telemetry — that traffic just wasn't drawn on this diagram, since its stated purpose is connection *ownership*, not a full protocol trace. It's been split onto a new dedicated `SocketControl`/`kbct.sock` (see `internal/ipc/sockets.go`'s `SocketIPC` comment for the failure mode that motivated the split: a telemetry-volume burst could fill the shared connection's buffer and take containment delivery down as collateral damage). Both directions are now drawn explicitly below instead of only the telemetry one.
+
 ```mermaid
 flowchart LR
-    subgraph KBD["kbd — Go Control Plane (binds 4 sockets)"]
-        S_IPC["/run/kb/kbd.sock<br/>SocketIPC — telemetry"]
+    subgraph KBD["kbd — Go Control Plane (binds 5 sockets)"]
+        S_IPC["/run/kb/kbd.sock<br/>SocketIPC — telemetry, sensor to Go only"]
+        S_CTL["/run/kb/kbct.sock<br/>SocketControl — containment/sensitive-path pushes, Go to sensor only"]
         S_GRPC["/run/kb/kba.sock<br/>SocketGRPC — API + health"]
         S_HTTP[":8080<br/>HTTP/SSE"]
         S_SSH[":2222<br/>SSH"]
@@ -579,6 +582,7 @@ flowchart LR
     end
 
     Sensor["kbd_sensor (C, kb-core)"] -->|framed telemetry| S_IPC
+    S_CTL -->|containment cmd + sensitive paths| Sensor
 
     TUI["kb-tui (Rust)"] -->|gRPC, live| S_GRPC
     MCP["kb-mcp (Go)"] -->|gRPC, live| S_GRPC
@@ -592,6 +596,7 @@ flowchart LR
     KBD_Client["kbd itself<br/>internal/checkerclient/<br/>(dialed from http.go handleServices)"] -->|gRPC GetStatus, live<br/>added 2026-07-23, see §1.13| S_KBC
 
     style S_IPC fill:#1f4e3d,stroke:#2e8b6f,color:#fff
+    style S_CTL fill:#1f4e3d,stroke:#2e8b6f,color:#fff
     style S_GRPC fill:#1f4e3d,stroke:#2e8b6f,color:#fff
     style S_HTTP fill:#1f4e3d,stroke:#2e8b6f,color:#fff
     style S_SSH fill:#1f4e3d,stroke:#2e8b6f,color:#fff
@@ -601,6 +606,7 @@ flowchart LR
 ```
 
 - **Reading this**:
+- `kbd.sock`/`kbct.sock` are a pair, not two independent sockets — both exist only for `kbd_sensor`'s connection, split by direction (telemetry in, control out) rather than by client identity the way the other sockets are.
 - `kba.sock` is the one socket everyone actually wants — 3 live clients: `kb-tui`, `kb-mcp`, `kb-checker`.
 - Plus one written-but-orphaned client: `kb-aads` — code exists, no agent calls it (see the "AADS" question above).
 - Plus one documented-but-nonexistent client: `kbctl` — `kb-op/kbctl/` is a README with no source, and that README itself is stale, describing the pre-migration `:50051` TCP endpoint instead of `kba.sock`.
