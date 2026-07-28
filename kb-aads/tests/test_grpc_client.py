@@ -165,3 +165,52 @@ def test_submit_decision(grpc_server):
         assert "dec-789" in response.message
     finally:
         client.close()
+
+
+def test_unary_then_streaming_raises(grpc_server):
+    """A client that already made a unary call must refuse to also stream
+    — see ControlPlaneClient's docstring for why (kbd.sock/kbct.sock-class
+    coupling risk at the gRPC-channel layer)."""
+    client = ControlPlaneClient(grpc_server)
+    try:
+        client.submit_decision(
+            decision_id="dec-guard-1", agent_id="agent-01", pid=1,
+            action="QUARANTINE", confidence=0.5,
+        )
+        with pytest.raises(RuntimeError, match="already made a unary call"):
+            client.stream_events(["execve"])
+    finally:
+        client.close()
+
+
+def test_streaming_then_unary_raises(grpc_server):
+    """The symmetric case: a client already streaming must refuse a
+    subsequent unary call."""
+    client = ControlPlaneClient(grpc_server)
+    try:
+        client.stream_events(["execve"])
+        with pytest.raises(RuntimeError, match="already streaming"):
+            client.submit_decision(
+                decision_id="dec-guard-2", agent_id="agent-01", pid=1,
+                action="QUARANTINE", confidence=0.5,
+            )
+    finally:
+        client.close()
+
+
+def test_separate_instances_do_not_conflict(grpc_server):
+    """The recommended pattern — two instances, one per role — must work
+    without tripping the guard."""
+    decision_client = ControlPlaneClient(grpc_server)
+    stream_client = ControlPlaneClient(grpc_server)
+    try:
+        response = decision_client.submit_decision(
+            decision_id="dec-guard-3", agent_id="agent-01", pid=1,
+            action="QUARANTINE", confidence=0.5,
+        )
+        assert response.success is True
+        events = list(stream_client.stream_events(["execve"]))
+        assert len(events) == 1
+    finally:
+        decision_client.close()
+        stream_client.close()
