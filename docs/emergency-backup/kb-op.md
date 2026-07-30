@@ -926,27 +926,27 @@ A dedicated suite asserts, for every capability in the registry, that: an unauth
 
 ```mermaid
 gantt
-    title kb-op roadmap to v1.0
-    dateFormat  X
-    axisFormat %s
+    title kb-op roadmap to v1.0 (relative timeline, not calendar-committed dates)
+    dateFormat YYYY-MM-DD
+    axisFormat %m/%d
     section Phase 0 — Foundation
-    Backend /proc read + minimal gRPC read API      :p0, 0, 3
-    ctl list/describe against real backend           :p0b, after p0, 2
+    Backend /proc read + minimal gRPC read API      :p0, 2025-01-01, 3w
+    ctl list/describe against real backend           :p0b, after p0, 2w
     section Phase 1 — First real actions
-    nftables connector (block/unblock)                :p1, after p0b, 3
-    journald tail as real log source                  :p1b, after p1, 2
-    ctl write commands (quarantine, block)             :p1c, after p1b, 2
+    nftables connector (block/unblock)                :p1, after p0b, 3w
+    journald tail as real log source                  :p1b, after p1, 2w
+    ctl write commands (quarantine, block)             :p1c, after p1b, 2w
     section Phase 2 — Live surface
-    tui live streaming views                          :p2, after p1c, 4
-    SSH-fronted operator access                        :p2b, after p2, 2
+    tui live streaming views                          :p2, after p1c, 4w
+    SSH-fronted operator access                        :p2b, after p2, 2w
     section Phase 3 — Agent surface
-    mcp server, tools + resources                      :p3, after p2b, 4
-    additional connectors (fail2ban, ClamAV, auditd)    :p3b, after p3, 3
-    authz/audit parity test suite                       :p3c, after p3b, 2
+    mcp server, tools + resources                      :p3, after p2b, 4w
+    additional connectors (fail2ban, ClamAV, auditd)    :p3b, after p3, 3w
+    authz/audit parity test suite                       :p3c, after p3b, 2w
     section Phase 4 — v1.0
-    web dashboard                                       :p4, after p3c, 4
-    packaging + install script                          :p4b, after p4, 2
-    docs site                                            :p4c, after p4b, 1
+    web dashboard                                       :p4, after p3c, 4w
+    packaging + install script                          :p4b, after p4, 2w
+    docs site                                            :p4c, after p4b, 1w
 ```
 
 ### Phase 0 — Foundation

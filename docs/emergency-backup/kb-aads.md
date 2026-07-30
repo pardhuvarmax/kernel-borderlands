@@ -511,18 +511,18 @@ finding = ray.get(finding_ref)
 ```mermaid
 flowchart LR
     subgraph Sim["Attack-Scenario Simulator (§23)"]
-        SC[ATT&CK-structured<br/>scenario library]
-        REPLAY[Replay engine:<br/>synthetic telemetry stream]
+        SC["ATT&amp;CK-structured<br/>scenario library"]
+        REPLAY["Replay engine:<br/>synthetic telemetry stream"]
     end
 
     subgraph Rollout["Rollout"]
-        ENV[Simulated host environment]
-        SWARM[Swarm under training<br/>(current policy weights)]
+        ENV["Simulated host environment"]
+        SWARM["Swarm under training<br/>(current policy weights)"]
     end
 
     subgraph Learn["Learning"]
-        REWARD[Reward computation (§19)]
-        UPDATE[Policy gradient update<br/>per agent role]
+        REWARD["Reward computation (§19)"]
+        UPDATE["Policy gradient update<br/>per agent role"]
         REPLAYBUF[(Experience replay buffer)]
     end
 
@@ -1042,7 +1042,7 @@ sequenceDiagram
     participant Host
     participant Pat as Patroller
     participant Hun as Hunter
-    participant Hun2 as Hunter (2nd opinion)
+    participant Hun2 as "Hunter, 2nd opinion"
     participant Hea as Healer
     participant Con as Consensus
     participant Cnt as Containment
@@ -1056,7 +1056,7 @@ sequenceDiagram
     Hea->>Con: pass-through
     Con->>Hun: request 2nd independent opinion
     Con->>Hun2: same raw evidence, no access to Hun's conclusion
-    Hun2-->>Con: approve ban_ip; abstain on kill_process
+    Hun2-->>Con: approve ban_ip, abstain on kill_process
     Con->>Con: tally: ban_ip 3/3, kill_process 2/2-non-abstain
     Con->>Cnt: approve both actions
     Cnt->>Cnt: revalidate scope (pid still live, connection still bound)

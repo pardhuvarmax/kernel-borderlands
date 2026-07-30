@@ -197,7 +197,7 @@ flowchart TB
         XDP --> MAPS
     end
 
-    LM -->|bpf() syscall: load, attach, pin| Kernel
+    LM -->|"bpf() syscall: load, attach, pin"| Kernel
     PE -->|policy map writes| MAPS
     MAPS -->|ring buffer drain| EE
     EE -->|JSON-lines / syslog / webhook| Sink[("Local disk /<br/>syslog / webhook")]
@@ -1107,21 +1107,21 @@ As noted in the opening callout, kb-core's pluggable export sinks and hot-reload
 
 ```mermaid
 gantt
-    title kb-core Roadmap
-    dateFormat X
-    axisFormat %s
+    title kb-core Roadmap (relative timeline, not calendar-committed dates)
+    dateFormat YYYY-MM-DD
+    axisFormat %m/%d
     section Phase 0
-    Single-hook PoC, CO-RE build validated across 2+ kernels :p0, 0, 3
+    Single-hook PoC, CO-RE build validated across 2+ kernels :p0, 2025-01-01, 3w
     section Phase 1 (v0.1)
-    Process tree + file-access LSM hooks, local YAML policy, JSON-lines export :p1, after p0, 4
+    Process tree + file-access LSM hooks, local YAML policy, JSON-lines export :p1, after p0, 4w
     section Phase 2
-    Network hooks, XDP filter, privilege-escalation detection, TLS uprobes :p2, after p1, 5
+    Network hooks, XDP filter, privilege-escalation detection, TLS uprobes :p2, after p1, 5w
     section Phase 3
-    Hot-reload policy, self-protection monitoring, pinned-program persistence, bundled CLI :p3, after p2, 4
+    Hot-reload policy, self-protection monitoring, pinned-program persistence, bundled CLI :p3, after p2, 4w
     section Phase 4 (v1.0)
-    Packaging, benchmark suite vs. auditd/Falco, docs site, pluggable sinks finalized :p4, after p3, 4
+    Packaging, benchmark suite vs. auditd/Falco, docs site, pluggable sinks finalized :p4, after p3, 4w
     section Beyond v1.0
-    Memory-injection detection depth, additional TLS library targets, XDP hardware-offload mode :p5, after p4, 6
+    Memory-injection detection depth, additional TLS library targets, XDP hardware-offload mode :p5, after p4, 6w
 ```
 
 ### 34.1 Phase detail
