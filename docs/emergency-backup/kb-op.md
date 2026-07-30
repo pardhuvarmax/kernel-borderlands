@@ -1332,29 +1332,29 @@ This chapter narrates one complete, realistic operator session end to end, cross
 
 ### 34.1 Scenario
 
-An operator, `priya`, is paged at 14:20 by an external alerting channel (out of scope for kb-op itself — kb-op is what she uses once she's already been told something is worth looking at) about unusual outbound traffic from `web-03`.
+An operator, `rupa`, is paged at 14:20 by an external alerting channel (out of scope for kb-op itself — kb-op is what she uses once she's already been told something is worth looking at) about unusual outbound traffic from `web-03`.
 
 ### 34.2 Step by step
 
-**1. Connecting.** Priya runs `ssh kb-op@web-03`. The embedded SSH service (Chapter 13) authenticates her public key against `authorized_keys`, allocates a PTY, and spawns `tui` attached to the session. `tui` opens its long-lived RPC connection to the backend daemon over the local UDS and requests an initial snapshot — the TUI state machine (Chapter 21) moves from `Connecting` to `Live`.
+**1. Connecting.** rupa runs `ssh kb-op@web-03`. The embedded SSH service (Chapter 13) authenticates her public key against `authorized_keys`, allocates a PTY, and spawns `tui` attached to the session. `tui` opens its long-lived RPC connection to the backend daemon over the local UDS and requests an initial snapshot — the TUI state machine (Chapter 21) moves from `Connecting` to `Live`.
 
-**2. Orientation.** The status bar (§10.1) already shows `⚠ 3 alerts in last 15m`. Priya presses `2` to switch to the Alerts view — a local, already-cached view switch, no RPC call needed, since the alert feed was already streaming in the background per §20.2.
+**2. Orientation.** The status bar (§10.1) already shows `⚠ 3 alerts in last 15m`. rupa presses `2` to switch to the Alerts view — a local, already-cached view switch, no RPC call needed, since the alert feed was already streaming in the background per §20.2.
 
 **3. Investigating.** She selects the top alert (severity `HIGH`, `unexpected-setuid` from process 2211) and presses `Enter`, landing on the alert-focused detail view from §10.5. She presses `i` to open the `investigate_process` guided flow (Chapter 36) for pid 2211. Behind the scenes this issues three read-tier RPC calls in sequence — `DescribeProcess(2211)`, `QueryAuditLog(pid=2211, since=15m)`, and a connections lookup — each independently authorized per §16.2 (all `read` tier, so only a valid identity is required, no `reason`).
 
-**4. Corroborating.** The investigation view surfaces that pid 2211 (`python3 worker.py`, normally running as `app`, part of the `worker.service` systemd unit) briefly transitioned to `uid 0` and opened an outbound connection to an address outside the host's normal egress pattern. This matches the paging alert. Priya decides to act.
+**4. Corroborating.** The investigation view surfaces that pid 2211 (`python3 worker.py`, normally running as `app`, part of the `worker.service` systemd unit) briefly transitioned to `uid 0` and opened an outbound connection to an address outside the host's normal egress pattern. This matches the paging alert. rupa decides to act.
 
 **5. Acting.** She presses `Esc` to return to the alert-focused view, then `q` to quarantine. Per §10.2's confirmation rule, this does not fire immediately — the TUI's `ConfirmPending` state (Chapter 21) opens a small prompt asking for a `reason` (required at `high` tier per §16.2) and a `y`/`N` confirmation. She types `"uid transition + unexpected egress, pid 2211"` and confirms.
 
-**6. What happens on confirm.** This follows the same pattern as the sequence diagrams in §15: `tui` issues `QuarantineProcess(pid=2211, reason="...")` over gRPC, the backend's authorizer checks Priya's identity and the `high` risk tier requirement, the capability implementation applies the cgroup/network-namespace isolation directly (this is a live OS-primitive action, not a fabric — §8.1), and the audit writer appends a chained record and returns an `audit_id`. `tui` renders `Quarantined pid 2211 (audit: c7e2a1)` in the status line.
+**6. What happens on confirm.** This follows the same pattern as the sequence diagrams in §15: `tui` issues `QuarantineProcess(pid=2211, reason="...")` over gRPC, the backend's authorizer checks rupa's identity and the `high` risk tier requirement, the capability implementation applies the cgroup/network-namespace isolation directly (this is a live OS-primitive action, not a fabric — §8.1), and the audit writer appends a chained record and returns an `audit_id`. `tui` renders `Quarantined pid 2211 (audit: c7e2a1)` in the status line.
 
-**7. Following up.** Priya wants to stop the whole `worker.service` unit from restarting the compromised job while investigation continues, and prevent it from silently starting itself back up (systemd's own restart policy would otherwise do exactly that). She presses `:` and types `intent apply mask-unit --param unit_name=worker.service --reason "compromised pid 2211 was part of this unit, audit c7e2a1" --yes`. Because `mask-unit` is `high` tier, this drops into `ConfirmPending` (already satisfied by `--yes` here since she's typed the full command in one line) before the backend sees the RPC call — it executes the same `ApplyIntent` path shown in §15.2, just from `tui`'s command mode instead of an agent.
+**7. Following up.** rupa wants to stop the whole `worker.service` unit from restarting the compromised job while investigation continues, and prevent it from silently starting itself back up (systemd's own restart policy would otherwise do exactly that). She presses `:` and types `intent apply mask-unit --param unit_name=worker.service --reason "compromised pid 2211 was part of this unit, audit c7e2a1" --yes`. Because `mask-unit` is `high` tier, this drops into `ConfirmPending` (already satisfied by `--yes` here since she's typed the full command in one line) before the backend sees the RPC call — it executes the same `ApplyIntent` path shown in §15.2, just from `tui`'s command mode instead of an agent.
 
-**8. Verifying the trail.** Once the incident is stable, she runs (from a separate terminal, using `ctl` directly rather than the TUI's command mode) `ctl audit query --since 30m --caller priya --format json` and confirms both actions — the quarantine and the `mask-unit` intent application — are present, correctly chained, with matching `audit_id`s and legible `reason` fields — exactly the query pattern described in the runbook (Chapter 32).
+**8. Verifying the trail.** Once the incident is stable, she runs (from a separate terminal, using `ctl` directly rather than the TUI's command mode) `ctl audit query --since 30m --caller rupa --format json` and confirms both actions — the quarantine and the `mask-unit` intent application — are present, correctly chained, with matching `audit_id`s and legible `reason` fields — exactly the query pattern described in the runbook (Chapter 32).
 
 ### 34.3 What this walkthrough demonstrates
 
-- Every action Priya took — whether through a keybinding, the TUI's command mode, or a separate `ctl` invocation — passed through the identical authorization and audit path described in Chapters 16–17. Nothing about *how* she issued a command changed *what* was enforced or logged.
+- Every action rupa took — whether through a keybinding, the TUI's command mode, or a separate `ctl` invocation — passed through the identical authorization and audit path described in Chapters 16–17. Nothing about *how* she issued a command changed *what* was enforced or logged.
 - The quarantine action (a direct OS primitive) and the `mask-unit` intent application (a fabric-adjacent, templated write) are both fully audited and both terminal-first, even though they're structurally different kinds of capability — confirming that the "one capability, one implementation" principle holds across both categories, not just within one.
 - The guided investigation flow (`investigate_process`) is the same MCP prompt template an LLM agent would use (Chapter 36), just rendered inside the TUI instead of an agent's chat surface — confirming the reuse claim made in §10.5.
 - No step required leaving the terminal, per the terminal-first principle (Chapter 5).
@@ -1533,7 +1533,7 @@ $ ctl intent list --json
  {"name": "enforce-auto-updates", "tier": "medium", "fabric": "patch-posture"}]
 
 $ ctl audit query --since 1h --severity high --json
-[{"audit_id": "c7e2a1", "capability": "quarantine_process", "caller": "priya",
+[{"audit_id": "c7e2a1", "capability": "quarantine_process", "caller": "rupa",
   "reason": "uid transition + unexpected egress, pid 2211", "result": "success",
   "timestamp": "2026-07-30T14:24:11Z"}]
 
