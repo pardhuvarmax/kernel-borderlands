@@ -19,6 +19,17 @@ They can still interoperate if the team stays together (loosely noted per-doc wh
 | [kb-aads](./kb-aads.md) | Distributed systems/Agents | A complete agentic security swarm — its own telemetry input, its own decision-making, its own enforcement connectors |
 | [kb-op](./kb-op.md) | DX/Interfaces | A complete unified interface product — CLI (`ctl`), TUI, MCP server, all backed by its own built-in local backend daemon |
 
+## Ownership, tech stack & complexity
+
+| Project | Lead | Role / focus | Primary tech stack | Standalone complexity | Why |
+|---|---|---|---|---|---|
+| [kb-core](./kb-core.md) | Pardhu Varma | Kernel & Security Subsystems | C (BPF, CO-RE) + Rust (loader, exporter, CLI) | ★★★★★ Very High | Ring-0 code — verifier constraints, CO-RE portability, ABI-level uprobe parsing, and a bug's blast radius is the whole host, not just the process |
+| [kb-cp](./kb-cp.md) | Tejaswini "Teju" | Defensive Pipelines & Unified Tool Integration | Go, gRPC/protobuf, native per-tool sockets/APIs (nftables, fail2ban, ClamAV, auditd, D-Bus) | ★★★★★ Very High | Breadth across six-plus established tools' native protocols, each with its own failure modes, behind one unified safety/dry-run/rollback/plugin layer |
+| [kb-aads](./kb-aads.md) | Karthik | AI & Agentic Systems | Python, Ray (actors + RLlib), PPO per-role policies | ★★★★★ Very High | Distributed multi-agent RL — non-deterministic training, consensus/safety-outside-the-policy correctness is hard to verify, and errors are behavioral, not just functional |
+| [kb-op](./kb-op.md) | Rupa | TUI, CLI Tooling & Operator Infra | Go (backend, `ctl`, `mcp`, SSH) + Rust (`tui`, `ratatui`) + React/TS (dashboard) + embedded Lua + optional Nix | ★★★★★ Very High | Four consumer surfaces kept in lockstep, a declarative reconciliation engine, and a 4-format spec DSL with its own compiler/formatter asymmetry to get right |
+
+> Each project has exactly one owner above — no shared/collab attribution — so there's no ambiguity about who carries which doc forward if only one gets picked up.
+
 ## How to use this backup
 
 1. Each `.md` file is fully self-contained — read and build from it without needing any of the others.
