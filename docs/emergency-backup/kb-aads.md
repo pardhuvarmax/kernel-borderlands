@@ -1100,11 +1100,11 @@ The Hunter's action space is not "investigate or don't" — investigation always
 
 Using the reward table from §19, here is the actual arithmetic for three example training rollouts against the Hunter's reward function `R = w1·hypothesis_correct + w2·calibration_term − w3·overconfidence_penalty`, with illustrative weights `w1=1.0, w2=0.5, w3=1.5`:
 
-| Scenario | Ground truth | Hunter output | `hypothesis_correct` | `calibration_term` (1 − |confidence − actual_correctness|) | `overconfidence_penalty` | Reward |
+| Scenario | Ground truth | Hunter output | `hypothesis_correct` | `calibration_term` (1 − abs(confidence − actual_correctness)) | `overconfidence_penalty` | Reward |
 |---|---|---|---|---|---|---|
-| True positive, correctly identified | credential-access, real | hypothesis=credential-access, confidence=0.85 | 1.0 | 1 − |0.85 − 1| = 0.85 | 0 (confidence roughly matches correctness) | 1.0 + 0.5(0.85) − 0 = **1.425** |
-| False positive, overconfident | benign (deploy script mimicking a scan pattern) | hypothesis=lateral-movement, confidence=0.93 | 0.0 | 1 − |0.93 − 0| = 0.07 | (0.93 − 0.5)² × scale ≈ 0.62 | 0.0 + 0.5(0.07) − 1.5(0.62) = **−0.895** |
-| Correct low-confidence call on genuinely ambiguous input | benign, but superficially unusual | hypothesis=insufficient-evidence, confidence=0.4 | 1.0 (insufficient-evidence was the right call) | 1 − |0.4 − 1| = 0.4 | 0 | 1.0 + 0.5(0.4) − 0 = **1.2** |
+| True positive, correctly identified | credential-access, real | hypothesis=credential-access, confidence=0.85 | 1.0 | 1 − abs(0.85 − 1) = 0.85 | 0 (confidence roughly matches correctness) | 1.0 + 0.5(0.85) − 0 = **1.425** |
+| False positive, overconfident | benign (deploy script mimicking a scan pattern) | hypothesis=lateral-movement, confidence=0.93 | 0.0 | 1 − abs(0.93 − 0) = 0.07 | (0.93 − 0.5)² × scale ≈ 0.62 | 0.0 + 0.5(0.07) − 1.5(0.62) = **−0.895** |
+| Correct low-confidence call on genuinely ambiguous input | benign, but superficially unusual | hypothesis=insufficient-evidence, confidence=0.4 | 1.0 (insufficient-evidence was the right call) | 1 − abs(0.4 − 1) = 0.4 | 0 | 1.0 + 0.5(0.4) − 0 = **1.2** |
 
 > The middle row is the important one to internalize: an *incorrect but appropriately low-confidence* call would score much better than this overconfident wrong call does — the steep overconfidence penalty is what specifically discourages the failure mode named in §19's table (a Hunter that always reports high confidence "to look thorough"). Implementers tuning `w3` should validate against held-out scenarios specifically containing ambiguous benign cases, not just clear-cut attack/benign pairs, since that's where an under-tuned overconfidence penalty will silently fail to bite.
 

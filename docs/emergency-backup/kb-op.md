@@ -1022,7 +1022,7 @@ This chapter collects the failure reports a new deployment is most likely to gen
 | Is the socket path writable? | `ls -la /run/kb-op/` | `kb-op` system user lacks permission on `/run/kb-op/`; re-run the install script's user/permission step |
 | Are required capabilities granted? | `systemctl show kb-opd -p AmbientCapabilities` | A connector needing `CAP_NET_ADMIN` (nftables) is enabled but the systemd unit wasn't regenerated after enabling it — re-run `make install-unit` or the packaged equivalent |
 | Is the config file valid TOML? | `kb-opd --check-config` | A hand-edited `config.toml` has a syntax error; the daemon intentionally refuses to start on invalid config rather than falling back to defaults silently |
-| Is another process already bound to the socket path? | `ss -lx | grep kbopd.sock` | A previous crashed instance left a stale socket file; remove it only after confirming via `ps` that no `kbopd` process is actually running |
+| Is another process already bound to the socket path? | `ss -lx \| grep kbopd.sock` | A previous crashed instance left a stale socket file; remove it only after confirming via `ps` that no `kbopd` process is actually running |
 
 ### 35.2 "`tui` connects but shows no data" / "`tui` can't connect at all"
 
