@@ -9,11 +9,11 @@
 ```mermaid
 flowchart LR
     Operator([Security Operator]) -->|kbctl command| CLI[kbctl Client]
-    CLI -->|gRPC / Port 50051| Gateway(gRPC Gateway)
+    CLI -->|gRPC over UDS /run/kb/kba.sock| Gateway(gRPC Gateway)
     Gateway --> ControlPlane[Go Control Plane Daemon]
 ```
 
-`kbctl` communicates directly with the `kb-control-plane` daemon over structured protocol buffer payloads. Every execution request is verified, authorized, and logged to the tamper-evident audit ledger.
+`kbctl` communicates directly with the `kb-control-plane` daemon over structured protocol buffer payloads on kbd's existing gRPC Unix domain socket (`/run/kb/kba.sock`) — the same socket every other RPC client (`kb-mcp`, `kb-tui`) uses; gRPC multiplexes every method of the `KernelBorderlands` service over that one connection, so no separate port or socket is needed. Every execution request is verified, authorized, and logged to the tamper-evident audit ledger.
 
 ---
 
@@ -29,20 +29,28 @@ kbctl policy reload
 ### B. Threat Zone & Enforcement Overrides
 Manually adjust process threat classifications or isolate specific compromised processes:
 ```bash
-# Manually override a process threat classification zone
+# Relabel how kbd tracks a process's zone (display/classification only —
+# does not touch kernel/enforcement state; a real zone transition from the
+# sensor will overwrite it the next time the process's score crosses a
+# threshold). Audit-logged.
 kbctl zone override --pid 1234 --zone SUSPICIOUS
 
-# Forcefully isolate/quarantine a process (triggers BPF LSM access denial)
+# Forcefully contain/isolate a process via kbd's SetContainment RPC.
+# Defaults to NAMESPACE; pass --level to choose CGROUP, SECCOMP, or TERMINATE.
 kbctl process isolate --pid 1234
+kbctl process isolate --pid 1234 --level TERMINATE
 ```
 
-### C. System Metrics & Audit Log Exports
-Export cryptographic audit ledgers or query general statistics:
+### C. System Metrics & Audit Log Verification/Export
+Verify or export the SHA-256 chained audit ledger, or query general statistics:
 ```bash
-# Export the full SHA-256 chained audit logs in JSON format
+# Verify the audit log's hash chain has not been tampered with
+kbctl audit verify
+
+# Export the full SHA-256 chained audit log in JSON format
 kbctl audit export --out /var/log/kb_audit.json
 
-# Fetch global telemetry volumes and active eBPF mapping statistics
+# Fetch global telemetry volumes and active process counts
 kbctl stats
 ```
 
@@ -56,14 +64,13 @@ kbctl stats
 cd kb-op/kbctl
 
 # Compile the CLI binary
-go build -o kbctl main.go
+go build -o kbctl .
 ```
 
 ### Configuration Flags
-By default, `kbctl` connects to `localhost:50051`. You can configure the target endpoint using flags:
+By default, `kbctl` connects to kbd's gRPC Unix domain socket at `/run/kb/kba.sock`. Use `--socket` to point at a different path (e.g. a non-default `KB_GRPC_SOCKET` the daemon was started with):
 ```bash
-# Specify a different gRPC server endpoint
-kbctl policy reload --server 192.168.1.100:50051
+kbctl policy reload --socket /run/kb/kba.sock
 ```
 
 ## Owner

@@ -7,6 +7,8 @@ import (
 	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // cachedToProto converts the store's L1 CachedState into the gRPC wire
@@ -29,7 +31,7 @@ func (cp *ControlPlane) GetProcessState(
 ) (*pb.ProcessState, error) {
 	cs, ok := cp.store.GetProcessState(req.Pid)
 	if !ok {
-		return &pb.ProcessState{}, nil
+		return nil, status.Errorf(codes.NotFound, "no tracked process with pid=%d", req.Pid)
 	}
 	return cachedToProto(cs), nil
 }
@@ -157,4 +159,78 @@ func (cp *ControlPlane) GetSystemStats(
 		EventsPerSecond: eps,
 		ActiveProcesses: active,
 	}, nil
+}
+
+// VerifyAuditChain wires up Logger.VerifyChain() (internal/audit/audit.go)
+// to gRPC — see docs/development/core-control/control-plane-catalog.md
+// §2.1. Chain-broken is a normal, successful response (chain_intact=false),
+// not a gRPC error — the caller needs the count/positional info either way.
+func (cp *ControlPlane) VerifyAuditChain(
+	ctx context.Context, req *pb.Empty,
+) (*pb.AuditVerifyResponse, error) {
+	ok, count, err := cp.audit.VerifyChain()
+	resp := &pb.AuditVerifyResponse{
+		ChainIntact:     ok,
+		EntriesVerified: uint32(count),
+	}
+	if err != nil {
+		resp.Error = err.Error()
+	}
+	return resp, nil
+}
+
+// ExportAuditLog returns the full audit_log table in chain order.
+func (cp *ControlPlane) ExportAuditLog(
+	ctx context.Context, req *pb.Empty,
+) (*pb.AuditExportResponse, error) {
+	rows, err := cp.store.DB().Query(`
+        SELECT ts_ns,action,subject,actor,reason,prev_hash,entry_hash
+        FROM audit_log ORDER BY id ASC
+    `)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "audit export query: %v", err)
+	}
+	defer rows.Close()
+
+	var entries []*pb.AuditEntry
+	for rows.Next() {
+		var e pb.AuditEntry
+		if err := rows.Scan(&e.TsNs, &e.Action, &e.Subject, &e.Actor, &e.Reason, &e.PrevHash, &e.EntryHash); err != nil {
+			return nil, status.Errorf(codes.Internal, "audit export scan: %v", err)
+		}
+		entries = append(entries, &e)
+	}
+	return &pb.AuditExportResponse{Entries: entries}, nil
+}
+
+// OverrideZone relabels an operator-tracked process's zone classification
+// in L1 (store.SetZone) without touching kernel/enforcement state, and
+// audit-logs the override. A subsequent real ZoneTransition event from
+// the sensor will overwrite this the next time the process's score
+// crosses a threshold.
+func (cp *ControlPlane) OverrideZone(
+	ctx context.Context, req *pb.ZoneOverrideRequest,
+) (*pb.ZoneOverrideResponse, error) {
+	if !cp.store.SetZone(req.Pid, int32(req.Zone)) {
+		return nil, status.Errorf(codes.NotFound, "no tracked process with pid=%d", req.Pid)
+	}
+	cp.audit.Log(
+		fmt.Sprintf("ZONE_OVERRIDE_%s", req.Zone),
+		fmt.Sprintf("pid=%d", req.Pid),
+		"OPERATOR", req.Reason,
+	)
+	return &pb.ZoneOverrideResponse{Success: true}, nil
+}
+
+// ReloadPolicy re-reads policy.yaml from the path kbd was started with —
+// see ControlPlane.ReloadPolicy (controlplane.go).
+func (cp *ControlPlane) ReloadPolicy(
+	ctx context.Context, req *pb.Empty,
+) (*pb.ReloadPolicyResponse, error) {
+	ok, msg, err := cp.reloadPolicyFromDisk()
+	if err != nil {
+		return &pb.ReloadPolicyResponse{Success: false, Message: err.Error()}, nil
+	}
+	cp.audit.Log("POLICY_RELOAD", cp.policyPath, "OPERATOR", "")
+	return &pb.ReloadPolicyResponse{Success: ok, Message: msg}, nil
 }

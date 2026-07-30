@@ -26,6 +26,10 @@ const (
 	KernelBorderlands_SubmitAgentDecision_FullMethodName = "/kb.KernelBorderlands/SubmitAgentDecision"
 	KernelBorderlands_StreamAlerts_FullMethodName        = "/kb.KernelBorderlands/StreamAlerts"
 	KernelBorderlands_GetSystemStats_FullMethodName      = "/kb.KernelBorderlands/GetSystemStats"
+	KernelBorderlands_VerifyAuditChain_FullMethodName    = "/kb.KernelBorderlands/VerifyAuditChain"
+	KernelBorderlands_ExportAuditLog_FullMethodName      = "/kb.KernelBorderlands/ExportAuditLog"
+	KernelBorderlands_OverrideZone_FullMethodName        = "/kb.KernelBorderlands/OverrideZone"
+	KernelBorderlands_ReloadPolicy_FullMethodName        = "/kb.KernelBorderlands/ReloadPolicy"
 )
 
 // KernelBorderlandsClient is the client API for KernelBorderlands service.
@@ -48,6 +52,20 @@ type KernelBorderlandsClient interface {
 	StreamAlerts(ctx context.Context, in *EventFilter, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Alert], error)
 	// Query global telemetry stats and process volumes
 	GetSystemStats(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*SystemStats, error)
+	// Verify the audit log's SHA-256 hash chain has not been tampered with.
+	VerifyAuditChain(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*AuditVerifyResponse, error)
+	// Export the full audit log.
+	ExportAuditLog(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*AuditExportResponse, error)
+	// Operator override of a process's tracked zone classification.
+	// Relabels the L1 CachedState.Zone only — does not touch kernel/
+	// enforcement state. Audit-logged. A subsequent real ZoneTransition
+	// event from the sensor will overwrite this the next time the
+	// process's score crosses a threshold.
+	OverrideZone(ctx context.Context, in *ZoneOverrideRequest, opts ...grpc.CallOption) (*ZoneOverrideResponse, error)
+	// Reload policy.yaml from the path kbd was started with, replacing
+	// the active policy.Engine and re-pushing sensitive_paths to the
+	// sensor over kbct.sock.
+	ReloadPolicy(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ReloadPolicyResponse, error)
 }
 
 type kernelBorderlandsClient struct {
@@ -155,6 +173,46 @@ func (c *kernelBorderlandsClient) GetSystemStats(ctx context.Context, in *Empty,
 	return out, nil
 }
 
+func (c *kernelBorderlandsClient) VerifyAuditChain(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*AuditVerifyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuditVerifyResponse)
+	err := c.cc.Invoke(ctx, KernelBorderlands_VerifyAuditChain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kernelBorderlandsClient) ExportAuditLog(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*AuditExportResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuditExportResponse)
+	err := c.cc.Invoke(ctx, KernelBorderlands_ExportAuditLog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kernelBorderlandsClient) OverrideZone(ctx context.Context, in *ZoneOverrideRequest, opts ...grpc.CallOption) (*ZoneOverrideResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ZoneOverrideResponse)
+	err := c.cc.Invoke(ctx, KernelBorderlands_OverrideZone_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kernelBorderlandsClient) ReloadPolicy(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ReloadPolicyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReloadPolicyResponse)
+	err := c.cc.Invoke(ctx, KernelBorderlands_ReloadPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KernelBorderlandsServer is the server API for KernelBorderlands service.
 // All implementations must embed UnimplementedKernelBorderlandsServer
 // for forward compatibility.
@@ -175,6 +233,20 @@ type KernelBorderlandsServer interface {
 	StreamAlerts(*EventFilter, grpc.ServerStreamingServer[Alert]) error
 	// Query global telemetry stats and process volumes
 	GetSystemStats(context.Context, *Empty) (*SystemStats, error)
+	// Verify the audit log's SHA-256 hash chain has not been tampered with.
+	VerifyAuditChain(context.Context, *Empty) (*AuditVerifyResponse, error)
+	// Export the full audit log.
+	ExportAuditLog(context.Context, *Empty) (*AuditExportResponse, error)
+	// Operator override of a process's tracked zone classification.
+	// Relabels the L1 CachedState.Zone only — does not touch kernel/
+	// enforcement state. Audit-logged. A subsequent real ZoneTransition
+	// event from the sensor will overwrite this the next time the
+	// process's score crosses a threshold.
+	OverrideZone(context.Context, *ZoneOverrideRequest) (*ZoneOverrideResponse, error)
+	// Reload policy.yaml from the path kbd was started with, replacing
+	// the active policy.Engine and re-pushing sensitive_paths to the
+	// sensor over kbct.sock.
+	ReloadPolicy(context.Context, *Empty) (*ReloadPolicyResponse, error)
 	mustEmbedUnimplementedKernelBorderlandsServer()
 }
 
@@ -205,6 +277,18 @@ func (UnimplementedKernelBorderlandsServer) StreamAlerts(*EventFilter, grpc.Serv
 }
 func (UnimplementedKernelBorderlandsServer) GetSystemStats(context.Context, *Empty) (*SystemStats, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSystemStats not implemented")
+}
+func (UnimplementedKernelBorderlandsServer) VerifyAuditChain(context.Context, *Empty) (*AuditVerifyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method VerifyAuditChain not implemented")
+}
+func (UnimplementedKernelBorderlandsServer) ExportAuditLog(context.Context, *Empty) (*AuditExportResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExportAuditLog not implemented")
+}
+func (UnimplementedKernelBorderlandsServer) OverrideZone(context.Context, *ZoneOverrideRequest) (*ZoneOverrideResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method OverrideZone not implemented")
+}
+func (UnimplementedKernelBorderlandsServer) ReloadPolicy(context.Context, *Empty) (*ReloadPolicyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReloadPolicy not implemented")
 }
 func (UnimplementedKernelBorderlandsServer) mustEmbedUnimplementedKernelBorderlandsServer() {}
 func (UnimplementedKernelBorderlandsServer) testEmbeddedByValue()                           {}
@@ -332,6 +416,78 @@ func _KernelBorderlands_GetSystemStats_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KernelBorderlands_VerifyAuditChain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KernelBorderlandsServer).VerifyAuditChain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KernelBorderlands_VerifyAuditChain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KernelBorderlandsServer).VerifyAuditChain(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KernelBorderlands_ExportAuditLog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KernelBorderlandsServer).ExportAuditLog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KernelBorderlands_ExportAuditLog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KernelBorderlandsServer).ExportAuditLog(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KernelBorderlands_OverrideZone_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ZoneOverrideRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KernelBorderlandsServer).OverrideZone(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KernelBorderlands_OverrideZone_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KernelBorderlandsServer).OverrideZone(ctx, req.(*ZoneOverrideRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KernelBorderlands_ReloadPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KernelBorderlandsServer).ReloadPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KernelBorderlands_ReloadPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KernelBorderlandsServer).ReloadPolicy(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KernelBorderlands_ServiceDesc is the grpc.ServiceDesc for KernelBorderlands service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -354,6 +510,22 @@ var KernelBorderlands_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSystemStats",
 			Handler:    _KernelBorderlands_GetSystemStats_Handler,
+		},
+		{
+			MethodName: "VerifyAuditChain",
+			Handler:    _KernelBorderlands_VerifyAuditChain_Handler,
+		},
+		{
+			MethodName: "ExportAuditLog",
+			Handler:    _KernelBorderlands_ExportAuditLog_Handler,
+		},
+		{
+			MethodName: "OverrideZone",
+			Handler:    _KernelBorderlands_OverrideZone_Handler,
+		},
+		{
+			MethodName: "ReloadPolicy",
+			Handler:    _KernelBorderlands_ReloadPolicy_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -53,3 +53,26 @@ func TestRemoveProcessEvictsFromL1(t *testing.T) {
 		t.Error("expected L1 miss after RemoveProcess")
 	}
 }
+
+func TestSetZoneUpdatesTrackedProcess(t *testing.T) {
+	s := newTestStore(t)
+	s.UpsertProcessState(&ipc.ProcessStateMsg{PID: 9, Comm: "y", Zone: ipc.ZoneSafe})
+
+	if ok := s.SetZone(9, int32(ipc.ZoneBorderlands)); !ok {
+		t.Fatal("SetZone on tracked pid should return true")
+	}
+	cs, ok := s.GetProcessState(9)
+	if !ok {
+		t.Fatal("expected L1 hit after SetZone")
+	}
+	if cs.Zone != ipc.ZoneBorderlands {
+		t.Errorf("got zone=%v, want BORDERLANDS", cs.Zone)
+	}
+}
+
+func TestSetZoneUntrackedPidReturnsFalse(t *testing.T) {
+	s := newTestStore(t)
+	if ok := s.SetZone(404, int32(ipc.ZoneSuspicious)); ok {
+		t.Error("SetZone on untracked pid should return false")
+	}
+}

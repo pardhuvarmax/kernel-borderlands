@@ -85,6 +85,39 @@ message SystemStats {
     uint32 active_processes  = 2;
 }
 
+// A single hash-chained audit_log row (internal/audit/audit.go).
+message AuditEntry {
+    int64  ts_ns      = 1;
+    string action     = 2;
+    string subject    = 3;
+    string actor      = 4;
+    string reason     = 5;
+    string prev_hash  = 6;
+    string entry_hash = 7;
+}
+
+message AuditVerifyResponse {
+    bool   chain_intact     = 1;
+    uint32 entries_verified = 2;
+    string error            = 3;
+}
+
+message AuditExportResponse {
+    repeated AuditEntry entries = 1;
+}
+
+message ZoneOverrideRequest {
+    uint32 pid    = 1;
+    Zone   zone   = 2;
+    string reason = 3;
+}
+message ZoneOverrideResponse { bool success = 1; }
+
+message ReloadPolicyResponse {
+    bool   success = 1;
+    string message = 2;
+}
+
 // KB Control Plane Service
 service KernelBorderlands {
     // Query process state
@@ -113,5 +146,23 @@ service KernelBorderlands {
 
     // Query global telemetry stats and process volumes
     rpc GetSystemStats(Empty) returns (SystemStats);
+
+    // Verify the audit log's SHA-256 hash chain has not been tampered with.
+    rpc VerifyAuditChain(Empty) returns (AuditVerifyResponse);
+
+    // Export the full audit log.
+    rpc ExportAuditLog(Empty) returns (AuditExportResponse);
+
+    // Operator override of a process's tracked zone classification.
+    // Relabels the L1 CachedState.Zone only — does not touch kernel/
+    // enforcement state. Audit-logged. A subsequent real ZoneTransition
+    // event from the sensor will overwrite this the next time the
+    // process's score crosses a threshold.
+    rpc OverrideZone(ZoneOverrideRequest) returns (ZoneOverrideResponse);
+
+    // Reload policy.yaml from the path kbd was started with, replacing
+    // the active policy.Engine and re-pushing sensitive_paths to the
+    // sensor over kbct.sock.
+    rpc ReloadPolicy(Empty) returns (ReloadPolicyResponse);
 }
 

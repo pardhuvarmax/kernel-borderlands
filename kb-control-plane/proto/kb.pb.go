@@ -892,6 +892,359 @@ func (x *SystemStats) GetActiveProcesses() uint32 {
 	return 0
 }
 
+// A single hash-chained audit_log row (internal/audit/audit.go).
+type AuditEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TsNs          int64                  `protobuf:"varint,1,opt,name=ts_ns,json=tsNs,proto3" json:"ts_ns,omitempty"`
+	Action        string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	Subject       string                 `protobuf:"bytes,3,opt,name=subject,proto3" json:"subject,omitempty"`
+	Actor         string                 `protobuf:"bytes,4,opt,name=actor,proto3" json:"actor,omitempty"`
+	Reason        string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	PrevHash      string                 `protobuf:"bytes,6,opt,name=prev_hash,json=prevHash,proto3" json:"prev_hash,omitempty"`
+	EntryHash     string                 `protobuf:"bytes,7,opt,name=entry_hash,json=entryHash,proto3" json:"entry_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuditEntry) Reset() {
+	*x = AuditEntry{}
+	mi := &file_proto_kb_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuditEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuditEntry) ProtoMessage() {}
+
+func (x *AuditEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_kb_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuditEntry.ProtoReflect.Descriptor instead.
+func (*AuditEntry) Descriptor() ([]byte, []int) {
+	return file_proto_kb_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *AuditEntry) GetTsNs() int64 {
+	if x != nil {
+		return x.TsNs
+	}
+	return 0
+}
+
+func (x *AuditEntry) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *AuditEntry) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *AuditEntry) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *AuditEntry) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *AuditEntry) GetPrevHash() string {
+	if x != nil {
+		return x.PrevHash
+	}
+	return ""
+}
+
+func (x *AuditEntry) GetEntryHash() string {
+	if x != nil {
+		return x.EntryHash
+	}
+	return ""
+}
+
+type AuditVerifyResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ChainIntact     bool                   `protobuf:"varint,1,opt,name=chain_intact,json=chainIntact,proto3" json:"chain_intact,omitempty"`
+	EntriesVerified uint32                 `protobuf:"varint,2,opt,name=entries_verified,json=entriesVerified,proto3" json:"entries_verified,omitempty"`
+	Error           string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AuditVerifyResponse) Reset() {
+	*x = AuditVerifyResponse{}
+	mi := &file_proto_kb_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuditVerifyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuditVerifyResponse) ProtoMessage() {}
+
+func (x *AuditVerifyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_kb_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuditVerifyResponse.ProtoReflect.Descriptor instead.
+func (*AuditVerifyResponse) Descriptor() ([]byte, []int) {
+	return file_proto_kb_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *AuditVerifyResponse) GetChainIntact() bool {
+	if x != nil {
+		return x.ChainIntact
+	}
+	return false
+}
+
+func (x *AuditVerifyResponse) GetEntriesVerified() uint32 {
+	if x != nil {
+		return x.EntriesVerified
+	}
+	return 0
+}
+
+func (x *AuditVerifyResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type AuditExportResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Entries       []*AuditEntry          `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuditExportResponse) Reset() {
+	*x = AuditExportResponse{}
+	mi := &file_proto_kb_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuditExportResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuditExportResponse) ProtoMessage() {}
+
+func (x *AuditExportResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_kb_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuditExportResponse.ProtoReflect.Descriptor instead.
+func (*AuditExportResponse) Descriptor() ([]byte, []int) {
+	return file_proto_kb_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AuditExportResponse) GetEntries() []*AuditEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+type ZoneOverrideRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Pid           uint32                 `protobuf:"varint,1,opt,name=pid,proto3" json:"pid,omitempty"`
+	Zone          Zone                   `protobuf:"varint,2,opt,name=zone,proto3,enum=kb.Zone" json:"zone,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ZoneOverrideRequest) Reset() {
+	*x = ZoneOverrideRequest{}
+	mi := &file_proto_kb_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ZoneOverrideRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ZoneOverrideRequest) ProtoMessage() {}
+
+func (x *ZoneOverrideRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_kb_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ZoneOverrideRequest.ProtoReflect.Descriptor instead.
+func (*ZoneOverrideRequest) Descriptor() ([]byte, []int) {
+	return file_proto_kb_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ZoneOverrideRequest) GetPid() uint32 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+func (x *ZoneOverrideRequest) GetZone() Zone {
+	if x != nil {
+		return x.Zone
+	}
+	return Zone_SAFE
+}
+
+func (x *ZoneOverrideRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type ZoneOverrideResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ZoneOverrideResponse) Reset() {
+	*x = ZoneOverrideResponse{}
+	mi := &file_proto_kb_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ZoneOverrideResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ZoneOverrideResponse) ProtoMessage() {}
+
+func (x *ZoneOverrideResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_kb_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ZoneOverrideResponse.ProtoReflect.Descriptor instead.
+func (*ZoneOverrideResponse) Descriptor() ([]byte, []int) {
+	return file_proto_kb_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ZoneOverrideResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+type ReloadPolicyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReloadPolicyResponse) Reset() {
+	*x = ReloadPolicyResponse{}
+	mi := &file_proto_kb_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReloadPolicyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReloadPolicyResponse) ProtoMessage() {}
+
+func (x *ReloadPolicyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_kb_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReloadPolicyResponse.ProtoReflect.Descriptor instead.
+func (*ReloadPolicyResponse) Descriptor() ([]byte, []int) {
+	return file_proto_kb_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ReloadPolicyResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReloadPolicyResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_proto_kb_proto protoreflect.FileDescriptor
 
 const file_proto_kb_proto_rawDesc = "" +
@@ -963,7 +1316,32 @@ const file_proto_kb_proto_rawDesc = "" +
 	"\x05Empty\"d\n" +
 	"\vSystemStats\x12*\n" +
 	"\x11events_per_second\x18\x01 \x01(\x01R\x0feventsPerSecond\x12)\n" +
-	"\x10active_processes\x18\x02 \x01(\rR\x0factiveProcesses*1\n" +
+	"\x10active_processes\x18\x02 \x01(\rR\x0factiveProcesses\"\xbd\x01\n" +
+	"\n" +
+	"AuditEntry\x12\x13\n" +
+	"\x05ts_ns\x18\x01 \x01(\x03R\x04tsNs\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x12\x18\n" +
+	"\asubject\x18\x03 \x01(\tR\asubject\x12\x14\n" +
+	"\x05actor\x18\x04 \x01(\tR\x05actor\x12\x16\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\x12\x1b\n" +
+	"\tprev_hash\x18\x06 \x01(\tR\bprevHash\x12\x1d\n" +
+	"\n" +
+	"entry_hash\x18\a \x01(\tR\tentryHash\"y\n" +
+	"\x13AuditVerifyResponse\x12!\n" +
+	"\fchain_intact\x18\x01 \x01(\bR\vchainIntact\x12)\n" +
+	"\x10entries_verified\x18\x02 \x01(\rR\x0fentriesVerified\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"?\n" +
+	"\x13AuditExportResponse\x12(\n" +
+	"\aentries\x18\x01 \x03(\v2\x0e.kb.AuditEntryR\aentries\"]\n" +
+	"\x13ZoneOverrideRequest\x12\x10\n" +
+	"\x03pid\x18\x01 \x01(\rR\x03pid\x12\x1c\n" +
+	"\x04zone\x18\x02 \x01(\x0e2\b.kb.ZoneR\x04zone\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"0\n" +
+	"\x14ZoneOverrideResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"J\n" +
+	"\x14ReloadPolicyResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage*1\n" +
 	"\x04Zone\x12\b\n" +
 	"\x04SAFE\x10\x00\x12\x0e\n" +
 	"\n" +
@@ -975,7 +1353,7 @@ const file_proto_kb_proto_rawDesc = "" +
 	"\x06CGROUP\x10\x01\x12\v\n" +
 	"\aSECCOMP\x10\x02\x12\r\n" +
 	"\tNAMESPACE\x10\x03\x12\r\n" +
-	"\tTERMINATE\x10\x042\x83\x03\n" +
+	"\tTERMINATE\x10\x042\xe9\x04\n" +
 	"\x11KernelBorderlands\x123\n" +
 	"\x0fGetProcessState\x12\x0e.kb.PidRequest\x1a\x10.kb.ProcessState\x12/\n" +
 	"\bListZone\x12\x0f.kb.ZoneRequest\x1a\x10.kb.ProcessState0\x01\x12A\n" +
@@ -983,7 +1361,11 @@ const file_proto_kb_proto_rawDesc = "" +
 	"\fStreamEvents\x12\x0f.kb.EventFilter\x1a\v.kb.KBEvent0\x01\x129\n" +
 	"\x13SubmitAgentDecision\x12\x11.kb.AgentDecision\x1a\x0f.kb.DecisionAck\x12,\n" +
 	"\fStreamAlerts\x12\x0f.kb.EventFilter\x1a\t.kb.Alert0\x01\x12,\n" +
-	"\x0eGetSystemStats\x12\t.kb.Empty\x1a\x0f.kb.SystemStatsBCZAgithub.com/pardhuvarmax/kernel-borderlands/kb-control-plane/protob\x06proto3"
+	"\x0eGetSystemStats\x12\t.kb.Empty\x1a\x0f.kb.SystemStats\x126\n" +
+	"\x10VerifyAuditChain\x12\t.kb.Empty\x1a\x17.kb.AuditVerifyResponse\x124\n" +
+	"\x0eExportAuditLog\x12\t.kb.Empty\x1a\x17.kb.AuditExportResponse\x12A\n" +
+	"\fOverrideZone\x12\x17.kb.ZoneOverrideRequest\x1a\x18.kb.ZoneOverrideResponse\x123\n" +
+	"\fReloadPolicy\x12\t.kb.Empty\x1a\x18.kb.ReloadPolicyResponseBCZAgithub.com/pardhuvarmax/kernel-borderlands/kb-control-plane/protob\x06proto3"
 
 var (
 	file_proto_kb_proto_rawDescOnce sync.Once
@@ -998,49 +1380,65 @@ func file_proto_kb_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_kb_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_kb_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_proto_kb_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_proto_kb_proto_goTypes = []any{
-	(Zone)(0),                   // 0: kb.Zone
-	(ContainmentLevel)(0),       // 1: kb.ContainmentLevel
-	(*ProcessState)(nil),        // 2: kb.ProcessState
-	(*KBEvent)(nil),             // 3: kb.KBEvent
-	(*Alert)(nil),               // 4: kb.Alert
-	(*AgentDecision)(nil),       // 5: kb.AgentDecision
-	(*PidRequest)(nil),          // 6: kb.PidRequest
-	(*ZoneRequest)(nil),         // 7: kb.ZoneRequest
-	(*EventFilter)(nil),         // 8: kb.EventFilter
-	(*DecisionAck)(nil),         // 9: kb.DecisionAck
-	(*ContainmentRequest)(nil),  // 10: kb.ContainmentRequest
-	(*ContainmentResponse)(nil), // 11: kb.ContainmentResponse
-	(*Empty)(nil),               // 12: kb.Empty
-	(*SystemStats)(nil),         // 13: kb.SystemStats
-	nil,                         // 14: kb.KBEvent.MetadataEntry
+	(Zone)(0),                    // 0: kb.Zone
+	(ContainmentLevel)(0),        // 1: kb.ContainmentLevel
+	(*ProcessState)(nil),         // 2: kb.ProcessState
+	(*KBEvent)(nil),              // 3: kb.KBEvent
+	(*Alert)(nil),                // 4: kb.Alert
+	(*AgentDecision)(nil),        // 5: kb.AgentDecision
+	(*PidRequest)(nil),           // 6: kb.PidRequest
+	(*ZoneRequest)(nil),          // 7: kb.ZoneRequest
+	(*EventFilter)(nil),          // 8: kb.EventFilter
+	(*DecisionAck)(nil),          // 9: kb.DecisionAck
+	(*ContainmentRequest)(nil),   // 10: kb.ContainmentRequest
+	(*ContainmentResponse)(nil),  // 11: kb.ContainmentResponse
+	(*Empty)(nil),                // 12: kb.Empty
+	(*SystemStats)(nil),          // 13: kb.SystemStats
+	(*AuditEntry)(nil),           // 14: kb.AuditEntry
+	(*AuditVerifyResponse)(nil),  // 15: kb.AuditVerifyResponse
+	(*AuditExportResponse)(nil),  // 16: kb.AuditExportResponse
+	(*ZoneOverrideRequest)(nil),  // 17: kb.ZoneOverrideRequest
+	(*ZoneOverrideResponse)(nil), // 18: kb.ZoneOverrideResponse
+	(*ReloadPolicyResponse)(nil), // 19: kb.ReloadPolicyResponse
+	nil,                          // 20: kb.KBEvent.MetadataEntry
 }
 var file_proto_kb_proto_depIdxs = []int32{
 	0,  // 0: kb.ProcessState.zone:type_name -> kb.Zone
 	1,  // 1: kb.ProcessState.containment:type_name -> kb.ContainmentLevel
-	14, // 2: kb.KBEvent.metadata:type_name -> kb.KBEvent.MetadataEntry
+	20, // 2: kb.KBEvent.metadata:type_name -> kb.KBEvent.MetadataEntry
 	0,  // 3: kb.ZoneRequest.zone:type_name -> kb.Zone
 	1,  // 4: kb.ContainmentRequest.level:type_name -> kb.ContainmentLevel
-	6,  // 5: kb.KernelBorderlands.GetProcessState:input_type -> kb.PidRequest
-	7,  // 6: kb.KernelBorderlands.ListZone:input_type -> kb.ZoneRequest
-	10, // 7: kb.KernelBorderlands.SetContainment:input_type -> kb.ContainmentRequest
-	8,  // 8: kb.KernelBorderlands.StreamEvents:input_type -> kb.EventFilter
-	5,  // 9: kb.KernelBorderlands.SubmitAgentDecision:input_type -> kb.AgentDecision
-	8,  // 10: kb.KernelBorderlands.StreamAlerts:input_type -> kb.EventFilter
-	12, // 11: kb.KernelBorderlands.GetSystemStats:input_type -> kb.Empty
-	2,  // 12: kb.KernelBorderlands.GetProcessState:output_type -> kb.ProcessState
-	2,  // 13: kb.KernelBorderlands.ListZone:output_type -> kb.ProcessState
-	11, // 14: kb.KernelBorderlands.SetContainment:output_type -> kb.ContainmentResponse
-	3,  // 15: kb.KernelBorderlands.StreamEvents:output_type -> kb.KBEvent
-	9,  // 16: kb.KernelBorderlands.SubmitAgentDecision:output_type -> kb.DecisionAck
-	4,  // 17: kb.KernelBorderlands.StreamAlerts:output_type -> kb.Alert
-	13, // 18: kb.KernelBorderlands.GetSystemStats:output_type -> kb.SystemStats
-	12, // [12:19] is the sub-list for method output_type
-	5,  // [5:12] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	14, // 5: kb.AuditExportResponse.entries:type_name -> kb.AuditEntry
+	0,  // 6: kb.ZoneOverrideRequest.zone:type_name -> kb.Zone
+	6,  // 7: kb.KernelBorderlands.GetProcessState:input_type -> kb.PidRequest
+	7,  // 8: kb.KernelBorderlands.ListZone:input_type -> kb.ZoneRequest
+	10, // 9: kb.KernelBorderlands.SetContainment:input_type -> kb.ContainmentRequest
+	8,  // 10: kb.KernelBorderlands.StreamEvents:input_type -> kb.EventFilter
+	5,  // 11: kb.KernelBorderlands.SubmitAgentDecision:input_type -> kb.AgentDecision
+	8,  // 12: kb.KernelBorderlands.StreamAlerts:input_type -> kb.EventFilter
+	12, // 13: kb.KernelBorderlands.GetSystemStats:input_type -> kb.Empty
+	12, // 14: kb.KernelBorderlands.VerifyAuditChain:input_type -> kb.Empty
+	12, // 15: kb.KernelBorderlands.ExportAuditLog:input_type -> kb.Empty
+	17, // 16: kb.KernelBorderlands.OverrideZone:input_type -> kb.ZoneOverrideRequest
+	12, // 17: kb.KernelBorderlands.ReloadPolicy:input_type -> kb.Empty
+	2,  // 18: kb.KernelBorderlands.GetProcessState:output_type -> kb.ProcessState
+	2,  // 19: kb.KernelBorderlands.ListZone:output_type -> kb.ProcessState
+	11, // 20: kb.KernelBorderlands.SetContainment:output_type -> kb.ContainmentResponse
+	3,  // 21: kb.KernelBorderlands.StreamEvents:output_type -> kb.KBEvent
+	9,  // 22: kb.KernelBorderlands.SubmitAgentDecision:output_type -> kb.DecisionAck
+	4,  // 23: kb.KernelBorderlands.StreamAlerts:output_type -> kb.Alert
+	13, // 24: kb.KernelBorderlands.GetSystemStats:output_type -> kb.SystemStats
+	15, // 25: kb.KernelBorderlands.VerifyAuditChain:output_type -> kb.AuditVerifyResponse
+	16, // 26: kb.KernelBorderlands.ExportAuditLog:output_type -> kb.AuditExportResponse
+	18, // 27: kb.KernelBorderlands.OverrideZone:output_type -> kb.ZoneOverrideResponse
+	19, // 28: kb.KernelBorderlands.ReloadPolicy:output_type -> kb.ReloadPolicyResponse
+	18, // [18:29] is the sub-list for method output_type
+	7,  // [7:18] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_proto_kb_proto_init() }
@@ -1054,7 +1452,7 @@ func file_proto_kb_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_kb_proto_rawDesc), len(file_proto_kb_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   13,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

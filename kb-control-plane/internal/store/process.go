@@ -33,6 +33,10 @@ type containmentWrite struct {
 	pid   uint32
 	level int32
 }
+type zoneOverrideWrite struct {
+	pid  uint32
+	zone int32
+}
 
 func (s *Store) initL1() {
 	s.l2Pipe = make(chan any, l2FlushBuffer)
@@ -54,6 +58,8 @@ func (s *Store) flushL2Worker() {
 			_, err = s.db.Exec(`DELETE FROM process_state WHERE pid=?`, v.pid)
 		case containmentWrite:
 			_, err = s.db.Exec(`UPDATE process_state SET containment=? WHERE pid=?`, v.level, v.pid)
+		case zoneOverrideWrite:
+			_, err = s.db.Exec(`UPDATE process_state SET zone=? WHERE pid=?`, v.zone, v.pid)
 		}
 		if err != nil {
 			log.Printf("[Store] L2 flush error: %v", err)
@@ -196,6 +202,28 @@ func (s *Store) SetContainment(pid uint32, level int32) {
 	case s.l2Pipe <- containmentWrite{pid: pid, level: level}:
 	default:
 	}
+}
+
+// SetZone updates L1's tracked Zone classification and queues the durable
+// write — used by the operator OverrideZone RPC. This only relabels how
+// kbd tracks the process; it does not touch kernel/enforcement state, and
+// a subsequent real ZoneTransition event from the sensor will overwrite
+// it the next time the process's score crosses a threshold. Returns false
+// if pid isn't currently tracked in L1.
+func (s *Store) SetZone(pid uint32, zone int32) bool {
+	v, ok := s.l1.Load(pid)
+	if !ok {
+		return false
+	}
+	updated := *v.(*CachedState)
+	updated.Zone = ipc.KBZone(zone)
+	s.l1.Store(pid, &updated)
+
+	select {
+	case s.l2Pipe <- zoneOverrideWrite{pid: pid, zone: zone}:
+	default:
+	}
+	return true
 }
 
 // Restore performs the cold-start recovery sweep from ADR-1's "Volatile

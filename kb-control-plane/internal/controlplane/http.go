@@ -30,6 +30,7 @@ func (cp *ControlPlane) StartHTTPServer(addr string) error {
 	mux.HandleFunc("/api/processes", server.handleProcesses)
 	mux.HandleFunc("/api/alerts", server.handleAlerts)
 	mux.HandleFunc("/api/logs", server.handleLogs)
+	mux.HandleFunc("/api/audit/verify", server.handleAuditVerify)
 	mux.HandleFunc("/api/services", server.handleServices)
 	mux.HandleFunc("/api/isolate", server.handleIsolate)
 	mux.HandleFunc("/api/restore", server.handleRestore)
@@ -241,6 +242,22 @@ func (s *HTTPServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 		list = []LogJSON{}
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// handleAuditVerify surfaces Logger.VerifyChain() (internal/audit/audit.go)
+// over HTTP for the dashboard's tamper-check tile — see
+// docs/development/core-control/control-plane-catalog.md §2.1.
+func (s *HTTPServer) handleAuditVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ok, count, err := s.cp.audit.VerifyChain()
+	resp := map[string]any{"chain_intact": ok, "entries_verified": count}
+	if err != nil {
+		resp["error"] = err.Error()
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // System environment helpers for real service checks

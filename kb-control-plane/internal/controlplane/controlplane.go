@@ -37,7 +37,9 @@ type ControlPlane struct {
 	healthServer *health.Server
 	audit        *audit.Logger
 	enforcer     *enforcement.Enforcer
+	policyMu     sync.RWMutex
 	policy       *policy.Engine
+	policyPath   string
 	grpc         *grpc.Server
 	// telemetryListener (SocketIPC, kbd.sock) and controlListener
 	// (SocketControl, kbct.sock) are both created once in New() and
@@ -102,6 +104,7 @@ func New(dbPath, policyPath string) (*ControlPlane, error) {
 		store:        s,
 		audit:        audit.New(s.DB()),
 		policy:       p,
+		policyPath:   policyPath,
 		healthServer: health.NewServer(),
 		sshService:   sshSvc,
 	}
@@ -183,8 +186,43 @@ func (cp *ControlPlane) Start() error {
 		}
 	}()
 
+	// One-shot startup tamper check: if the audit chain was already broken
+	// before kbd came up (e.g. rows edited/deleted directly in SQLite),
+	// operators need to know immediately — but a possibly-already-broken
+	// audit trail shouldn't stop the daemon from doing its job, so this
+	// is a loud warning, not log.Fatal.
+	if ok, count, err := cp.audit.VerifyChain(); ok {
+		log.Printf("[KB] audit log hash chain verified intact (%d entries)", count)
+	} else {
+		log.Printf("[KB] WARNING: audit log hash chain is BROKEN (verified %d entries before break: %v) — audit_log may have been tampered with", count, err)
+	}
+
 	log.Println("[KB] Control plane ready")
 	return nil
+}
+
+// reloadPolicyFromDisk re-reads policy.yaml from the path kbd was started
+// with, builds a fresh policy.Engine, and atomically swaps it in under
+// policyMu. Also re-pushes the (possibly changed) sensitive_paths list to
+// the sensor over kbct.sock, mirroring what New() does on first load.
+// Called from the ReloadPolicy gRPC handler (grpc.go).
+func (cp *ControlPlane) reloadPolicyFromDisk() (bool, string, error) {
+	p, err := policy.New(cp.policyPath)
+	if err != nil {
+		return false, "", fmt.Errorf("reload policy: %w", err)
+	}
+
+	cp.policyMu.Lock()
+	cp.policy = p
+	cp.policyMu.Unlock()
+
+	if cp.controlListener != nil {
+		cp.controlListener.SetSensitivePaths(p.SensitivePaths())
+	}
+
+	msg := fmt.Sprintf("reloaded policy from %s", cp.policyPath)
+	log.Printf("[KB] %s", msg)
+	return true, msg, nil
 }
 
 func (cp *ControlPlane) Stop() {
@@ -379,7 +417,10 @@ func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
 		}
 		cp.fanOutAlert(alert)
 
-		if cp.policy.AutoTerminate(comm) {
+		cp.policyMu.RLock()
+		autoTerminate := cp.policy.AutoTerminate(comm)
+		cp.policyMu.RUnlock()
+		if autoTerminate {
 			cp.enforcer.Contain(msg.PID, uint32(pb.ContainmentLevel_TERMINATE), "policy:auto_terminate=true")
 			cp.audit.Log("AUTO_TERMINATE",
 				fmt.Sprintf("pid=%d comm=%s", msg.PID, comm),
