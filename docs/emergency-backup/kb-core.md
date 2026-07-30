@@ -316,7 +316,11 @@ stateDiagram-v2
     Observed --> Tracked: process-tree entry created (pid, ppid, uid, exe_hash, cgroup_id)
     Tracked --> Flagged: policy match on exec (bprm_check_security)
     Flagged --> Contained: containment action applied (future action, not in v1.0 core scope)
-    Tracked --> Tracked: file/network/privilege events correlated via pid lookup
+    note right of Tracked
+        file/network/privilege events
+        correlated via pid lookup
+        while in this state
+    end note
     Flagged --> Tracked: flag cleared / false positive suppressed upstream
     Tracked --> Evicted: sched_process_exit
     Flagged --> Evicted: sched_process_exit

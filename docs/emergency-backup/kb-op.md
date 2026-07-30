@@ -743,15 +743,24 @@ stateDiagram-v2
     [*] --> Connecting
     Connecting --> Live: connection established, initial snapshot received
     Connecting --> Reconnecting: connection failed
-    Live --> AlertFocused: operator selects an alert
-    AlertFocused --> Live: Esc
-    Live --> CommandMode: ':' pressed
-    CommandMode --> Live: command executed or Esc
-    CommandMode --> ConfirmPending: high-risk command entered
-    ConfirmPending --> Live: confirmed and executed, or cancelled
+
+    state Live {
+        [*] --> Idle
+        Idle --> AlertFocused: select alert
+        AlertFocused --> Idle: Esc
+        Idle --> CommandMode: press ':'
+        CommandMode --> Idle: executed or Esc
+        CommandMode --> ConfirmPending: high-risk command entered
+        ConfirmPending --> Idle: confirmed and executed, or cancelled
+    }
+
     Live --> Reconnecting: stream disconnects
-    Reconnecting --> Live: reconnect succeeds, fresh snapshot applied
-    Reconnecting --> Reconnecting: retry with backoff
+    Reconnecting --> Live: reconnect succeeds
+    note right of Reconnecting
+        retries with backoff,
+        fresh snapshot applied
+        once reconnected
+    end note
     Live --> [*]: 'q' at top level
 ```
 
