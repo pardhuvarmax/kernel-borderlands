@@ -1,0 +1,700 @@
+\documentclass{article}
+
+\usepackage{arxiv}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[strings]{underscore}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{cleveref}
+\usepackage{graphicx}
+\usepackage{natbib}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{seqsplit}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  framerule=0.4pt,
+  backgroundcolor=\color{white},
+  showstringspaces=false
+}
+
+\title{An eBPF-Based Behavioral Detection and Multi-Agent Containment
+Architecture for Linux Server Workloads}
+
+\author{
+  Pardhu Sri Rushi Varma Konduru \\
+  Dept.\ of Cybersecurity, ECE \& IoT \\
+  Malla Reddy University, Hyderabad \\
+  \texttt{2311CS040089@mallareddyuniversity.ac.in}
+  \And
+  Tejaswini Kandukoori \\
+  Dept.\ of Cybersecurity, ECE \& IoT \\
+  Malla Reddy University, Hyderabad \\
+  \texttt{2311CS040077@mallareddyuniversity.ac.in}
+  \And
+  Karthik Kanne \\
+  Dept.\ of Cybersecurity, ECE \& IoT \\
+  Malla Reddy University, Hyderabad \\
+  \texttt{2311CS040080@mallareddyuniversity.ac.in}
+  \And
+  Rupa Yeshvitha Karedla \\
+  Dept.\ of Cybersecurity, ECE \& IoT \\
+  Malla Reddy University, Hyderabad \\
+  \texttt{2311CS040082@mallareddyuniversity.ac.in}
+}
+
+\renewcommand{\shorttitle}{Kernel Borderlands}
+
+\hypersetup{
+pdftitle={An eBPF-Based Behavioral Detection and Multi-Agent Containment Architecture for Linux Server Workloads},
+pdfauthor={Kernel Borderlands Team},
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Kernel Borderlands (KB) is a kernel-level runtime defense framework for
+Linux composed of five subsystems: an eBPF-based Ring-0 sensor
+(\texttt{kb-core}), a Go control plane for scoring, storage, and
+enforcement (\texttt{kb-control-plane}), a Python multi-agent swarm for
+adaptive response (\texttt{kb-aads}), a stateless Rust integrity
+watchdog (\texttt{kb-checker}), and a set of operator interfaces
+(\texttt{kb-op}). This paper documents the design, implementation
+history, and current status of each subsystem in turn --- including
+defects found and fixed along the way, and defects still open --- rather
+than concentrating on any single component. Substantial, independently
+verifiable engineering effort went into each subsystem: kernel-verified
+enforcement primitives and authorization gates in \texttt{kb-core}; a
+two-tier storage engine and a hash-chained, verifiably tamper-evident
+audit log in \texttt{kb-control-plane}; a Ray-based actor swarm in
+\texttt{kb-aads}, of which one role --- Containment --- now carries a
+trained and live-verified reinforcement-learning policy; a stateless
+boot-gating watchdog in \texttt{kb-checker}; and four operator-facing
+interfaces in \texttt{kb-op}. We additionally report a source-level
+security audit conducted across all four non-RL subsystems, surfacing
+fifteen open defects, three of them critical, alongside three
+previously undocumented fixes. Where a subsystem or feature is
+incomplete or stubbed at the time of writing, we say so explicitly
+rather than omitting it.
+\end{abstract}
+
+\keywords{eBPF \and Linux security \and runtime containment \and
+multi-agent systems \and reinforcement learning \and intrusion
+detection \and distributed systems}
+
+\begin{center}
+\small \textbf{Code availability.} The full source referenced
+throughout this paper is available at
+\url{https://github.com/pardhuvarmax/kernel-borderlands} \citep{kbrepo}.
+\end{center}
+
+\section{Introduction}
+
+Runtime defense for Linux hosts increasingly relies on kernel-level
+observability: extended Berkeley Packet Filter (eBPF) programs attached
+to LSM hooks, tracepoints, and kprobes observe process behavior at
+Ring 0 with low overhead \citep{gregg2019bpf, vieira2020fast}, building
+on packet-filtering foundations dating back to the original BSD Packet
+Filter \citep{mccanne1993bsd}. Observability alone is
+not response --- a runtime defense system must also decide, act, and be
+able to prove that its own decision trail has not been tampered with
+after the fact. Kernel Borderlands (KB) \citep{kbrepo} is organized around this
+observe-score-decide-enforce-audit loop, implemented across five
+cooperating subsystems, each of which represents an independent,
+substantial body of engineering work: \texttt{kb-core} (Section~\ref{sec:core}),
+\texttt{kb-control-plane} (Section~\ref{sec:cp}), \texttt{kb-aads}
+(Section~\ref{sec:aads}), \texttt{kb-checker} (Section~\ref{sec:checker}),
+and \texttt{kb-op} (Section~\ref{sec:op}).
+
+This paper's aim is to document KB as it currently stands, subsystem by
+subsystem, including what each subsystem does, notable defects
+discovered and corrected during its development, and --- honestly ---
+what remains incomplete. Section~\ref{sec:audit} reports a source-level
+security audit conducted across four of the five subsystems.
+Section~\ref{sec:status} summarizes per-subsystem status in one table.
+We do not attempt to make any single subsystem the centerpiece of this
+report; each received comparable engineering effort and is treated
+accordingly.
+
+\section{kb-core: eBPF Sensor and Enforcement Primitives}
+\label{sec:core}
+
+\texttt{kb-core} is a C/eBPF subsystem, built with CO-RE (Compile Once,
+Run Everywhere) via BTF for cross-kernel portability without
+per-kernel-version recompilation. It is the only subsystem with a
+presence in Ring 0.
+
+\subsection{Hook Points and the Containment Model}
+
+\texttt{kb-core} attaches LSM hooks and tracepoints covering process
+execution (\texttt{bprm\_check\_security}), file access
+(\texttt{file\_open}), network connect/bind, memory-protection changes
+(\texttt{file\_mprotect}), and credential changes
+(\texttt{commit\_creds}), and maintains a five-level containment state
+per monitored process, uniform across all hooks, escalating through the
+standard Linux primitives of cgroups, seccomp, and namespaces
+\citep{kerrisk2010linux}:
+\texttt{NONE} (no entry; every hook passes through), \texttt{CGROUP}
+(resource throttling only, no LSM blocking), \texttt{SECCOMP} (blocks
+new network connections/binds and process exec), \texttt{NAMESPACE}
+(adds RWX/exec memory-protection blocking on top of \texttt{SECCOMP}),
+and \texttt{TERMINATE} (blocks everything interceptable, combined with
+a userspace \texttt{SIGKILL} as a belt-and-suspenders measure). Every
+hook returns a uniform \texttt{-EPERM} rather than hook-specific error
+codes, so the kernel presents a consistent ``Operation not permitted''
+regardless of which containment layer intervened.
+
+\subsection{CPM and CWP: Authorization Gates on Containment Writes}
+
+Two authorization layers sit in front of containment map writes, both
+implemented in this project's current development cycle.
+\textbf{CPM (Critical Process Module)} refuses to contain PID 1, kernel
+threads, self-registered sensor components, or a protected-executable
+registry. The classifier (\texttt{cpm\_classify()}) is deliberately
+implemented in userspace C rather than in-kernel eBPF, since that is
+where the actual containment-map write occurs in this codebase --- a
+documented deviation from an earlier design sketch that placed the gate
+purely in-kernel. Two eBPF maps
+(\texttt{protected\_pids\_map}, \texttt{protected\_exec\_paths\_map})
+back it, populated at exec time and cleared at exit time so that a
+reused PID cannot inherit a predecessor's protection. \textbf{CWP
+(Critical Workload Protection)} extends the same idea to a broader
+class of protected workloads, identified by either path or SHA-256
+content hash (\texttt{protected\_workloads\_map}, sized to 8192 entries
+to comfortably exceed realistic protected-workload counts in
+microservice-scale deployments), evaluated strictly after CPM and never
+merged with it. Both gates were verified against the live running
+sensor, not merely built: a live test confirmed that a containment
+command for a protected PID was rejected correctly while the connection
+was simultaneously saturated with unrelated telemetry.
+
+\subsection{The kbd.sock / kbct.sock Split}
+
+Telemetry and containment commands were originally multiplexed on a
+single, hand-rolled socket connection between the sensor and the
+control plane. This proved to be a latent availability bug: a
+telemetry-volume burst could fill the connection's send buffer,
+\texttt{write()} would return \texttt{EAGAIN}, and the sensor's error
+handling misread this as a dead connection and closed it --- taking
+containment delivery down as collateral damage of an unrelated
+telemetry spike. The fix splits control traffic (containment commands,
+sensitive-path and rules pushes) onto a dedicated \texttt{kbct.sock},
+leaving \texttt{kbd.sock} telemetry-only, and additionally ignores
+\texttt{SIGPIPE} process-wide so a closed peer cannot kill the sensor
+via signal regardless of the split. A secondary, previously-latent bug
+was found while wiring this up: the containment-command read path's
+error handler unconditionally reset a global file descriptor rather
+than the one actually passed in.
+
+\subsection{Rate Limiting}
+
+Telemetry rate limiting uses per-PID/per-resource hybrid token buckets
+implemented with BPF task-local storage and LRU hash maps, tracking
+limits by \texttt{PID + Resource ID} (e.g., destination IP, syscall ID)
+specifically to prevent an evasion technique in which an attacker
+distributes activity across many distinct resources to stay under a
+single flat per-PID limit. Tier-1 events --- privilege escalation,
+LSM denials, TLS-plaintext writes --- are permanently exempted from
+throttling by design: the busier or more heavily attacked a system is,
+the more important it is that these specific events are never silently
+dropped for volume reasons.
+
+\subsection{Known Defects}
+
+A historical, critical defect is documented here for completeness: an
+early version of the sensitive-path LSM block was unconditional
+(applied to every process, not only contained ones), and the first time
+it fired correctly in the project's history it blocked
+\texttt{/etc/sudoers}/\texttt{/etc/shadow} reads system-wide, breaking
+\texttt{sudo}, \texttt{su}, \texttt{pkexec}, and login authentication
+simultaneously on the test host, recoverable only via a full external
+VM restart. This was fixed by making the block containment-gated,
+consistent with every other hook. A related bug --- the block
+technically never enforced anything even when intended to, because
+\texttt{bpf\_d\_path()} does not zero the tail of its output buffer
+past the NUL terminator, causing exact-match lookups against a
+fixed-size key to silently fail --- was found and fixed by explicitly
+zero-filling the buffer. Two defects remain open at the time of
+writing, found during the audit in Section~\ref{sec:audit}: the
+level-3+ ``block all file opens'' guarantee fails open if
+\texttt{bpf\_d\_path()} itself fails before the containment-level check
+runs, and three PID-keyed telemetry maps (syscall totals/counts,
+credential snapshots) are never cleaned up on process exit, unlike
+their CPM/CWP counterparts, risking silent map exhaustion under
+long-running PID churn.
+
+\section{kb-control-plane: Scoring, Storage, and Enforcement}
+\label{sec:cp}
+
+\texttt{kb-control-plane} is a Go daemon (\texttt{kbd}) responsible for
+ingesting sensor telemetry, maintaining process state, exposing a gRPC
+and HTTP API, and issuing containment commands back to the sensor.
+
+\subsection{Storage: L1/L2 Hybrid}
+
+State is kept in a two-layer store, per this project's ADR-1: an
+in-memory \texttt{sync.Map} (L1), authoritative for all reads, and an
+asynchronously-written SQLite database in WAL mode (L2), durable and
+single-writer (\texttt{SetMaxOpenConns(1)}) via a buffered channel, so
+that L1 writers never block on disk I/O even under load. On startup, L1
+is restored from L2's durable copy. PID-reuse safety is handled
+explicitly: a process-exit wire message flushes both the stale L1 entry
+and the L2 row immediately, so a later, unrelated process reusing the
+same PID cannot inherit a predecessor's cached state.
+
+\subsection{The Audit Log}
+
+Every enforcement action, policy reload, and agent decision is recorded
+in a SHA-256 hash-chained append-only log
+(\texttt{entry\_hash = SHA256(fields || prev\_hash)}), such that
+mutating or deleting any row breaks every hash computed after it. A
+\texttt{VerifyChain()} routine existed correctly for some time before
+being wired to anything callable outside its own test --- meaning the
+security property existed in code but delivered no operational value
+until an HTTP route (\texttt{GET /api/audit/verify}) and a gRPC
+\texttt{VerifyAuditChain} method were added to actually invoke it,
+alongside a \texttt{kbctl audit verify} command
+(Section~\ref{sec:op}). This audit's own review of \texttt{VerifyChain()}
+found that it currently discards the error returned by its SQL row-scan
+step, which could produce a false ``chain broken'' verdict on an
+ordinary I/O or schema error rather than a real tamper event ---
+reported as an open defect in Section~\ref{sec:audit}.
+
+\subsection{Policy Engine and Hot-Reload}
+
+\texttt{policy.yaml} configures per-process auto-terminate overrides
+and the sensitive-paths list consulted by \texttt{kb-core}. Changing
+this configuration originally required a full daemon restart, which
+also dropped every sensor connection and forced a cold-start L1
+rebuild. This was corrected by adding a \texttt{ReloadPolicy} gRPC
+method that re-reads \texttt{policy.yaml} and atomically swaps a freshly
+built \texttt{policy.Engine} into place under a \texttt{sync.RWMutex}
+--- a full lock on the (rare) write path, a read lock on the (frequent,
+per-zone-transition) read path --- verified during this audit to be
+genuinely race-free, not merely apparently working.
+
+\subsection{Known Defects}
+
+A historical, critical defect: the wire-level constant for containment
+commands (\texttt{MsgTypeContainmentCmd}) was \texttt{3} on the Go side
+but the C sensor checked for \texttt{5}, so every containment command
+issued via any operator interface was silently dropped, while the
+control plane's own audit log recorded a successful entry regardless
+(the sensor never NACKs) --- completely masking the failure until a live
+test against the running sensor exposed it. Open defects found during
+this audit (Section~\ref{sec:audit}) include an HTTP API bound to all
+network interfaces with no authentication (the most severe finding of
+the audit), a telemetry-ingestion bug that silently resets an actively
+contained process's recorded state back to \texttt{NONE}, the
+audit-chain scan-error issue above, absent input validation/rate
+limiting on containment RPCs, and an SSH operator listener with no
+brute-force throttling and a dev-mode fallback that can silently weaken
+key material.
+
+\section{kb-aads: The Agent Defense Swarm}
+\label{sec:aads}
+
+\texttt{kb-aads} is a Python subsystem built on Ray, organized as a set
+of role-specialized actors intended to jointly monitor, investigate,
+and respond to threats.
+
+\subsection{Actor Architecture}
+
+Roles are implemented as Ray actors subclassing a common
+\texttt{BaseAgent}: \textbf{Patroller} (baseline monitoring),
+\textbf{Hunter} (threat investigation), \textbf{Healer} (false-positive
+recovery), \textbf{Containment} (enforcement-level selection), and a
+\textbf{Judge/Jury/Executor (JJE)} consensus mechanism intended to gate
+high-stakes decisions behind a quorum vote before the
+\textbf{Executor} carries them out over gRPC to
+\texttt{kb-control-plane}. The actor scaffolding itself required a
+non-trivial fix early in its development: \texttt{BaseAgent} was
+originally decorated \texttt{@ray.remote} directly, which raises
+\texttt{ActorClassInheritanceException} the instant any concrete role
+subclass also applies \texttt{@ray.remote} --- meaning no concrete role
+actor could actually be constructed under the original design. The fix
+removes the decorator from the base class and applies it individually
+per concrete subclass (with a \texttt{RemoteBaseAgent} convenience
+wrapper for roles with no dedicated subclass), after which the swarm
+could be verified to actually spawn, tick, and report status end to
+end.
+
+\subsection{JJE Consensus: Design Intent and Current Gaps}
+
+The JJE consensus design calls for Judge to open a round when a
+Patroller-raised alert crosses a threshold, a dynamically-spawned Jury
+pool to cast weighted votes, and Executor to carry out the resulting
+decision only after quorum. As implemented, \textbf{Jury}'s vote
+condition compares an alert's confidence value against a threshold of
+$75.0$, while every confidence value elsewhere in the system --- the
+control plane's own \texttt{SubmitAgentDecision} threshold, and the
+wire-level \texttt{confidence} field itself --- is a $0.0$--$1.0$ float.
+Under the scale used everywhere else, this condition cannot be true for
+any realistic payload, making Jury's containment vote unreachable in
+practice; \texttt{coordinate\_consensus}'s pool size is additionally
+hardcoded rather than read from its own configuration file, and a
+crashed juror's exception is not caught, so one failing actor can abort
+an entire consensus round rather than degrading gracefully. These are
+reported as open defects in Section~\ref{sec:audit} rather than fixed
+in this cycle, since correcting Jury's decision logic is properly
+scoped together with giving it an actual trained policy, which has not
+yet been done (only Containment has, per Section~\ref{sec:rl}).
+
+\subsection{Containment: A Trained Reinforcement-Learning Policy}
+\label{sec:rl}
+
+Of \texttt{kb-aads}'s decision-making roles, Containment is the only
+one currently backed by a trained policy rather than a stub or an
+unreachable rule. Applying reinforcement learning to intrusion response
+specifically (as opposed to detection alone, the more heavily studied
+problem \citep{liao2013intrusion}) is an active area
+\citep{nguyen2021deep}; we contribute a single, concrete, reproducible
+instance of it rather than a general treatment. We formulate its
+decision as a single-step
+reinforcement learning problem: a five-way discrete action
+(\texttt{ContainmentLevel}, matching Section~\ref{sec:core}'s
+enumeration) over a 5-dimensional observation built from the same
+fields KB's control plane already carries on the wire for a process
+(\texttt{score}, \texttt{zone}, a binary \texttt{uid\_is\_root} flag,
+\texttt{score\_delta}, and an \texttt{event\_type} code), with reward
+
+\begin{equation}
+  r(a, t) = 1 - 0.3\,|a-t| - 0.2\,|a-t|\cdot\mathbb{1}[a < t]
+\end{equation}
+
+\noindent penalizing under-containment ($a<t$) more heavily than
+over-containment relative to the labeled target level $t$.
+
+\paragraph{Data.} No real eBPF-captured attack corpus existed for KB at
+the time of this work, so real public data matching KB's actual
+observation surface --- Linux syscall sequences, not network flow, which
+an initially-tried NSL-KDD dataset was rejected for mismatching --- was
+used instead. We mapped five of ADFA-LD's six attack categories
+\citep{creech2013generation, creech2014semantic} onto five of KB's own
+named attack scenarios (Table~\ref{tab:mapping}); KB's
+\texttt{memory\_exploit} scenario has no ADFA-LD equivalent and is not
+covered. The benign class combines ADFA-LD's Normal traces with real
+\texttt{/proc}-derived telemetry sampled from a live development host.
+
+\begin{table}[h]
+\centering
+\caption{ADFA-LD category to KB attack-scenario mapping.}
+\label{tab:mapping}
+\begin{tabular}{ll}
+\toprule
+ADFA-LD category & KB scenario \\
+\midrule
+Adduser & privilege\_escalation \\
+Hydra\_FTP & credential\_access \\
+Hydra\_SSH & lateral\_movement \\
+Java\_Meterpreter & process\_injection \\
+Meterpreter, Web\_Shell & reverse\_shell \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Training and a mid-training defect.} We trained a PPO policy
+\citep{schulman2017proximal} via RLlib \citep{liang2018rllib} on Ray
+\citep{moritz2018ray}. An initial run reached 97.8\% overall test
+accuracy but only 60--73\% on the \texttt{CGROUP}/\texttt{SECCOMP}
+classes (Table~\ref{tab:run1}), root-caused to \texttt{credential\_access}
+and \texttt{lateral\_movement} sharing the same engineered
+\texttt{event\_type} code and \texttt{zone} floor. Assigning each
+category a distinct code and retraining improved every attack category
+to 97--100\% and reduced the under-containment rate to 0.0\%, at the
+cost of \texttt{NONE} accuracy falling from 100\% to 82.2\%
+(Table~\ref{tab:run2}) --- a trade we consider correct for a containment
+system, since a false positive on benign traffic costs a review action
+while a false negative on a real threat costs a missed compromise.
+
+\begin{table}[h]
+\centering
+\caption{Per-level test accuracy before and after the event\_type fix.}
+\label{tab:run1}
+\begin{tabular}{lrr}
+\toprule
+Level & Before fix & After fix \\
+\midrule
+NONE & 100.0\% & 82.2\% \\
+CGROUP & 60.0\% & 100.0\% \\
+SECCOMP & 70.4\% & 100.0\% \\
+NAMESPACE & 100.0\% & 97.1\% \\
+TERMINATE & 93.3\% & 100.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Overall test-set results before and after the fix.}
+\label{tab:run2}
+\begin{tabular}{lrr}
+\toprule
+& Before fix & After fix \\
+\midrule
+Overall accuracy & 97.8\% & 84.4\% \\
+Under-containment rate & 1.1\% & \textbf{0.0\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Live verification.} We verified the trained checkpoint three
+ways: offline test-set evaluation (above); a direct unit-level check
+against a live \texttt{ContainmentAgent} Ray actor for one synthetic
+observation per attack scenario; and an end-to-end run streaming real
+telemetry from KB's actual eBPF sensor and control plane on a live
+host. The end-to-end check surfaced an integration defect distinct from
+the model: the control plane returns a zero-value default
+\texttt{ProcessState} (not an error) for an unscored PID, and a naive
+feature mapping misread the resulting default \texttt{uid=0} as
+``running as root,'' producing spurious high-severity decisions for
+untracked, usually short-lived processes --- corrected by treating an
+empty \texttt{comm} field as the true not-found signal.
+
+\subsection{Status Note}
+
+Patroller, Hunter, and Healer remain non-functional stubs at the time
+of writing: Patroller's \texttt{tick()} sets a static status string,
+Hunter's investigation method contains only unimplemented TODOs, and
+Healer performs no recovery logic. No trained or rule-based decision
+currently flows through these roles into a real enforcement action.
+
+\section{kb-checker: Stateless Integrity Watchdog}
+\label{sec:checker}
+
+\texttt{kb-checker} is a Rust subsystem deliberately kept stateless and
+network-free beyond its own local diagnostic socket, following a KISS
+design principle intended to minimize its own attack surface as the
+component responsible for detecting compromise of everything else.
+
+\subsection{Active Auditing}
+
+\texttt{kb-checker} performs three classes of active audit rather than
+passive log-watching. \textbf{Bytecode integrity}: it retrieves loaded
+BPF program metadata from the kernel, extracts the JIT-compiled
+instruction footprint via \texttt{bpf\_obj\_get\_info\_by\_fd}, and
+computes a SHA-256 hash to verify it against an expected signature.
+\textbf{Map self-healing}: it traverses the live kernel containment map
+via \texttt{libbpf-sys}, cross-references its keys against the control
+plane's database, and heals discrepancies with
+\texttt{bpf\_map\_update\_elem}. \textbf{Liveness}: it connects to the
+control plane's telemetry stream, forks a disposable test process
+(\texttt{/bin/true}), and verifies that the corresponding
+\texttt{sched\_process\_exec} event is observed within a bounded
+(3-second) window, catching a fully wedged sensor that is still
+technically running but no longer actually emitting telemetry.
+Execution-latency audits additionally read JIT instruction run-count
+and cumulative run-time counters to flag hooks whose average execution
+time exceeds a 500ns threshold.
+
+\subsection{Boot-Sequence Gating}
+
+\texttt{kb-checker} gates the swarm's ability to start at all. Per the
+project's boot-sequence specification, systemd is configured such that
+if \texttt{kb-checker}'s audits fail, the Ray-based agent service
+(\texttt{kbd-agent.service}) is blocked from starting, effectively
+quarantining a host from executing swarm workloads until the watchdog
+is satisfied that the layers beneath it are intact.
+
+\subsection{Fallback Containment Hierarchy}
+
+For cases where the primary daemons cannot be cleanly unloaded via
+normal systemd control, \texttt{kb-checker} implements a three-layer
+hard fallback: force-killing the sensor's userspace process group
+(\texttt{SIGKILL}), detaching dangling BPF hooks directly via
+\texttt{bpftool} if the process-level kill is insufficient, and, as a
+last resort, an \texttt{iptables}-based network quarantine that drops
+all traffic except loopback, preserving local console access for an
+operator to intervene manually.
+
+\subsection{Status Note}
+
+\texttt{kb-checker} was not found to have any open defects within the
+time available for the audit in Section~\ref{sec:audit}; this reflects
+the scope of time spent on it during this audit cycle, not a
+formal claim of exhaustive verification.
+
+\section{kb-op: Operator Interfaces}
+\label{sec:op}
+
+\texttt{kb-op} provides four operator-facing surfaces over KB's gRPC
+and HTTP APIs.
+
+\subsection{kbctl}
+
+\texttt{kbctl} is a Go CLI dialing \texttt{kbd}'s gRPC service directly
+over its Unix domain socket. It supports process isolation and restore
+(\texttt{process isolate}, with an explicit
+\texttt{CGROUP|SECCOMP|NAMESPACE|TERMINATE} level flag), zone
+classification overrides, audit-chain verification and JSON export
+(\texttt{audit verify}, \texttt{audit export}), policy hot-reload
+(\texttt{policy reload}, Section~\ref{sec:cp}), and system statistics.
+An open defect found during this audit: \texttt{audit verify} calls
+\texttt{os.Exit(1)} directly on a detected chain break, bypassing the
+function's own deferred connection-cleanup calls --- minor in practice
+for a short-lived CLI process, but notably sloppy in exactly the one
+command whose entire purpose is flagging tampering.
+
+\subsection{kb-tui}
+
+\texttt{kb-tui} is a Rust/ratatui terminal console, reachable over an
+SSH listener hosted by \texttt{kbd} itself (\texttt{internal/ssh/}), which
+spawns \texttt{kb-tui} as a subprocess connected to the SSH session's
+PTY after public-key authentication. The project's own architecture
+documentation records a considered, not-yet-implemented decision to
+replace this custom Go SSH server with a real OpenSSH instance plus a
+forced command, specifically because a hand-rolled SSH implementation
+carries a far thinner security track record than \textasciitilde 25
+years of OpenSSH hardening for the one listener in the system that is
+network-exposed at all. Two related open defects were found during
+this audit: no rate limiting on failed authentication attempts, and a
+development-mode fallback path that can silently relocate host key
+material relative to the current working directory rather than a fixed
+location.
+
+\subsection{kb-dashboard}
+
+\texttt{kb-dashboard} is a TypeScript web frontend against \texttt{kbd}'s
+HTTP API. This audit found its isolate/restore controls to be the
+client side of the most severe defect surfaced in this work
+(Section~\ref{sec:audit}): the HTTP endpoints they call have no
+authentication and are served with a wildcard CORS header, and the
+dashboard additionally hardcodes its API host to
+\texttt{localhost:8080}, which would make that exposure
+network-reachable rather than local-only the moment the hardcoded host
+is changed for a non-local deployment without the underlying API also
+being fixed.
+
+\subsection{kb-mcp}
+
+\texttt{kb-mcp} exposes KB's telemetry and query surface as a Model
+Context Protocol server, intended to let LLM-based tooling query
+process state and zone classifications through the same gRPC API
+\texttt{kbctl} and \texttt{kb-tui} use. This subsystem was not included
+in the source-level audit reported in Section~\ref{sec:audit} within
+the time available; we note this explicitly rather than imply
+coverage we did not perform.
+
+\section{Security Audit}
+\label{sec:audit}
+
+Independent of any single subsystem's feature work, we conducted a
+source-level audit across \texttt{kb-core}, \texttt{kb-control-plane},
+\texttt{kb-aads}, and \texttt{kb-op} (\texttt{kb-checker} was included
+in scope but no defects were found within the time available, and
+\texttt{kb-mcp} specifically was not covered), verified directly
+against current source rather than taken on prior documentation's
+word. The audit surfaced fifteen confirmed open defects (the five most
+severe listed in Table~\ref{tab:bugs}; the remainder are discussed
+alongside their respective subsystems above), three
+previously-undocumented resolved items, and reconfirmed three
+historical critical bugs already fixed earlier in the project's
+history and discussed in Sections~\ref{sec:core}--\ref{sec:cp}. The
+single most severe finding is BUG-001: an HTTP endpoint bound to all
+network interfaces with no authentication and a wildcard CORS header,
+capable of terminating or restoring containment on an arbitrary
+process ID from any network-reachable origin.
+
+\begin{table}[h]
+\centering
+\caption{The five most severe open findings from the security audit.}
+\label{tab:bugs}
+\begin{tabular}{lll}
+\toprule
+ID & Severity & Summary \\
+\midrule
+BUG-001 & Critical & Unauthenticated, wildcard-CORS HTTP containment API (\S\ref{sec:cp}, \S\ref{sec:op}) \\
+BUG-002 & Critical & Telemetry update silently resets active containment to NONE (\S\ref{sec:cp}) \\
+BUG-003 & High & Consensus vote threshold uses wrong confidence scale, dead code (\S\ref{sec:aads}) \\
+BUG-004 & High & LSM hook fails open on path-resolution failure (\S\ref{sec:core}) \\
+BUG-005 & Medium-High & Audit-chain verifier discards its own scan error (\S\ref{sec:cp}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Current Project Status}
+\label{sec:status}
+
+Table~\ref{tab:status} summarizes what is complete, partial, or
+outstanding across all five subsystems at the time of writing.
+
+\begin{table}[h]
+\centering
+\caption{Per-subsystem implementation status.}
+\label{tab:status}
+\begin{tabular}{p{2.6cm}p{9.5cm}}
+\toprule
+Subsystem & Status \\
+\midrule
+kb-core (\S\ref{sec:core}) & Complete for the enforcement primitives
+documented here (containment levels, CPM/CWP gates, rate limiting,
+socket split), each independently live-verified. Two open defects
+found in this audit. \\
+kb-control-plane (\S\ref{sec:cp}) & Complete for storage, scoring
+ingestion, gRPC/HTTP API, audit-chain logging, and policy hot-reload.
+Five open defects found in this audit, two critical. \\
+kb-aads (\S\ref{sec:aads}) & Actor scaffolding functional; Containment
+role trained and live-verified. Patroller, Hunter, Healer, and
+Judge/Jury consensus remain non-functional stubs; Jury's vote condition
+is additionally confirmed unreachable under realistic input. \\
+kb-checker (\S\ref{sec:checker}) & Complete for its stated scope
+(stateless integrity auditing, boot-sequence gating, fallback
+containment). No defects found in this audit within the time
+available. \\
+kb-op (\S\ref{sec:op}) & \texttt{kbctl}, \texttt{kb-tui}, and
+\texttt{kb-dashboard} functional against the current gRPC/HTTP
+surface, one defect found in each. \texttt{kb-mcp} functional per its
+own scope but not included in this audit's coverage. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Limitations and Future Work}
+
+Several gaps are explicitly acknowledged rather than papered over. KB's
+own attack-lab data pipeline remains unbuilt, so Containment's training
+data (Section~\ref{sec:rl}) is a public-dataset stand-in with no
+coverage for the \texttt{memory\_exploit} scenario, and no mapping yet
+exists from \texttt{kb-core}'s real eBPF event-type vocabulary to the
+category codes that policy was trained on. Jury, Healer, and Hunter
+require both their underlying logic defects fixed
+(Section~\ref{sec:aads}) and their own training or implementation work
+before they can contribute real decisions. \texttt{kb-mcp} was not
+covered by this audit cycle. Most importantly, the security findings in
+Section~\ref{sec:audit} --- particularly the unauthenticated containment
+endpoint and the containment-state reset bug --- should be treated as
+blocking issues for any deployment beyond a development host,
+independent of feature completeness elsewhere in the system.
+
+\section{Conclusion}
+
+We documented Kernel Borderlands subsystem by subsystem: kernel-verified
+enforcement primitives and authorization gates in \texttt{kb-core}; a
+two-tier storage engine, hash-chained audit log, and hot-reloadable
+policy engine in \texttt{kb-control-plane}; an actor-based swarm in
+\texttt{kb-aads} carrying one trained and live-verified
+reinforcement-learning decision role; a stateless boot-gating watchdog
+in \texttt{kb-checker}; and four operator interfaces in \texttt{kb-op}.
+Substantial, independently verifiable work underlies each of these, and
+each was subjected to the same source-level scrutiny in this paper's
+security audit, which surfaced a prioritized, concrete list of defects
+--- most notably a critical unauthenticated containment endpoint ---
+representing the necessary next work before any subsystem should be
+considered production-ready.
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\end{document}
