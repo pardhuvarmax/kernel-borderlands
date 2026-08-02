@@ -22,5 +22,6 @@ This directory houses the chronological session and daily development cycle prog
 * **Achievements**: Refactored operator clients under `kb-op/`, consolidated specification documents in `docs/specdocs/`, synchronized the off-tree GitHub wiki repository, updated the platform website index page, and established permanent developer rules and constraints.
 
 ### 4. [June 26 Status Report](kb-control-plane/june26-26.md)
+* **Lead Engineer**: Tejaswini (Defensive Security, Control & Communication Pipelines)
 * **Subsystem**: Control Plane (`kb-control-plane`).
 * **Note**: not previously listed in this catalog — added for completeness.
