@@ -95,3 +95,4 @@ class ContainmentAgent(BaseAgent):
                 f"PID {pid} -> {decision['level_name']} "
                 f"({'trained policy' if decision['model_loaded'] else 'no model loaded'})"
             )
+            print(f"[{self.state.agent_id}] {self.state.last_action}", flush=True)

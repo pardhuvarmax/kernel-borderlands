@@ -1,0 +1,241 @@
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ colab new -s kb-containment
+[colab] Creating session 'kb-containment'...
+[colab] Session READY.
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ colab install -s kb-containment "ray[rllib]>=2.9.0" gymnasium torch pandas
+[colab] Installing packages on kb-containment (preferring uv)...
+╭───────────────────────────────────────────────── Traceback (most recent call last) ─────────────────────────────────────────────────╮
+│ /home/emergence/.local/share/uv/tools/google-colab-cli/lib/python3.12/site-packages/colab_cli/commands/automation.py:264 in install │
+│                                                                                                                                     │
+│   261 install()                                                                                                                     │
+│   262 """                                                                                                                           │
+│   263 │   typer.echo(f"[colab] Installing packages on {name} (preferring uv)...")                                                   │
+│ ❱ 264 │   run_automation(name, "install", code)                                                                                     │
+│   265                                                                                                                               │
+│   266                                                                                                                               │
+│   267 def register(app: typer.Typer):                                                                                               │
+│                                                                                                                                     │
+│ /home/emergence/.local/share/uv/tools/google-colab-cli/lib/python3.12/site-packages/colab_cli/commands/automation.py:151 in         │
+│ run_automation                                                                                                                      │
+│                                                                                                                                     │
+│   148 │   │   else:                                                                                                                 │
+│   149 │   │   │   state.history.log_event(name, "automation", {"op": op, "code": code})                                             │
+│   150 │   │                                                                                                                         │
+│ ❱ 151 │   │   outputs = runtime.execute_code(code, allow_stdin=allow_stdin, timeout=timeout)                                        │
+│   152 │   │   state.history.log_event(                                                                                              │
+│   153 │   │   │   name, "automation_result", {"op": op, "outputs": outputs}                                                         │
+│   154 │   │   )                                                                                                                     │
+│                                                                                                                                     │
+│ /home/emergence/.local/share/uv/tools/google-colab-cli/lib/python3.12/site-packages/colab_cli/runtime.py:227 in execute_code        │
+│                                                                                                                                     │
+│   224 │   │   │   # execute_interactive returns the raw reply message                                                               │
+│   225 │   │   │   reply_content = reply["content"] if reply else {"status": "error"}                                                │
+│   226 │   │   else:                                                                                                                 │
+│ ❱ 227 │   │   │   reply = self.kernel_client.execute(code, **kwargs)                                                                │
+│   228 │   │   │   if not reply:                                                                                                     │
+│   229 │   │   │   │   return []                                                                                                     │
+│   230 │   │   │   outputs = reply.get("outputs", [])                                                                                │
+│                                                                                                                                     │
+│ /home/emergence/.local/share/uv/tools/google-colab-cli/lib/python3.12/site-packages/colab_cli/runtime.py:154 in kernel_client       │
+│                                                                                                                                     │
+│   151 │   │   │   │   │   else:                                                                                                     │
+│   152 │   │   │   │   │   │   raise last_err                                                                                        │
+│   153 │   │   │   │   except Exception as e:                                                                                        │
+│ ❱ 154 │   │   │   │   │   raise e                                                                                                   │
+│   155 │   │                                                                                                                         │
+│   156 │   │   return self._kernel_client                                                                                            │
+│   157                                                                                                                               │
+│                                                                                                                                     │
+│ /home/emergence/.local/share/uv/tools/google-colab-cli/lib/python3.12/site-packages/colab_cli/runtime.py:106 in kernel_client       │
+│                                                                                                                                     │
+│   103 │   │   │   │   │   │   # WSSession (Session) expects 'session' for the ID                                                    │
+│   104 │   │   │   │   │   │   client_kwargs["session"] = self.session_id                                                            │
+│   105 │   │   │   │   │                                                                                                             │
+│ ❱ 106 │   │   │   │   │   self._kernel_client = jupyter_kernel_client.KernelClient(                                                 │
+│   107 │   │   │   │   │   │   server_url=self.url,                                                                                  │
+│   108 │   │   │   │   │   │   token=self.token,                                                                                     │
+│   109 │   │   │   │   │   │   kernel_id=self.kernel_id,                                                                             │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+AttributeError: module 'jupyter_kernel_client' has no attribute 'KernelClient'
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ colab install -s kb-containment "ray[rllib]>=2.9.0" gymnasium torch pandas
+[colab] Installing packages on kb-containment (preferring uv)...
+Installation Complete (via uv)!
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ colab upload -s kb-containment kb-aads/marl/env.py /content/env.py
+colab upload -s kb-containment kb-aads/marl/train_containment.py /content/train_containment.py
+
+echo "import os; os.makedirs('/content/data', exist_ok=True)" | colab exec -s kb-containment
+
+colab upload -s kb-containment scripts/dataset/output/train.csv /content/data/train.csv
+colab upload -s kb-containment scripts/dataset/output/val.csv /content/data/val.csv
+colab upload -s kb-containment scripts/dataset/output/test.csv /content/data/test.csv
+[colab] Uploaded 'kb-aads/marl/env.py' to '/content/env.py'
+[colab] Uploaded 'kb-aads/marl/train_containment.py' to '/content/train_containment.py'
+[colab] Uploaded 'scripts/dataset/output/train.csv' to '/content/data/train.csv'
+[colab] Uploaded 'scripts/dataset/output/val.csv' to '/content/data/val.csv'
+[colab] Uploaded 'scripts/dataset/output/test.csv' to '/content/data/test.csv'
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ colab exec -s kb-containment -f kb-aads/marl/remote_train_driver.py --timeout 1800
+2026-08-02 15:46:28,602    INFO worker.py:2024 -- Started a local Ray instance.
+2026-08-02 15:46:32,325    WARNING 3456002817.py:29 -- DeprecationWarning: `build` has been deprecated. Use `AlgorithmConfig.build_algo` instead. This will raise an error in the future!
+2026-08-02 15:46:32,328    WARNING algorithm_config.py:5177 -- You are running PPO on the new API stack! This is the new default behavior for this algorithm. If you don't want to use the new API stack, set `config.api_stack(enable_rl_module_and_learner=False,enable_env_runner_and_connector_v2=False)`. For a detailed migration guide, see here: https://docs.ray.io/en/master/rllib/new-api-stack-migration-guide.html
+(SingleAgentEnvRunner pid=3659) DeprecationWarning: `RLModule(config=[RLModuleConfig object])` has been deprecated. Use `RLModule(observation_space=.., action_space=.., inference_only=.., model_config=.., catalog_class=..)` instead. This will raise an error in the future!
+2026-08-02 15:46:44,423    WARNING rl_module.py:463 -- DeprecationWarning: `RLModule(config=[RLModuleConfig object])` has been deprecated. Use `RLModule(observation_space=.., action_space=.., inference_only=.., model_config=.., catalog_class=..)` instead. This will raise an error in the future!
+2026-08-02 15:46:51,070    INFO trainable.py:154 -- Trainable.setup took 18.735 seconds. If your trainable is slow to initialize, consider setting reuse_actors=True to reduce actor creation overheads.
+2026-08-02 15:46:51,072    WARNING util.py:62 -- Install gputil for GPU system monitoring.
+[train] baseline (untrained) policy on val set:
+[eval] overall accuracy: 31/898 (3.5%)
+[eval] under-containment rate: 28/898 (3.1%)
+[eval]   NONE      : 0/789 (0.0%)
+[eval]   CGROUP    : 0/24 (0.0%)
+[eval]   SECCOMP   : 0/26 (0.0%)
+[eval]   NAMESPACE : 31/31 (100.0%)
+[eval]   TERMINATE : 0/28 (0.0%)
+[train] iter 1/60  episode_return_mean=0.395
+[train] iter 5/60  episode_return_mean=0.835
+[train] iter 10/60  episode_return_mean=0.895
+[train] iter 15/60  episode_return_mean=0.913
+[train] iter 20/60  episode_return_mean=0.913
+[train] iter 25/60  episode_return_mean=0.916
+[train] iter 30/60  episode_return_mean=0.941
+[train] iter 35/60  episode_return_mean=0.931
+[train] iter 40/60  episode_return_mean=0.934
+[train] iter 45/60  episode_return_mean=0.950
+[train] iter 50/60  episode_return_mean=0.940
+[train] iter 55/60  episode_return_mean=0.942
+[train] iter 60/60  episode_return_mean=0.957
+[train] trained policy on val set:
+[eval] overall accuracy: 883/898 (98.3%)
+[eval] under-containment rate: 7/898 (0.8%)
+[eval]   NONE      : 789/789 (100.0%)
+[eval]   CGROUP    : 16/24 (66.7%)
+[eval]   SECCOMP   : 19/26 (73.1%)
+[eval]   NAMESPACE : 31/31 (100.0%)
+[eval]   TERMINATE : 28/28 (100.0%)
+[train] checkpoint saved to /content/containment_ppo
+[train] held-out test set evaluation:
+[eval] overall accuracy: 888/908 (97.8%)
+[eval] under-containment rate: 10/908 (1.1%)
+[eval]   NONE      : 791/791 (100.0%)
+[eval]   CGROUP    : 15/25 (60.0%)
+[eval]   SECCOMP   : 19/27 (70.4%)
+[eval]   NAMESPACE : 35/35 (100.0%)
+[eval]   TERMINATE : 28/30 (93.3%)
+READY: /content/containment_ppo_checkpoint.zip
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ colab download -s kb-containment /content/containment_ppo_checkpoint.zip scripts/zips/containment_ppo_checkpoint.zip
+
+mkdir -p kb-aads/marl/checkpoints
+unzip -o scripts/zips/containment_ppo_checkpoint.zip -d kb-aads/marl/checkpoints/containment_ppo
+[colab] Downloaded '/content/containment_ppo_checkpoint.zip' to 'scripts/zips/containment_ppo_checkpoint.zip'
+Archive:  scripts/zips/containment_ppo_checkpoint.zip
+   creating: kb-aads/marl/checkpoints/containment_ppo/env_runner/
+   creating: kb-aads/marl/checkpoints/containment_ppo/learner_group/
+  inflating: kb-aads/marl/checkpoints/containment_ppo/rllib_checkpoint.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/algorithm_state.pkl
+   creating: kb-aads/marl/checkpoints/containment_ppo/env_runner/env_to_module_connector/
+   creating: kb-aads/marl/checkpoints/containment_ppo/env_runner/module_to_env_connector/
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/env_to_module_connector/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/env_to_module_connector/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/env_to_module_connector/state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/module_to_env_connector/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/module_to_env_connector/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/module_to_env_connector/state.pkl
+   creating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/state.pkl
+   creating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/state.pkl
+   creating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/default_policy/
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/module_state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/default_policy/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/default_policy/module_state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/default_policy/metadata.json
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ ^C
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ ^C
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ colab exec -s kb-containment -f kb-aads/marl/remote_train_driver.py --timeout 1800
+2026-08-02 16:14:25,792    INFO worker.py:2024 -- Started a local Ray instance.
+2026-08-02 16:14:30,367    WARNING 3456002817.py:29 -- DeprecationWarning: `build` has been deprecated. Use `AlgorithmConfig.build_algo` instead. This will raise an error in the future!
+2026-08-02 16:14:30,370    WARNING algorithm_config.py:5177 -- You are running PPO on the new API stack! This is the new default behavior for this algorithm. If you don't want to use the new API stack, set `config.api_stack(enable_rl_module_and_learner=False,enable_env_runner_and_connector_v2=False)`. For a detailed migration guide, see here: https://docs.ray.io/en/master/rllib/new-api-stack-migration-guide.html
+(SingleAgentEnvRunner pid=10568) DeprecationWarning: `RLModule(config=[RLModuleConfig object])` has been deprecated. Use `RLModule(observation_space=.., action_space=.., inference_only=.., model_config=.., catalog_class=..)` instead. This will raise an error in the future!
+2026-08-02 16:14:43,248    WARNING rl_module.py:463 -- DeprecationWarning: `RLModule(config=[RLModuleConfig object])` has been deprecated. Use `RLModule(observation_space=.., action_space=.., inference_only=.., model_config=.., catalog_class=..)` instead. This will raise an error in the future!
+2026-08-02 16:14:45,197    INFO trainable.py:154 -- Trainable.setup took 14.816 seconds. If your trainable is slow to initialize, consider setting reuse_actors=True to reduce actor creation overheads.
+2026-08-02 16:14:45,201    WARNING util.py:62 -- Install gputil for GPU system monitoring.
+[train] baseline (untrained) policy on val set:
+[eval] overall accuracy: 30/898 (3.3%)
+[eval] under-containment rate: 29/898 (3.2%)
+[eval]   NONE      : 0/789 (0.0%)
+[eval]   CGROUP    : 0/24 (0.0%)
+[eval]   SECCOMP   : 0/26 (0.0%)
+[eval]   NAMESPACE : 30/31 (96.8%)
+[eval]   TERMINATE : 0/28 (0.0%)
+[train] iter 1/60  episode_return_mean=0.365
+[train] iter 5/60  episode_return_mean=0.781
+[train] iter 10/60  episode_return_mean=0.935
+[train] iter 15/60  episode_return_mean=0.957
+[train] iter 20/60  episode_return_mean=0.977
+[train] iter 25/60  episode_return_mean=0.971
+ [train] iter 30/60  episode_return_mean=0.995
+[train] iter 35/60  episode_return_mean=0.983
+[train] iter 40/60  episode_return_mean=0.980
+[train] iter 45/60  episode_return_mean=0.963
+[train] iter 50/60  episode_return_mean=0.977
+[train] iter 55/60  episode_return_mean=0.985
+[train] iter 60/60  episode_return_mean=0.970
+[train] trained policy on val set:
+[eval] overall accuracy: 766/898 (85.3%)
+[eval] under-containment rate: 0/898 (0.0%)
+[eval]   NONE      : 657/789 (83.3%)
+[eval]   CGROUP    : 24/24 (100.0%)
+[eval]   SECCOMP   : 26/26 (100.0%)
+[eval]   NAMESPACE : 31/31 (100.0%)
+[eval]   TERMINATE : 28/28 (100.0%)
+[train] checkpoint saved to /content/containment_ppo
+[train] held-out test set evaluation:
+[eval] overall accuracy: 766/908 (84.4%)
+[eval] under-containment rate: 0/908 (0.0%)
+[eval]   NONE      : 650/791 (82.2%)
+[eval]   CGROUP    : 25/25 (100.0%)
+[eval]   SECCOMP   : 27/27 (100.0%)
+[eval]   NAMESPACE : 34/35 (97.1%)
+[eval]   TERMINATE : 30/30 (100.0%)
+READY: /content/containment_ppo_checkpoint.zip
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ colab download -s kb-containment /content/containment_ppo_checkpoint.zip scripts/zips/containment_ppo_checkpoint.zip
+
+mkdir -p kb-aads/marl/checkpoints
+unzip -o scripts/zips/containment_ppo_checkpoint.zip -d kb-aads/marl/checkpoints/containment_ppo
+[colab] Downloaded '/content/containment_ppo_checkpoint.zip' to 'scripts/zips/containment_ppo_checkpoint.zip'
+Archive:  scripts/zips/containment_ppo_checkpoint.zip
+  inflating: kb-aads/marl/checkpoints/containment_ppo/rllib_checkpoint.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/algorithm_state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/env_to_module_connector/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/env_to_module_connector/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/env_to_module_connector/state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/module_to_env_connector/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/module_to_env_connector/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/env_runner/module_to_env_connector/state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/module_state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/metadata.json
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/default_policy/class_and_ctor_args.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/default_policy/module_state.pkl
+  inflating: kb-aads/marl/checkpoints/containment_ppo/learner_group/learner/rl_module/default_policy/metadata.json
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$ colab stop -s kb-containment
+[colab] Stopping session 'kb-containment'...
+[colab] Session terminated.
+emergence@UbuntuVM-eBPF:~/Desktop/kernel-borderlands$

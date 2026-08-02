@@ -4,6 +4,90 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ---
 
+## [Unreleased] - 2026-08-02
+
+### Added
+- **Containment RL training pipeline (`scripts/dataset/`, `kb-aads/marl/`)**: Built a real dataset pipeline (`collect.py`/`label.py`/`split.py`) using [ADFA-LD](https://www.unsw.adfa.edu.au/unsw-canberra-cyber/cybersecurity/ADFA-IDS-Datasets/) real Linux syscall-sequence traces — a host-based IDS dataset matching kb-core's actual observation surface, chosen after correctly rejecting an initial NSL-KDD (network-flow) attempt as a mismatch for what KB hunts. Maps 5 of KB's 6 attack-lab scenarios onto ADFA-LD categories (`memory_exploit.sh` has no equivalent — stated, uncovered gap), plus real `/proc` telemetry sampled from the dev machine for benign-class diversity. Full report: [`docs/reports/kb-aads/containment-rl-2026-08-02.md`](docs/reports/kb-aads/containment-rl-2026-08-02.md). [Karthik] [PardhuVarma]
+- **Fixed `ContainmentEnv` (`kb-aads/marl/env.py`)**: Replaced the `AADSEnv` stub (single-step, placeholder observations, hardcoded reward) with a real Gymnasium env — observation is the actual `ProcessState`/`KBEvent` wire-field shape, reward computed from labeled targets with an over-/under-containment asymmetry. [Karthik] [PardhuVarma]
+- **RLlib PPO training via `colab` CLI (`kb-aads/marl/train_containment.py`, `COLAB_CLI_TRAINING.md`, `remote_train_driver.py`)**: Trained Containment's policy remotely on a Colab CPU session (no local GPU on the dev machine). Final held-out test-set result: 84.4% overall accuracy, 97-100% on every real attack category, **0% under-containment rate**. Full training transcript at `kb-aads/marl/session.log`. [Karthik] [PardhuVarma]
+- **Live inference wiring (`kb-aads/agents/containment.py`)**: `ContainmentAgent` now loads the trained checkpoint via `RLModule.from_checkpoint` (inference-only) and drives real containment decisions instead of doing nothing — falls back to `NONE` + explicit `model_loaded: False` if no checkpoint exists, never guesses. [Karthik] [PardhuVarma]
+- **Live pipeline demo (`kb-aads/demo/live_containment_monitor.py`)**: Long-running driver that streams real `KBEvent`s from a live `kb-control-plane`, fetches each PID's real `ProcessState`, and feeds it to a persistent, trained `ContainmentAgent` actor — verified against the actual running `kb-core` sensor + `kb-control-plane` on this machine, not synthetic data. [Karthik] [PardhuVarma]
+
+### Fixed
+- **`event_type` feature collision in Containment's training data (`scripts/dataset/label.py`)**: First training run scored only 60-73% on `CGROUP`/`SECCOMP` specifically because `credential_access`/`lateral_movement` shared the same engineered `event_type` code and `zone` floor, leaving the trained policy almost nothing to distinguish them by. Gave each of the 6 categories a distinct `event_type` code and retrained; those two levels went to 100% in the retrain, at the cost of `NONE` dropping 100%→82.2% (an accepted trade — over-caution on benign traffic beats a missed threat for a containment system). [Karthik] [PardhuVarma]
+- **`.gitignore`'s dataset-raw rule never matched anything**: `kernel-borderlands/scripts/dataset/output/raw` had a stray path prefix relative to where `.gitignore` actually lives, so `scripts/dataset/output/raw/` (real downloaded datasets, real local telemetry samples) was never actually ignored. Fixed to `scripts/dataset/output/raw/`; also added `kb-aads/marl/checkpoints/*` and `scripts/zips/` (binary/regenerable training artifacts). [Karthik] [PardhuVarma]
+- **Upstream `google-colab-cli` `colab install` crash**: `jupyter_kernel_client` 1.0.0 removed/renamed the `KernelClient` class the CLI's bundled version depends on. Pinned `jupyter_kernel_client==0.15.0` in the tool's isolated `uv` venv to restore the expected API — not a change to this repo's own code, but blocking anyone else using the same `colab` CLI setup for training. [Karthik] [PardhuVarma]
+
+---
+
+## [8335f23] - 2026-08-02
+
+### Added
+- **CPM eBPF-side registration + CWP (Critical Workload Protection) scaffolding (`kb-core`)**: `protected_pids_map`/`protected_exec_paths_map` exec/exit-time registration hooks per `docs/features/CPM.md`, plus a new `protected_workloads_map` (8192 entries, path- or hash-identity tier) implementing `docs/features/CWP.md` §5-6.1 — evaluated strictly after CPM, never merged with it. SHA-256 hashing (`kb_sha256.c`/`.h`) added for hash-based workload identity. `kb-core/tests/test_cwp.py` added; owner-team/justification alerting (§9) explicitly out of scope for this pass. [PardhuVarma]
+- **Knowledge graph published (`docs/index.html`, `graphify-out/`)**: A `graphify`-generated knowledge graph of the whole codebase (1,924 nodes, 3,146 edges, 178 communities — vendored `vmlinux.h` BTF excluded so the graph reflects KB's own architecture, not kernel-header noise), linked from the site's new `#graph` section and footer. [PardhuVarma]
+
+---
+
+## [2b35dc9] - 2026-07-30
+
+### Added
+- **`kbctl` CLI (`kb-op/kbctl/`)**: New standalone Go CLI (`cmd_audit.go`, `cmd_policy.go`, `cmd_process.go`, `cmd_stats.go`, `cmd_zone.go`) talking to `kb-control-plane` over its gRPC API, plus new `kb.proto` RPCs/messages backing it and `internal/controlplane/grpc.go`/`http.go` handlers to serve them. [Tejaswini4119]
+- **Audit chain support (`kb-control-plane/internal/store`, `internal/controlplane`)**: New store-layer methods and gRPC plumbing for querying the audit trail `kbctl audit` reads. [Tejaswini4119]
+- **`docs/emergency-backup/` — standalone per-subsystem documentation (`kb-aads.md`, `kb-core.md`, `kb-cp.md`, `kb-op.md`, plus a `README.md` index)**: ~5,300 lines added across several commits, written so each subsystem could be forked and continued independently "in case the team disbands" — a real, deliberate deliverable despite the informal commit messages ("i love my team.", "hate my clg", etc.) it landed under. [PardhuVarma]
+
+---
+
+## [f8096ac] - 2026-07-28
+
+### Added
+- **CPM (Containment Policy Manager) authorization gate (`kb-core`)**: `cpm_classify()` in `handle_incoming_containment_cmd()` now rejects containment of PID 1, kernel threads, self-registered sensor components, and a protected-executable registry, per `docs/features/CPM.md`. Classifier lives in userspace C (not in-kernel eBPF) since that's where the actual containment-map write happens — a documented deviation from the spec's literal diagram. Verified live against the real sensor (`kb-core/tests/test_cpm.py`). [PardhuVarma]
+- **`kbd.sock`/`kbct.sock` socket split (`kb-core`, `kb-control-plane`)**: Telemetry and containment commands were previously multiplexed on one raw socket connection — a telemetry-volume burst could fill the send buffer, and `write()` returning `EAGAIN` was misread as a dead connection, taking containment delivery down as collateral damage. Split control traffic (containment cmds, sensitive-path/rules pushes) onto a new `kbct.sock`, leaving `kbd.sock` telemetry-only; `kb-control-plane`'s `NewListener()`/`New()` now bind both. Also ignores `SIGPIPE` process-wide. Verified live: a containment command for a protected PID was delivered and rejected correctly while the connection was simultaneously saturated with unrelated telemetry. [PardhuVarma] [Tejaswini4119]
+- **`kb-aads` `ControlPlaneClient` streaming/unary mixing guard (`kb-aads/comms/grpc_client.py`)**: Same class of coupling the socket split fixed, at the gRPC-channel layer — a stalled `stream_events`/`stream_alerts` consumer sharing a channel with a latency-sensitive unary call (`submit_decision`, etc.) could delay the unary response. Not live yet (no caller used the streaming methods at the time), fixed pre-emptively. 3 new tests, all passing. [Karthik]
+
+### Fixed
+- **Containment-cmd read path reset the wrong bridge fd (`kb-core`)**: The error handler unconditionally reset the global `bridge_fd` instead of whichever fd was actually passed in — found while wiring up the socket split. [PardhuVarma]
+- **`test_cpm.py`/`test_restore_ipc.py` silently no-op after the socket split (`kb-core/tests`)**: Both mock-control-plane test drivers bound only `kbd.sock` and sent containment commands there; post-split, `kbd_sensor` no longer reads containment commands from that connection, so these scripts reported success while doing nothing. Updated both to use `kbct.sock`. [PardhuVarma]
+- **Stale `kbd.sock`-carries-everything documentation, corrected across the board**: `CPM.md`, `cpm-implementation.md`, `boot_sequence_spec.md`, `wire-protocol.md`, `ipc-v3-wiring.md`, `developer-commands.md`, `worksheet.md`, `specifications/README.md` (which also incorrectly called `kbd.sock` gRPC — `kba.sock` is), `kb-control-plane/README.md`, `cmd/README.md`, and `CLAUDE.md` all still described `kbd.sock` as carrying containment commands or being kb-core's only socket. [PardhuVarma] [Tejaswini4119]
+- **`comms/README.md`/`demo/README.md` described ZeroMQ as current**: No `import zmq` exists anywhere in `kb-aads` — ZeroMQ was dropped for Ray before these docs were last touched. New `docs/development/control-aads/kb-events-swarm-ingestion-gap.md` documents, with code citations, that nothing currently consumes `StreamEvents`/`StreamAlerts` at all. Also corrected `aads-intelligence-roadmap.md`'s claim that CPM/CWP is a "scoring engine" (`CPM.md` is explicit it isn't). [Karthik]
+
+---
+
+## [452b64d] - 2026-07-26
+
+### Added
+- **Academic/major-project submission materials (`docs/project/major-project-submissions/`)**: PPTX, synopsis PDF, and README/video-link updates for the university major-project review cycle — non-engineering, not detailed individually here. [PardhuVarma]
+
+---
+
+## [8b6a3a2] - 2026-07-24
+
+### Added
+- **`kb-aads` actor scaffolding fixed from non-functional to a verified-working skeleton (`kb-aads/agents/`)**: `BaseAgent` was previously decorated `@ray.remote` directly, which throws `ActorClassInheritanceException` the moment any subclass (`HunterAgent`, `PatrollerAgent`, ...) tries to also apply `@ray.remote` — no concrete role actor could actually be constructed. Removed the decorator from `BaseAgent` itself; added `RemoteBaseAgent = ray.remote(BaseAgent)` for roles with no dedicated subclass. Added `AgentState.last_action` and surfaced it via `get_status()`. Added `ExecutorAgent` (`kb-aads/agents/executor.py`) — the first real gateway back to `kb-control-plane`, submitting consensus decisions over `kba.sock` via `submit_decision`. Added `config/agents.yaml` (swarm composition). [Karthik]
+- **AADS Intelligence Roadmap (`docs/development/control-aads/aads-intelligence-roadmap.md`)**: Initial roadmap from skeleton agents to trained agents — the per-agent RL/LLM/no-model assignment table, JJE's courthouse-for-sub-agents design, and the phased Phase 0-6 plan this session's Containment training work (see `[Unreleased]` above) partially executes against. [Karthik]
+- **Resource management roadmap (`docs/architecture/resource_management_roadmap.md`, `kb-core_system_requirements.md`)**: New architecture docs covering planned resource-management/fleet-deployment direction. [PardhuVarma]
+- **Product plan, years 1-2 (`docs/project/kbgoal2yrs.md`)**: Longer-term product roadmap document. [PardhuVarma]
+
+### Fixed
+- **Stale cross-references across `docs/`**: Corrected references in `docs/README.md`, `docs/features/README.md`, `docs/reports/README.md`, `docs/specifications/README.md`, `docs/development/core-control/README.md`, and media READMEs after the AADS roadmap and other docs churn left several pointing at moved/renamed files. [Karthik]
+
+---
+
+## [a525f41] - 2026-07-23
+
+### Added
+- **`kb-checker` gRPC health-verification channel (`kb-control-plane/internal/checkerclient/`, `proto/checker/`)**: New `checkerclient.go` client plus `checker.proto`/generated Go stubs, letting `kb-control-plane` query `kb-checker`'s health over gRPC — the Go-side half of the `kbd`↔`kb-checker` diagnostic channel referenced in `control-plane-catalog.md`. [Tejaswini4119]
+- **Resource management / kb-core system requirements docs (`docs/architecture/`)**: Further build-out of `resource_management_roadmap.md` and `kb-core_system_requirements.md`. [Tejaswini4119] [PardhuVarma]
+- **`control-plane-catalog.md` expanded (`docs/development/core-control/`)**: Substantial documentation additions describing the control-plane socket/service catalog — despite several of this date's commit messages referencing "http.go :80xx tcp port" changes, the actual diffs are documentation-only; no `http.go` TCP-port code change landed under these commits. [Tejaswini4119]
+
+---
+
+## [8a3286a] - 2026-07-18
+
+### Added
+- **Demo-run telemetry media (`media/demoruns/`)**: READMEs and a tracked demo-run telemetry video, plus general README polish. [PardhuVarma]
+
+---
+
 ## [d8c6665] - 2026-07-17
 
 ### Added

@@ -15,12 +15,28 @@ Judge, Executor, Patroller, signal relays, and containment militia squad members
 
 Unlike Jury/Healer (still stubs), **Containment now has an actual trained-policy pipeline**, built as a stand-in for the roadmap's full Phase 0/1/2 (which needs real eBPF capture from isolated-VM attack-lab runs — that doesn't exist yet). What's real here, not synthetic:
 
-- **Data**: [ADFA-LD](https://www.unsw.adfa.edu.au/unsw-canberra-cyber/cybersecurity/ADFA-IDS-Datasets/) (Creech & Hu) — real Linux syscall-sequence traces, a host-based dataset matching kb-core's actual observation surface (syscalls), not a network-flow dataset like NSL-KDD/CICIDS (tried first, replaced — network flow doesn't match what KB hunts). Attack categories mapped onto KB's attack-lab scenario names (`scripts/dataset/collect.py`'s `ADFA_CATEGORY_TO_KB_SCENARIO`) — Adduser→privilege_escalation, Hydra_FTP→credential_access, Hydra_SSH→lateral_movement, Java_Meterpreter→process_injection, Meterpreter/Web_Shell→reverse_shell. **Gap, stated plainly**: no ADFA-LD category maps to `memory_exploit.sh` — that scenario has zero training coverage. Benign class also includes real `/proc` telemetry sampled from the dev machine.
+- **Data**: [ADFA-LD](https://www.unsw.adfa.edu.au/unsw-canberra-cyber/cybersecurity/ADFA-IDS-Datasets/) (Creech & Hu) — real Linux syscall-sequence traces, a host-based dataset matching kb-core's actual observation surface (syscalls), not a network-flow dataset like NSL-KDD/CICIDS (tried first, replaced — network flow doesn't match what KB hunts). Attack categories mapped onto KB's attack-lab scenario names (`scripts/dataset/collect.py`'s `ADFA_CATEGORY_TO_KB_SCENARIO`) — Adduser→privilege_escalation, Hydra_FTP→credential_access, Hydra_SSH→lateral_movement, Java_Meterpreter→process_injection, Meterpreter/Web_Shell→reverse_shell. **Gap, stated plainly**: no ADFA-LD category maps to `memory_exploit.sh` — that scenario has zero training coverage. Benign class also includes real `/proc` telemetry sampled from the dev machine (42/10/8 rows in train/val/test — a small slice of the ~6000-row normal class, folded in alongside ADFA-LD's own much larger real-Normal corpus, not a token gesture but not the majority signal either).
 - **Pipeline**: `scripts/dataset/collect.py` → `label.py` → `split.py`, all real code, runnable end to end (see their docstrings for exactly what each computed feature means and why — `score`/`score_delta` are a composite z-score over trace length/syscall-diversity/repeat-run-length against ADFA-LD's own Normal-trace statistics, not a random per-category band).
 - **Env**: `env.py`'s `ContainmentEnv` — observation is the real `ProcessState`/`KBEvent` wire-field shape, reward is computed from the labeled target vs. action taken (over-/under-containment asymmetry), single-step episodes (a deliberate, documented scope choice for Containment specifically — see the env's docstring for why that's not just the old stub carried forward).
-- **Training**: `train_containment.py` (RLlib PPO) / `train_containment.ipynb` (same script, Colab-wrapped — no local GPU on the dev machine, though this env is small enough that CPU training works fine either way).
-- **Inference**: `agents/containment.py` loads the resulting checkpoint (`RLModule.from_checkpoint`, inference-only, no `ray.init()`/training stack needed in the agent process) and actually drives `ContainmentAgent`'s decisions — falls back to `NONE` + explicit `model_loaded: False` if no checkpoint has been trained yet, never guesses.
+- **Training**: `train_containment.py` (RLlib PPO), run via `colab` CLI (`kb-aads/marl/COLAB_CLI_TRAINING.md` + `remote_train_driver.py`) — no local GPU on the dev machine, though this env is small enough that CPU training works fine either way (also `train_containment.ipynb`, a Colab-notebook-upload alternative to the CLI route, same training logic).
+- **Inference**: `agents/containment.py` loads the resulting checkpoint (`RLModule.from_checkpoint`, inference-only, no `ray.init()`/training stack needed in the agent process) and actually drives `ContainmentAgent`'s decisions — falls back to `NONE` + explicit `model_loaded: False` if no checkpoint has been trained yet, never guesses. Verified live: a real `ContainmentAgent` actor loading the trained checkpoint produces the correct level for one held-out example of every category (see below).
 - **Attack-scenario → `ContainmentLevel` mapping** (proposed, not Karthik-confirmed — see `scripts/dataset/label.py`'s docstring for the full reasoning): credential_access→CGROUP, lateral_movement→SECCOMP, privilege_escalation/process_injection→NAMESPACE, reverse_shell→TERMINATE.
+
+### Results (final, after one fix-and-retrain iteration)
+
+First training run scored 97.8% test accuracy overall but only 60-73% on CGROUP/SECCOMP specifically — root-caused to `credential_access` and `lateral_movement` sharing the same engineered `event_type` code and `zone` floor, leaving the policy almost nothing to distinguish them by besides noisy score features. Fixed by giving each of the 5 KB scenarios (plus normal) its own `event_type` code (`scripts/dataset/label.py`'s `KB_SCENARIO_EVENT_TYPE`, `env.py`'s observation-space bound updated 0-3 → 0-5 to match) and retrained from scratch. Final held-out test-set numbers:
+
+| Level | Accuracy |
+|---|---|
+| NONE | 82.2% (791 samples) |
+| CGROUP | 100.0% (25 samples) |
+| SECCOMP | 100.0% (27 samples) |
+| NAMESPACE | 97.1% (35 samples) |
+| TERMINATE | 100.0% (30 samples) |
+| **Overall** | **84.4%** (908 samples) |
+| **Under-containment rate** | **0.0%** |
+
+Net trade-off from the fix: overall accuracy dropped (97.8%→84.4%), entirely from NONE (100%→82.2%) — the policy became more willing to over-contain borderline-normal traffic. Every attack category improved to 97-100%, and under-containment (missing a real threat) dropped to zero. For a containment system, this is the right direction to trade in — a false alarm on benign traffic costs less than a missed threat.
 
 Jury and Healer are still the old hardcoded-threshold stubs — this session's scope was Containment only.
 

@@ -62,7 +62,7 @@ class ContainmentEnv(gym.Env):
 
         self.observation_space = spaces.Box(
             low=np.array([0.0, 0.0, 0.0, -100.0, 0.0], dtype=np.float32),
-            high=np.array([100.0, 2.0, 1.0, 100.0, 3.0], dtype=np.float32),
+            high=np.array([100.0, 2.0, 1.0, 100.0, 5.0], dtype=np.float32),
             dtype=np.float32,
         )
         self.action_space = spaces.Discrete(N_CONTAINMENT_LEVELS)

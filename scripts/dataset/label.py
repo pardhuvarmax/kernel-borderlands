@@ -9,7 +9,7 @@ Target schema matches what kb-control-plane actually puts on the wire
     ProcessState.zone    -> zone          (0=SAFE, 1=SUSPICIOUS, 2=BORDERLANDS)
     ProcessState.uid     -> uid_is_root   (0/1 — engineered, see below)
     KBEvent.score_delta  -> score_delta   (float, -100..100)
-    KBEvent.event_type   -> event_type    (0..3, engineered category)
+    KBEvent.event_type   -> event_type    (0..5, engineered category — one code per KB scenario, see KB_SCENARIO_EVENT_TYPE)
 and a target action matching ContainmentLevel:
     0 NONE, 1 CGROUP, 2 SECCOMP, 3 NAMESPACE, 4 TERMINATE
 
@@ -76,8 +76,22 @@ KB_SCENARIO_ZONE_FLOOR = {
 }
 
 KB_SCENARIO_EVENT_TYPE = {
-    "normal": 0, "credential_access": 1, "lateral_movement": 1,
-    "privilege_escalation": 2, "process_injection": 2, "reverse_shell": 3,
+    # One code per KB scenario, not per severity bucket. Fixing a real bug
+    # found after the first training run: credential_access/lateral_movement
+    # (-> CGROUP/SECCOMP) previously shared event_type=1 and the same
+    # zone_floor, leaving the policy almost nothing to tell them apart by
+    # except noisy score/score_delta — measured result was 60-73% accuracy
+    # on those two vs. 93-100% everywhere else. zone stays tied to the real
+    # Zone enum's semantics (both genuinely are SUSPICIOUS, not BORDERLANDS
+    # — not inflating that field artificially), so event_type is where the
+    # actual fix belongs: it's already an engineered field, not a wire-
+    # contract value with fixed cardinality.
+    "normal": 0,
+    "credential_access": 1,
+    "lateral_movement": 2,
+    "privilege_escalation": 3,
+    "process_injection": 4,
+    "reverse_shell": 5,
 }
 
 def read_trace(path):
