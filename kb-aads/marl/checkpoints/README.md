@@ -1,10 +1,14 @@
 # Trained checkpoints
 
-Not checked into git (binary training artifacts) — see `.gitignore`.
+Checked into git — each trained policy is confined to its own subdirectory
+(e.g. `containment_ppo/`), so committing the actual weights keeps the repo
+immediately runnable (clone and go) without requiring a retrain first. Only
+~1.8MB for `containment_ppo/`; re-evaluate this choice if a future
+checkpoint (e.g. Jury/Healer, or a larger model) is significantly bigger.
 
-Run `train_containment.py` (or `train_containment.ipynb` on Colab, given no
-local GPU) to produce `containment_ppo/`, loaded at runtime by
-`kb-aads/agents/containment.py`. If `containment_ppo/` isn't here,
+Regenerate any checkpoint by running `train_containment.py` (or
+`train_containment.ipynb` on Colab, given no local GPU) — loaded at runtime
+by `kb-aads/agents/containment.py`. If `containment_ppo/` isn't here,
 `ContainmentAgent` falls back to `NONE` (no containment) and reports
 `model_loaded: False` — it does not guess.
 
