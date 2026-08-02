@@ -301,6 +301,8 @@ var auditVerifyCmd = &cobra.Command{
 ```
 Pick one or both — HTTP is the cheaper win for the dashboard, the gRPC/CLI route matters more if `kbctl` or `kb-tui` should be able to check this without the HTTP server running.
 
+#### STATUS : DONE.
+
 ### 2.2 [SECURITY] `AgentDecision.AuthorizedBy` is captured but never checked — SEV: High
 - **Owner**: Teju, solo. Pure Go work in `grpc.go`, no infra dependency.
 - **Where**: `internal/controlplane/grpc.go`, `SubmitAgentDecision`.

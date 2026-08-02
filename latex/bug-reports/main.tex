@@ -1,0 +1,758 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------- Core encoding / fonts ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[strings]{underscore}   % literal underscores in text mode, no manual escaping
+
+% ---------- Layout ----------
+% Generous top/bottom margins so the header/footer sit clearly between
+% the page-edge border (drawn 1cm in, see below) and the body text --
+% no overlap in either direction.
+\usepackage[a4paper,left=2.6cm,right=2.6cm,top=3.4cm,bottom=3.2cm,
+            headheight=14pt,headsep=22pt,footskip=28pt]{geometry}
+\usepackage{tikz}
+\usetikzlibrary{calc}
+\usepackage{eso-pic}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{parskip}
+\usepackage{seqsplit}
+
+% ---------- Strictly black & white ----------
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=black,
+  pdftitle={Kernel Borderlands -- Bug Report},
+  pdfauthor={Kernel Borderlands Team}
+}
+
+% ---------- Four-side page border on every page ----------
+\newcommand{\pageborder}{%
+  \begin{tikzpicture}[remember picture, overlay]
+    \draw[black, line width=0.7pt]
+      ($(current page.north west)+(1.0cm,-1.0cm)$) rectangle
+      ($(current page.south east)+(-1.0cm,1.0cm)$);
+  \end{tikzpicture}%
+}
+\AddToShipoutPictureBG{\pageborder}
+
+% ---------- Headers / footers ----------
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancyhead[L]{\small\scshape Kernel Borderlands}
+\fancyhead[R]{\small\scshape Bug Report}
+\fancyfoot[C]{\small\thepage}
+
+\fancypagestyle{plain}{%
+  \fancyhf{}
+  \renewcommand{\headrulewidth}{0pt}
+  \fancyfoot[C]{\small\thepage}
+}
+
+% ---------- Section styling (clean, sharp, no color) ----------
+\titleformat{\section}
+  {\normalfont\Large\bfseries}{\thesection}{0.8em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries}{}{0em}{}
+\titlespacing*{\subsection}{0pt}{1.4em}{0.6em}
+
+% ---------- Code listings: plain monospace, no color ----------
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{black},
+  backgroundcolor=\color{white},
+  showstringspaces=false,
+  xleftmargin=1pt,
+  xrightmargin=1pt,
+  tabsize=2,
+  aboveskip=0.8em,
+  belowskip=0.8em
+}
+
+% ---------- Helper macros for bug entries ----------
+\newcommand{\bugmeta}[3]{%
+  \noindent\textbf{Severity:} #1 \\
+  \textbf{Component:} \ttfamily\seqsplit{#2}\normalfont \\
+  \textbf{Status:} #3
+  \par\vspace{0.5em}
+}
+
+\newcommand{\entrysep}{\vspace{0.4em}\noindent\rule{\linewidth}{0.3pt}\vspace{1.1em}}
+
+% A printed name with a styled, greyed-out "signature" underneath --
+% uses the standard Zapf Chancery PSNFSS font for a script/signature look,
+% no external font install needed.
+% #1 = name, #2 = roll number
+\newcommand{\devcredit}[2]{%
+  \begin{minipage}[t]{3.2cm}
+    \centering
+    {\small #1}\\[0.35em]
+    {\color{gray!65}\fontfamily{pzc}\selectfont\large #2}
+  \end{minipage}%
+}
+
+\setlist[itemize]{leftmargin=1.4em, itemsep=0.2em}
+\setlist[enumerate]{leftmargin=1.6em, itemsep=0.2em}
+
+\begin{document}
+
+% ================= TITLE PAGE =================
+\begin{titlepage}
+\thispagestyle{empty}
+\centering
+\vspace*{\fill}
+
+{\small\textls[280]{KERNEL BORDERLANDS}}
+
+\vspace{1.6cm}
+
+{\fontsize{40}{48}\selectfont\bfseries Bug Report}
+
+\vspace{0.8em}
+
+{\normalsize A Source-Verified Audit of Open, Resolved, and Historical Defects}
+
+\vspace{1.2cm}
+
+{\small Compiled for August 2nd, 2026}
+
+\vspace*{\fill}
+
+\begin{minipage}{0.8\linewidth}
+\centering
+\small
+\textbf{Scope} \\[0.3em]
+Direct source audit across all four subsystems --- \texttt{kb-core},
+\texttt{kb-aads}, \texttt{kb-control-plane}, \texttt{kb-op} --- cross-checked
+against \seqsplit{\texttt{docs/development/core-control/control-plane-catalog.md}} and
+\texttt{CHANGELOG.md}. Every finding was independently verified by reading
+the current source directly, not taken on faith from prior documentation.
+\end{minipage}
+
+\vspace{1.4cm}
+
+{\small \scshape Kernel Borderlands Team}\\[0.9em]
+\devcredit{Karthik}{2311CS040080}\hspace{0.6cm}\devcredit{PardhuVarma}{2311CS040089}\hspace{0.6cm}\devcredit{Tejaswini}{2311CS040077}\hspace{0.6cm}\devcredit{Rupa}{2311CS040082}
+
+\vspace{1.5cm}
+\end{titlepage}
+
+% ================= TOC =================
+\tableofcontents
+\thispagestyle{plain}
+\clearpage
+
+% ================= INTRODUCTION =================
+\section*{Introduction}
+\addcontentsline{toc}{section}{Introduction}
+
+This report covers real, code-level defects and security gaps in the
+Kernel Borderlands product itself --- sourced from
+\seqsplit{\texttt{docs/development/core-control/control-plane-catalog.md}} (the
+control plane's own severity-graded \emph{Open Gaps} register) and
+\texttt{CHANGELOG.md}, cross-checked directly against the current source
+to confirm what is actually still open versus already fixed since those
+documents were written.
+
+Dev-environment and tooling issues encountered during development are
+intentionally excluded from this report --- see
+\seqsplit{\texttt{docs/reports/kb-aads/containment-rl-2026-08-02.md}} for those. This
+revision adds a direct source audit across all four subsystems
+(\texttt{kb-core}, \texttt{kb-aads}, \texttt{kb-control-plane},
+\texttt{kb-op}); every finding below was independently verified by reading
+the actual current source, not taken on faith from any prior document.
+
+\clearpage
+
+% ================= OPEN BUGS =================
+\section{Open --- Confirmed Still Present in Current Source}
+
+\subsection*{BUG-001 --- Unauthenticated, Wildcard-CORS HTTP API Can Terminate/Restore Containment on Any PID}
+\addcontentsline{toc}{subsection}{BUG-001 --- Unauthenticated HTTP API}
+\bugmeta{Critical (Security)}{kb-control-plane/internal/controlplane/\{controlplane.go, http.go\}, triggered from kb-op/kb-dashboard/src/App.tsx}{Open}
+
+\textbf{Description.} \texttt{kbd} starts an HTTP API on \texttt{:8080} ---
+bound to \textbf{all interfaces}, not loopback-only --- serving
+\texttt{/api/isolate} and \texttt{/api/restore} with \textbf{zero
+authentication}, and a CORS handler that sets
+\texttt{Access-Control-Allow-Origin: *} on every response.
+
+\textbf{Confirmed in source:}
+\begin{lstlisting}[language=Go]
+// controlplane.go:184
+if err := cp.StartHTTPServer(":8080"); err != nil {
+    // all interfaces, not 127.0.0.1:8080
+
+// http.go:46
+w.Header().Set("Access-Control-Allow-Origin", "*")
+    // every origin, no check
+
+// http.go:398-423, handleIsolate -- no auth check anywhere
+var req struct{ Pid uint32 `json:"pid"` }
+json.NewDecoder(r.Body).Decode(&req)
+s.cp.enforcer.Contain(req.Pid, uint32(pb.ContainmentLevel_TERMINATE),
+    "Manual isolation from dashboard")
+\end{lstlisting}
+\texttt{handleRestore} (same file, near line 425) is identical in shape,
+calling \seqsplit{\texttt{Contain(..., ContainmentLevel\_NONE, ...)}}.
+
+\textbf{Impact.} Any actor with network reach to port 8080 --- or, because
+of the wildcard CORS header, \emph{any webpage a browser loads at all},
+from any origin --- can POST \texttt{\{"pid": N\}} to \texttt{/api/isolate}
+and terminate containment on an arbitrary PID with no credential, token, or
+origin check whatsoever. This is strictly worse than BUG-011/BUG-012
+(which at least require reaching a Unix socket): this is an open TCP
+listener with explicit cross-origin permission, reachable from anywhere
+the port is routable. Combined with BUG-011 (no protected-PID gate on the
+Go side), this path can also be pointed at PID 1 or \texttt{kbd}'s own PID
+with no additional resistance. Not mentioned anywhere in
+\texttt{control-plane-catalog.md}, which only discusses this daemon's
+gRPC-facing gaps --- its HTTP API's auth posture appears to have gone
+unreviewed entirely.
+
+\textbf{Suggested fix.} Bind to \texttt{127.0.0.1:8080} unless explicit
+remote-dashboard access is configured; require a real auth token/session
+on \texttt{/api/isolate} and \texttt{/api/restore} (and any other
+state-mutating route); replace the wildcard CORS header with an explicit
+allowed-origin list.
+
+\entrysep
+
+\subsection*{BUG-002 --- UpsertProcessState Silently Resets an Actively-Contained Process Back to NONE}
+\addcontentsline{toc}{subsection}{BUG-002 --- Containment reset on telemetry update}
+\bugmeta{Critical}{kb-control-plane/internal/store/process.go}{Open}
+
+\textbf{Description.} \texttt{UpsertProcessState} --- called on the hot
+path, continuously, for every incoming telemetry update from
+\texttt{kb-core} --- builds a \textbf{brand-new} \texttt{CachedState\{...\}}
+literal and overwrites L1 wholesale. Unlike every other mutator in this
+file (\texttt{SetContainment}, \texttt{SetZone},
+\texttt{InsertZoneTransition}, all of which correctly load-then-mutate-one-
+field), this one omits the \texttt{Containment} field entirely, so it is
+always the Go zero-value (\texttt{0} = \texttt{NONE}) after any telemetry
+update.
+
+\textbf{Confirmed in source:}
+\begin{lstlisting}[language=Go]
+// SetContainment (correct pattern):
+if v, ok := s.l1.Load(pid); ok {
+    updated := *v.(*CachedState)
+    updated.Containment = level
+    s.l1.Store(pid, &updated)
+}
+
+// UpsertProcessState (the bug):
+s.l1.Store(msg.PID, &CachedState{
+    PID: msg.PID, PPID: msg.PPID, UID: msg.UID, Comm: msg.Comm,
+    StartTimeNs: msg.StartTimeNs, LastUpdatedNs: msg.LastUpdatedNs,
+    DimScore: msg.DimScore, CompositeScore: msg.CompositeScore,
+    EMAScore: msg.EMAScore,
+    SyscallEntropyLifetime: msg.SyscallEntropyLifetime,
+    Zone: msg.Zone, EventCount: msg.EventCount,
+    // Containment: not set -- zero value, i.e. NONE
+})
+\end{lstlisting}
+
+\textbf{Impact.} An operator (or agent) calls
+\texttt{SetContainment(pid, TERMINATE)} $\rightarrow$ correctly recorded.
+\texttt{kb-core} keeps sending routine telemetry for that PID (containment
+does not stop monitoring) $\rightarrow$ the very next \texttt{ProcessState}
+update overwrites L1 with \texttt{Containment: NONE}. Every reader of
+\texttt{GetProcessState} --- \texttt{kb-tui}, \texttt{kbctl}, the dashboard,
+\texttt{kb-aads} --- now reports an actively-contained process as
+uncontained, within one telemetry cycle (typically sub-second). This is a
+state-consistency bug with direct operational-security impact: the
+system's own status reporting cannot be trusted for containment state.
+
+\textbf{Suggested fix.} Load the existing \texttt{CachedState} and copy
+forward \texttt{Containment} (and ideally do a true partial-field update,
+not full replacement) the same way \texttt{SetContainment}/\texttt{SetZone}
+already do.
+
+\entrysep
+
+\subsection*{BUG-003 --- JJE Consensus: Jury's Containment Vote Can Never Trigger on Any Real Input}
+\addcontentsline{toc}{subsection}{BUG-003 --- Jury threshold scale mismatch}
+\bugmeta{High}{kb-aads/consensus/jje.py, JuryAgent.evaluate\_and\_vote}{Open}
+
+\textbf{Description.} \texttt{vote = "CONTAIN" if score > 75.0 else
+"ALLOW"}, where \texttt{score = alert\_payload.get("confidence", 0.0)}.
+Every other confidence value in this system is a $0.0$--$1.0$ float ---
+confirmed against \seqsplit{\texttt{kb-control-plane/internal/controlplane/grpc.go}}'s
+\texttt{SubmitAgentDecision} (\texttt{"confidence \%.2f below 0.85
+threshold"}) and \texttt{kb.proto}'s confidence fields. A real alert with
+confidence $0.95$ (about as certain as this system ever gets) is not
+$> 75.0$ --- so under the scale used everywhere else, this condition is
+never true for any realistic payload.
+
+\textbf{Impact.} The Judge $\rightarrow$ Jury $\rightarrow$ Executor
+consensus containment path --- the mechanism this project's own
+architecture treats as the primary quorum-gated containment decision --- is
+effectively dead code. Jury never votes CONTAIN, so
+\texttt{coordinate\_consensus}'s \texttt{contain\_votes / total\_votes >
+0.5} check can never pass, so \texttt{execute\_quarantine} is never
+triggered via this path. The identical threshold also appears in
+\seqsplit{\texttt{docs/development/control-aads/aads-development-plan.md:300}},
+suggesting it was copied from an early design sketch and never reconciled
+with the 0--1 convention the rest of the system settled on.
+
+\textbf{Suggested fix.} Change the threshold to the 0--1 scale (e.g.
+\texttt{score > 0.75}), and add a test asserting a realistic
+high-confidence payload (\texttt{confidence: 0.9}+) actually produces a
+CONTAIN vote --- the kind of test that would have caught this immediately.
+
+\entrysep
+
+\subsection*{BUG-004 --- kb\_lsm\_file\_open Fails Open on Path-Resolution Failure, Before the Containment-Level Check Ever Runs}
+\addcontentsline{toc}{subsection}{BUG-004 --- LSM fail-open on bpf\_d\_path failure}
+\bugmeta{High}{kb-core/ebpf/kbd\_sensor.bpf.c}{Open}
+
+\textbf{Description.}
+\begin{lstlisting}[language=C]
+int len = bpf_d_path(&file->f_path, path_buf, sizeof(path_buf));
+if (len < 0) return 0;   // allow -- before containment level is checked
+...
+if (level) {
+    if (*level >= 3) {
+        return -13; // Block ALL file open requests (full sandbox quarantine)
+    }
+    ...
+\end{lstlisting}
+If \texttt{bpf\_d\_path()} fails (a real, documented failure mode for
+certain special files, pseudo-filesystems, or under kernel memory pressure
+--- not hypothetical), the function returns "allow" immediately, before the
+containment-level $\geq 3$ "block all file opens" check ever executes.
+
+\textbf{Impact.} A process placed at containment level 3 or 4 --- which the
+code's own comment states should have "ALL file open requests" blocked for
+full sandbox quarantine --- has that guarantee silently bypassed for any
+file whose path resolution triggers this failure mode. This is distinct
+from the already-fixed zero-padding bug (HIST-3, which was about
+sensitive-path \emph{string matching}); this is about the level-3+ block
+never running at all in this code path.
+
+\textbf{Suggested fix.} On \texttt{bpf\_d\_path()} failure, fail closed for
+any contained process (check \texttt{level} first, before attempting path
+resolution, and block/return \texttt{-13} for level $\geq 3$ regardless of
+whether the path was resolved) rather than allowing by default.
+
+\entrysep
+
+\subsection*{BUG-005 --- VerifyChain() Discards the SQL Scan Error, Risking a False Tamper Verdict}
+\addcontentsline{toc}{subsection}{BUG-005 --- VerifyChain ignores Scan error}
+\bugmeta{Medium-High}{kb-control-plane/internal/audit/audit.go}{Open}
+
+\textbf{Description.}
+\begin{lstlisting}[language=Go]
+rows.Scan(&ts, &action, &subject, &actor, &reason, &prevH, &entryH)
+\end{lstlisting}
+The returned error is never checked. On a scan failure (unexpected NULL,
+type mismatch, a corrupted row), the loop proceeds with zero-valued
+fields, hashes garbage, and reports \texttt{"chain broken at entry N"} ---
+a false tamper alert --- rather than the actual I/O/schema error. This
+directly undermines RESOLVED-1: the verifier that was just wired up has a
+latent bug that can produce an incorrect verdict.
+
+\textbf{Suggested fix.} \texttt{if err := rows.Scan(...); err != nil \{
+return false, count, err \}}.
+
+\entrysep
+
+\subsection*{BUG-006 --- kb-aads Jury Pool Size Is Hardcoded, Silently Ignoring Its Own Config File}
+\addcontentsline{toc}{subsection}{BUG-006 --- Jury pool size ignores config}
+\bugmeta{Medium}{kb-aads/consensus/jje.py, JudgeAgent.coordinate\_consensus}{Open}
+
+\textbf{Description.} \texttt{config/agents.yaml} declares \texttt{jury:
+pool\_size: 5}, but \texttt{coordinate\_consensus} hardcodes
+\texttt{jury\_pool = [JuryAgent.remote(f"jury-\{i\}") for i in range(5)]}
+and never reads that config value. Currently invisible only because the
+numbers happen to match by coincidence.
+
+\textbf{Impact.} An operator changing \texttt{pool\_size} in config,
+expecting it to take effect, silently gets no change at all.
+
+\textbf{Suggested fix.} Read \texttt{config/agents.yaml}'s
+\texttt{jury.pool\_size} instead of the literal \texttt{5}.
+
+\entrysep
+
+\subsection*{BUG-007 --- Consensus Round Has No Fault Tolerance for a Crashed Juror}
+\addcontentsline{toc}{subsection}{BUG-007 --- No fault tolerance in consensus round}
+\bugmeta{Medium}{kb-aads/consensus/jje.py, JudgeAgent.coordinate\_consensus}{Open}
+
+\textbf{Description.} \texttt{votes = ray.get(vote\_futures)} has no error
+handling. If any spawned \texttt{JuryAgent} dies or its \texttt{.remote()}
+call raises, the exception propagates uncaught and kills the entire
+consensus round.
+
+\textbf{Impact.} One crashed/misbehaving juror blocks the whole
+containment decision for that alert, rather than the round degrading
+gracefully (excluding the failed juror, re-normalizing remaining weights).
+
+\textbf{Suggested fix.} Wrap in a per-future try/except (or
+\texttt{ray.wait} with a timeout) and proceed with whichever jurors
+actually responded.
+
+\entrysep
+
+\subsection*{BUG-008 --- Unbounded Per-PID eBPF Maps Are Never Cleaned Up, Unlike Their CPM/CWP Siblings}
+\addcontentsline{toc}{subsection}{BUG-008 --- eBPF map leak}
+\bugmeta{Medium}{kb-core/ebpf/kbd\_sensor.bpf.c}{Open}
+
+\textbf{Description.} \texttt{kb\_handle\_exit} explicitly deletes
+\texttt{protected\_pids\_map} and \texttt{protected\_workloads\_map}
+entries on process exit (correctly, for PID-reuse safety) --- but three
+other PID-keyed maps are never touched by any exit path:
+\texttt{kb\_syscall\_totals} (10240 entries), \texttt{kb\_syscall\_counts}
+(655360 entries), \texttt{kb\_cred\_prev} (10240 entries). All
+\texttt{bpf\_map\_update\_elem} calls against them also ignore their
+return value.
+
+\textbf{Impact.} On a long-running host with normal PID churn, these maps
+fill permanently. Once full, new-PID inserts silently fail (\texttt{-E2BIG},
+unchecked) --- syscall-volume telemetry and the privilege-escalation
+UID-diffing in \texttt{kb\_handle\_commit\_creds} stop updating for any new
+process from that point on, with no error surfaced anywhere.
+
+\textbf{Suggested fix.} Delete corresponding entries from all three maps
+in \texttt{kb\_handle\_exit}, matching the pattern already used for
+\texttt{protected\_pids\_map}/\texttt{protected\_workloads\_map}.
+
+\entrysep
+
+\subsection*{BUG-009 --- Dashboard Hardcodes http://localhost:8080, Compounding BUG-001 if Ever Pointed at a Real Host}
+\addcontentsline{toc}{subsection}{BUG-009 --- Dashboard hardcoded localhost}
+\bugmeta{Low (Medium once BUG-001 is fixed and this is deployed remotely)}{kb-op/kb-dashboard/src/App.tsx (7 call sites)}{Open}
+
+\textbf{Description.} The dashboard's API base URL is hardcoded to
+\texttt{localhost:8080} rather than being environment-configurable.
+
+\textbf{Impact.} Breaks the dashboard for any non-localhost deployment
+today. More importantly, it means the natural fix anyone reaches for
+("just change the hardcoded URL to the real host") makes BUG-001's
+vulnerability remotely exploitable instead of LAN-local, unless BUG-001 is
+fixed first.
+
+\textbf{Suggested fix.} Externalize to a build-time/runtime environment
+variable.
+
+\entrysep
+
+\subsection*{BUG-010 --- AgentDecision.AuthorizedBy Is Captured but Never Validated}
+\addcontentsline{toc}{subsection}{BUG-010 --- AuthorizedBy unvalidated}
+\bugmeta{High (Security)}{kb-control-plane/internal/controlplane/grpc.go, SubmitAgentDecision}{Open}
+
+\textbf{Description.} \texttt{AuthorizedBy} is logged into the audit trail
+as if it were a meaningful authorization claim, but it is just a
+caller-supplied string field on the incoming \texttt{AgentDecision}
+message --- nothing checks it against an allowlist, a signature, or any
+real authority before acting on it.
+
+\textbf{Confirmed in source} (\texttt{grpc.go}):
+\begin{lstlisting}[language=Go]
+cp.audit.Log(
+    fmt.Sprintf("AGENT_%s", d.Action),
+    fmt.Sprintf("pid=%d agent=%s conf=%.2f auth=%v",
+        d.Pid, d.AgentId, d.Confidence, d.AuthorizedBy),
+    d.AgentId, "",
+)
+\end{lstlisting}
+\texttt{d.AuthorizedBy} is read into the log string and nowhere else.
+
+\textbf{Impact.} Combined with BUG-011, any process able to reach
+\texttt{kba.sock} can submit a fabricated
+\texttt{TERMINATE}/\texttt{NAMESPACE}/\texttt{SECCOMP} decision, and the
+audit trail will faithfully record a false provenance for it --- the log
+looks legitimate even though nothing verified the claim.
+
+\textbf{Suggested fix.} Enforce \texttt{AuthorizedBy} against a configured
+allowlist of known agent identities before acting on destructive actions,
+or use real transport-level authorization (e.g. \texttt{SO\_PEERCRED} UID
+checks on the UDS socket) instead of a client-supplied string.
+
+\entrysep
+
+\subsection*{BUG-011 --- No Protected-PID Gate on the Go Control-Plane Side}
+\addcontentsline{toc}{subsection}{BUG-011 --- No protected-PID gate (Go side)}
+\bugmeta{High (Security)}{kb-control-plane/internal/enforcement/enforce.go (Contain), called from SetContainment and SubmitAgentDecision}{Open}
+
+\textbf{Description.} \texttt{kb-core}'s CPM (Critical Process Module)
+correctly gates containment writes on the C sensor side --- refusing to
+contain PID 1, kernel threads, or protected executables. But the Go
+control plane is the \emph{other} entry point a containment request can
+originate from (operator RPC, agent decision), and it has \textbf{zero
+exemption logic of its own}.
+
+\textbf{Confirmed in source.} Grepping \texttt{enforce.go} for any
+PID-1/self-PID/protected-list check returns nothing --- \texttt{Contain()}
+forwards any PID it is given exactly the same way, relying entirely on
+\texttt{kb-core}'s gate one hop downstream over \texttt{kbct.sock}.
+
+\textbf{Impact.} A single bug or race in \texttt{kb-core}'s CPM gate has
+no backstop on the Go side. A request to contain PID 1, \texttt{systemd},
+or \texttt{kbd}'s own PID is forwarded identically to a request against
+any other process.
+
+\textbf{Suggested fix.} A minimal check in \texttt{Contain()} (or
+immediately before it) refusing/alerting on requests targeting PID 1,
+\texttt{os.Getpid()} (the control plane itself), and a small configured
+list of critical process names --- independent of whatever \texttt{kb-core}
+does downstream.
+
+\entrysep
+
+\subsection*{BUG-012 --- No Input Validation or Rate Limiting on Containment RPCs}
+\addcontentsline{toc}{subsection}{BUG-012 --- No input validation/rate limiting}
+\bugmeta{Medium (Security/Robustness)}{kb-control-plane/internal/controlplane/grpc.go, SetContainment + SubmitAgentDecision}{Open}
+
+\textbf{Description.} Both RPCs accept any \texttt{int32}/\texttt{uint32}
+\texttt{Pid} (including \texttt{0}, a negative cast, or a PID that does
+not exist) and act on it without checking existence against the store
+first. Neither has any throttle.
+
+\textbf{Confirmed in source:}
+\begin{lstlisting}[language=Go]
+func (cp *ControlPlane) SetContainment(ctx context.Context,
+    req *pb.ContainmentRequest) (*pb.ContainmentResponse, error) {
+    cp.enforcer.Contain(req.Pid, uint32(req.Level), req.Reason)
+    ...
+\end{lstlisting}
+No \texttt{store.GetProcessState} existence check precedes the
+\texttt{Contain()} call in either RPC; no rate-limiter or token bucket
+exists anywhere in this file.
+
+\textbf{Impact.} A buggy or compromised agent client can call
+\texttt{SubmitAgentDecision} in a tight loop with no backpressure, and
+containment actions can be issued against PIDs the store has never even
+observed.
+
+\textbf{Suggested fix.} Validate \texttt{Pid} exists via
+\texttt{store.GetProcessState} before acting; add a simple per-agent-ID
+token-bucket or minimum-interval check.
+
+\entrysep
+
+\subsection*{BUG-013 --- SSH Listener Has No Auth-Attempt Throttling; Dev-Mode Fallback Silently Weakens Key Material}
+\addcontentsline{toc}{subsection}{BUG-013 --- SSH throttling / dev-mode fallback}
+\bugmeta{Medium-High (Security)}{kb-control-plane/internal/ssh/server.go, internal/ssh/config.go}{Open (architectural fix planned, not yet implemented)}
+
+\textbf{Description.} This is the daemon's only network-exposed listener
+(port 2222) --- every other socket is UDS, local-only. Two distinct
+issues:
+
+\begin{enumerate}
+\item \textbf{No rate limiting/lockout on failed public-key attempts.}
+\texttt{wish.WithPublicKeyAuth} calls \texttt{ValidatePublicKey} per
+attempt with no counter, backoff, or fail2ban-style hook. Public-key auth
+makes brute-force cryptographically impractical, but there is no
+protection against connection-exhaustion/resource-abuse from repeated
+handshakes.
+\item \textbf{Dev-mode fallback is a real security downgrade, not just a
+convenience.} When \texttt{/etc/kb} is not writable and
+\texttt{KB\_DEV=true}, \texttt{LoadConfig()} silently switches to host
+keys and an \texttt{authorized\_keys} file stored \textbf{relative to the
+process's current working directory}. If \texttt{kbd} is ever started
+with \texttt{KB\_DEV=true} from an unexpected working directory (a
+misconfigured systemd unit, a CI job, a debugging session on a
+semi-production box), the host key silently regenerates or resolves
+somewhere unexpected --- breaking host-key pinning for anyone who
+previously trusted the old fingerprint.
+\end{enumerate}
+
+\textbf{Impact.} An attacker with network reach to port 2222 has unlimited
+authentication attempts against the SSH listener; a misconfigured
+dev-mode deployment can silently rotate host keys in a way that trains
+operators to ignore host-key-changed warnings (classic MITM setup).
+
+\textbf{Suggested fix.} Short-term --- per-IP attempt counter/backoff, and
+require an explicit second opt-in (e.g. \texttt{KB\_SSH\_ALLOW\_DEV\_FALLBACK=true})
+beyond just \texttt{KB\_DEV=true} before falling back to CWD-relative
+keys. Longer-term (already decided, not yet built): replace the custom Go
+SSH server with real OpenSSH + \texttt{ForceCommand}, inheriting
+\textasciitilde 25 years of hardening instead of re-implementing
+session/auth handling in a far less battle-tested library.
+
+\entrysep
+
+\subsection*{BUG-014 --- kb-tui Launch Path Is a Hardcoded, Single-Developer Absolute Path}
+\addcontentsline{toc}{subsection}{BUG-014 --- Hardcoded kb-tui dev path}
+\bugmeta{Medium (Deployment)}{kb-control-plane/internal/ssh/session.go}{Open}
+
+\textbf{Description.} The SSH session handler locates the \texttt{kb-tui}
+binary via a hardcoded fallback chain that includes an absolute path
+specific to one developer's machine, pointing at a Cargo \textbf{debug}
+build.
+
+\textbf{Confirmed in source:}
+\begin{lstlisting}[language=Go]
+tuiPath := os.Getenv("KB_TUI_PATH")
+// falls back to:
+"/home/emergence/Desktop/kernel-borderlands/kb-op/kb-tui/target/debug/kb-tui",
+"/home/emergence/Desktop/kernel-borderlands/kb-op/kb-tui/kb-tui",
+"kb-tui",
+\end{lstlisting}
+
+\textbf{Impact.} Deployed to any other host, every SSH session either
+silently falls through to a \texttt{\$PATH} lookup (works only if someone
+manually installed \texttt{kb-tui} there) or fails outright at SSH-login
+time --- there is no build- or install-time contract keeping
+\texttt{kb-control-plane} (Go) and \texttt{kb-tui} (Rust) in sync, since
+they are two separately-built subsystems glued together only by this
+file path.
+
+\textbf{Suggested fix.} Standardize on one fixed install-time location
+(e.g. \texttt{/usr/local/bin/kb-tui}), matching how \texttt{kbd} itself
+would be installed. Keep only \texttt{KB\_TUI\_PATH} (override) and the
+fixed path (common case); drop the dev-machine absolute path and
+bare-\texttt{\$PATH} fallbacks entirely. Fail loudly with a specific
+message instead of silently trying three guesses.
+
+\entrysep
+
+\subsection*{BUG-015 --- kbctl audit verify Bypasses Its Own Deferred Cleanup on a Detected Chain Break}
+\addcontentsline{toc}{subsection}{BUG-015 --- kbctl os.Exit skips cleanup}
+\bugmeta{Low}{kb-op/kbctl/cmd\_audit.go, auditVerifyCmd}{Open}
+
+\textbf{Description.} On a detected tamper (\texttt{!resp.ChainIntact}),
+the handler calls \texttt{os.Exit(1)} directly:
+\begin{lstlisting}[language=Go]
+fmt.Printf("CHAIN BROKEN -- %d entries verified before break\n",
+    resp.EntriesVerified)
+if resp.Error != "" {
+    fmt.Println(resp.Error)
+}
+os.Exit(1)
+return nil
+\end{lstlisting}
+\texttt{os.Exit()} terminates the process immediately without running any
+deferred calls --- so the \texttt{defer conn.Close()} and
+\texttt{defer cancel()} registered earlier in the same function never
+execute.
+
+\textbf{Impact.} Minor in practice (a short-lived CLI process, the OS
+reclaims the socket/fd on exit regardless), but it is a real defect and
+notably sloppy in exactly the one code path whose entire purpose is
+flagging tamper events --- the most security-relevant command in the CLI
+has the least-clean shutdown of any command in the file.
+
+\textbf{Suggested fix.} \texttt{return fmt.Errorf(...)} and let
+\texttt{main()}'s existing \texttt{os.Exit(1)} (after printing to stderr)
+handle the non-zero exit, same as every other command in this CLI already
+does --- rather than calling \texttt{os.Exit} directly from inside
+\texttt{RunE}.
+
+\clearpage
+
+% ================= RESOLVED =================
+\section{Resolved Since the Gaps Were First Documented}
+
+These were open at the time \texttt{control-plane-catalog.md} was written
+but are confirmed fixed in current source --- included to show real
+progress, not just outstanding issues.
+
+\subsection*{RESOLVED-1 --- Audit Hash-Chain Verification Was Implemented but Never Wired to Anything Callable}
+\addcontentsline{toc}{subsection}{RESOLVED-1 --- Audit chain verification wired}
+\textbf{Was:} \texttt{Logger.VerifyChain()} existed and was correct, but
+had zero callers outside its own test --- tampering with the audit log in
+SQLite directly would never be detected or alerted on.
+
+\textbf{Now:} Confirmed wired on both paths --- \texttt{GET
+/api/audit/verify} (\seqsplit{\texttt{internal/controlplane/http.go}}) and a
+\texttt{VerifyAuditChain} gRPC RPC
+(\texttt{internal/controlplane/grpc.go}, \texttt{proto/kb.proto}), plus a
+startup check in \texttt{controlplane.go}.
+
+\subsection*{RESOLVED-2 --- GetProcessState Did Not Distinguish "Not Found" From "Zero Value"}
+\addcontentsline{toc}{subsection}{RESOLVED-2 --- GetProcessState NotFound}
+\textbf{Was:} A PID never tracked by the store returned an empty-but-valid
+\texttt{ProcessState} struct indistinguishable from a real all-defaults
+process.
+
+\textbf{Now:} Confirmed fixed --- \texttt{GetProcessState} returns
+\texttt{status.Errorf(codes.NotFound, "no tracked process with
+pid=\%d", req.Pid)} when the store lookup misses.
+
+\subsection*{RESOLVED-3 --- Policy Had No Hot-Reload Path on the Go Side}
+\addcontentsline{toc}{subsection}{RESOLVED-3 --- Policy hot-reload}
+\textbf{Was:} \texttt{control-plane-catalog.md} \S 2.6 documented that
+changing \texttt{policy.yaml} required a full \texttt{kbd} restart --- the
+Go-side \texttt{Engine} had no reload path at all.
+
+\textbf{Now:} Confirmed fixed and correctly implemented ---
+\texttt{kbctl policy reload} $\rightarrow$ \texttt{ReloadPolicy} gRPC
+handler $\rightarrow$ \texttt{reloadPolicyFromDisk()} builds a fresh
+\texttt{policy.Engine} and swaps it into \texttt{cp.policy} under a proper
+\texttt{sync.RWMutex}. The write side takes a full lock; the read side (in
+the zone-transition handler) takes a read lock --- genuinely race-free,
+not just apparently working. Found while auditing \texttt{kbctl} for
+BUG-015; initially suspected a data race here, traced it fully, and it
+checks out.
+
+\clearpage
+
+% ================= HISTORICAL =================
+\section{Historical --- Critical Bugs From CHANGELOG.md, Already Fixed and Verified Live}
+
+\subsection*{HIST-1 --- sudo/PAM System-Wide Lockout During Live LSM Enforcement}
+\addcontentsline{toc}{subsection}{HIST-1 --- sudo/PAM lockout}
+\bugmeta{Critical}{kb-core/ebpf/kbd\_sensor.bpf.c}{Fixed}
+\textbf{Root cause:} \texttt{kb\_lsm\_file\_open}'s sensitive-path block
+was unconditional --- applied to every process, not just contained ones
+--- inconsistent with every other LSM hook in the same file. The first
+time it fired correctly, it blocked \texttt{/etc/sudoers}/\texttt{/etc/shadow}
+reads system-wide, breaking \texttt{sudo}/\texttt{su}/\texttt{pkexec}/login
+PAM simultaneously, with no already-authenticated root path left inside
+the machine to recover from --- required a full external VM restart.
+
+\textbf{Fix:} Made the block containment-gated (level $\geq 2$ only),
+matching the rest of the file.
+
+\textbf{Verification:} \texttt{sudo whoami} succeeds with the sensor
+actively enforcing; a deliberately-contained test process still has its
+access correctly blocked.
+
+\subsection*{HIST-2 --- SetContainment Silently Never Applied Containment at All}
+\addcontentsline{toc}{subsection}{HIST-2 --- SetContainment silent failure}
+\bugmeta{Critical}{kb-control-plane / kb-core wire protocol}{Fixed}
+\textbf{Root cause:} \texttt{MsgTypeContainmentCmd} was \texttt{3} on the
+Go side but the C sensor checked for \texttt{KB\_WIRE\_MSG\_CONTAINMENT\_CMD}
+(\texttt{5}) --- every containment command from \texttt{kb-tui}/\texttt{kbctl}
+was silently dropped, while \texttt{kbd} logged a successful audit entry
+regardless (the sensor never NACKs), completely masking the failure.
+
+\textbf{Fix:} Corrected the Go-side constant to \texttt{5}.
+
+\textbf{Verification:} A test PID placed into Seccomp containment via
+\texttt{kb-tui} had its sensitive-path access correctly blocked
+afterward; an uncontained process reading the same file continued to
+succeed.
+
+\subsection*{HIST-3 --- Sensitive-Path LSM Block Never Actually Enforced, Despite Being Documented as Active}
+\addcontentsline{toc}{subsection}{HIST-3 --- LSM zero-padding bug}
+\bugmeta{High}{kb-core/ebpf/kbd\_sensor.bpf.c}{Fixed}
+\textbf{Root cause:} \texttt{bpf\_d\_path()} writes a NUL-terminated path
+but does not guarantee the buffer's tail past the terminator is zeroed;
+the map lookup compared the full fixed-size 64-byte key including that
+uninitialized tail, so even an exact, correctly-registered path never
+matched.
+
+\textbf{Fix:} Explicitly zero-fill \texttt{path\_buf[len..63]} after
+\texttt{bpf\_d\_path()} returns.
+
+\end{document}
