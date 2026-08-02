@@ -33,7 +33,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 ### Added
 - **`kbctl` CLI (`kb-op/kbctl/`)**: New standalone Go CLI (`cmd_audit.go`, `cmd_policy.go`, `cmd_process.go`, `cmd_stats.go`, `cmd_zone.go`) talking to `kb-control-plane` over its gRPC API, plus new `kb.proto` RPCs/messages backing it and `internal/controlplane/grpc.go`/`http.go` handlers to serve them. [Tejaswini4119]
 - **Audit chain support (`kb-control-plane/internal/store`, `internal/controlplane`)**: New store-layer methods and gRPC plumbing for querying the audit trail `kbctl audit` reads. [Tejaswini4119]
-- **`docs/emergency-backup/` — standalone per-subsystem documentation (`kb-aads.md`, `kb-core.md`, `kb-cp.md`, `kb-op.md`, plus a `README.md` index)**: ~5,300 lines added across several commits, written so each subsystem could be forked and continued independently "in case the team disbands" — a real, deliberate deliverable despite the informal commit messages ("i love my team.", "hate my clg", etc.) it landed under. [PardhuVarma]
+- **`docs/emergency-backup/` — standalone per-subsystem documentation (`kb-aads.md`, `kb-core.md`, `kb-cp.md`, `kb-op.md`, plus a `README.md` index)**: ~5,300 lines added across several commits, written so each subsystem could be forked and continued independently "in case the team disbands". [PardhuVarma]
 
 ---
 
