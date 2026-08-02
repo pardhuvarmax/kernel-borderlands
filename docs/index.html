@@ -1445,6 +1445,7 @@
     <li><a href="#pipelines">Pipelines</a></li>
     <li><a href="#operator">Operator</a></li>
     <li><a href="#quickstart">Docs</a></li>
+    <li><a href="#graph">Graph</a></li>
   </ul>
   <a href="https://github.com/pardhuvarmax/kernel-borderlands" target="_blank" class="nav-gh">
     <span class="gh-icon">⬡</span> GitHub
@@ -3107,6 +3108,25 @@
   </div>
 </section>
 
+<!-- KNOWLEDGE GRAPH -->
+<section id="graph" style="padding:110px 48px;border-bottom:1px solid var(--border)">
+  <div class="eyebrow">Explore the Codebase</div>
+  <h2 class="section-title">KNOWLEDGE<br>GRAPH</h2>
+  <p class="body-text" style="margin-top:16px;max-width:640px">
+    Generated with <strong>graphify</strong> from every subsystem — eBPF sensor, Go control plane,
+    Python agent swarm, Rust watchdog, operator interfaces, and the full <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">docs/</code> tree.
+    <strong>1,924 nodes</strong> and <strong>3,146 edges</strong> across <strong>178 communities</strong>,
+    with vendored kernel headers (<code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--volt)">vmlinux.h</code>) excluded so the graph reflects KB's own
+    architecture — god nodes, cross-subsystem call/reference edges, and surprising connections between
+    docs and code — instead of BTF struct noise.
+  </p>
+  <div class="hero-ctas" style="margin-top:32px">
+    <a href="graphify-out/graph.html" target="_blank" class="btn-primary"><span>Open Interactive Graph →</span></a>
+    <a href="graphify-out/GRAPH_REPORT.md" target="_blank" class="btn-ghost">Read the Report</a>
+    <a href="graphify-out/graph.json" target="_blank" class="btn-ghost" title="Opens raw in-browser — too large for GitHub's blob viewer">View graph.json (raw)</a>
+  </div>
+</section>
+
 <!-- CTA -->
 <section id="cta">
   <div class="cta-tag r">Open Source · Under Active Development</div>
@@ -3138,6 +3158,7 @@
     <li><a href="https://github.com/pardhuvarmax/kernel-borderlands" target="_blank">GitHub</a></li>
     <li><a href="https://github.com/pardhuvarmax/kernel-borderlands/tree/main/docs" target="_blank">Docs</a></li>
     <li><a href="https://github.com/pardhuvarmax/kernel-borderlands/blob/main/docs/KB.pdf" target="_blank">Whitepaper</a></li>
+    <li><a href="graphify-out/graph.html" target="_blank">Knowledge Graph</a></li>
     <li><a href="#arch">Architecture</a></li>
     <li><a href="#core">CO-RE</a></li>
     <li><a href="#zones">Zone Model</a></li>

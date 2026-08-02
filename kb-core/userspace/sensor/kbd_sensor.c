@@ -21,6 +21,7 @@
 #include "../../include/kb_behavior.h"
 #include "../../include/kb_rules.h"
 #include "../bridge/kb_bridge.h"
+#include "kb_sha256.h"
 #include <fcntl.h>
 #include <dirent.h>
 #include <limits.h>
@@ -39,7 +40,13 @@ static kb_zone_t map_state_to_zone(kb_behavior_state_t state);
 #define KB_STATE_SYNC_EVERY_N 20
 
 // ── Syscall entropy scan (KB_DIM_SYSCALL, 25% weight) ──
-#define KB_ENTROPY_SCAN_EVERY_N_POLLS 10     
+#define KB_ENTROPY_SCAN_EVERY_N_POLLS 10
+// CWP orphan-reconciliation sweep (docs/features/CWP.md §14.3) —
+// approximate cadence only: ring_buffer__poll()'s 100ms timeout returns
+// early on real events, so this is "every ~3000 idle-ish polls", not a
+// precise timer. Deliberately low frequency per §15's performance
+// requirement (sweep cost must stay independent of steady-state load).
+#define KB_CWP_ORPHAN_SWEEP_EVERY_N_POLLS 3000
 #define KB_ENTROPY_MAX_TRACKED_PIDS   4096   
 #define KB_ENTROPY_SNAPSHOT_TABLE_SIZE 65536 
 #define KB_ENTROPY_MAX_MAP_ITER       50000  
@@ -853,6 +860,348 @@ static void read_cpm_protected_exec_from_bridge(int fd, struct kbd_sensor_bpf *s
     apply_cpm_protected_exec_frame(pkt_buf + 4, length, skel);
 }
 
+// ── CWP (Critical Workload Protection) — docs/features/CWP.md ──
+//
+// Evaluated strictly after CPM (§2.3, §8's Detection→CPM→CWP→LSM
+// ordering) — cwp_classify() below is only ever called once
+// cpm_classify() has already returned CPM_ALLOW (see
+// handle_incoming_containment_cmd). Same userspace-classifier deviation
+// CPM's file-header comment above already explains: the spec sketches
+// this as in-kernel eBPF, but the real "last gate before enforcement"
+// choke point is handle_incoming_containment_cmd(), so that's where
+// this lives too.
+//
+// Two further simplifications scoped down deliberately for this pass
+// (both called out again in the implementation record's follow-up
+// list):
+//  1. protected_workloads_map's value is a single tier byte, not the
+//     full §6.1 {protected, identity_tier, policy_id} struct —
+//     policy_id only matters for the owner_team/justification lookups
+//     feeding severity-escalated SIEM alerting (§9), out of scope here.
+//  2. There is no compiled-in path floor the way CPM has systemd/dbus:
+//     CWP protects organization-specific business applications, which
+//     have no universal, safe-to-guess default the way OS infrastructure
+//     paths do. The registry is populated entirely from operator-pushed
+//     KB_WIRE_MSG_CWP_WORKLOADS frames.
+
+enum cwp_decision {
+    CWP_ALLOW,
+    CWP_REJECT_PROTECTED_PATH,
+    CWP_REJECT_PROTECTED_HASH,
+};
+
+static const char *cwp_decision_reason(enum cwp_decision d)
+{
+    switch (d) {
+        case CWP_REJECT_PROTECTED_PATH: return "Administrator Protected Workload (path)";
+        case CWP_REJECT_PROTECTED_HASH: return "Administrator Protected Workload (hash-verified)";
+        default:                        return "Allowed";
+    }
+}
+
+#define CWP_IDENTITY_TIER_PATH 0
+#define CWP_IDENTITY_TIER_HASH 1
+#define CWP_MAX_REGISTRY_ENTRIES 64
+
+// Userspace mirror of protected_workload_paths_map, holding the
+// expected-hash bytes the BPF map has no room for (§6.2). Keyed by the
+// same 64-byte zero-padded path strings used as BPF map keys. Populated
+// exclusively by apply_cwp_workloads_frame() below.
+struct cwp_registry_entry {
+    char    path[64];
+    uint8_t identity_tier;
+    uint8_t expected_hash[KB_SHA256_DIGEST_SIZE];
+};
+static struct cwp_registry_entry cwp_registry[CWP_MAX_REGISTRY_ENTRIES];
+static int cwp_registry_count;
+
+static const struct cwp_registry_entry *cwp_registry_lookup(const char *key64)
+{
+    for (int i = 0; i < cwp_registry_count; i++) {
+        if (memcmp(cwp_registry[i].path, key64, sizeof(cwp_registry[i].path)) == 0)
+            return &cwp_registry[i];
+    }
+    return NULL;
+}
+
+// §5.4/§7 classifier, evaluated after CPM allows. Checks the fast path
+// first (already-registered PID from the exec hook), falling back to a
+// direct path re-check for the same exec/containment race CPM's own
+// classifier defends against (§5.5).
+static enum cwp_decision cwp_classify(struct kbd_sensor_bpf *skel, pid_t pid)
+{
+    __u8 tier;
+    int found = 0;
+
+    int workloads_fd = bpf_map__fd(skel->maps.protected_workloads_map);
+    if (workloads_fd >= 0) {
+        __u32 upid = (__u32)pid;
+        if (bpf_map_lookup_elem(workloads_fd, &upid, &tier) == 0)
+            found = 1;
+    }
+
+    char exec_path[PATH_MAX];
+    int have_exec_path = (cpm_resolve_exec_path(pid, exec_path, sizeof(exec_path)) == 0);
+
+    if (!found) {
+        if (!have_exec_path)
+            return CWP_ALLOW; // can't resolve identity; nothing to check against
+
+        char key[64] = {0};
+        strncpy(key, exec_path, sizeof(key) - 1);
+
+        int paths_fd = bpf_map__fd(skel->maps.protected_workload_paths_map);
+        if (paths_fd < 0) return CWP_ALLOW;
+        if (bpf_map_lookup_elem(paths_fd, key, &tier) != 0)
+            return CWP_ALLOW;
+        found = 1;
+    }
+
+    if (!found) return CWP_ALLOW; // unreachable; defensive
+
+    if (tier == CWP_IDENTITY_TIER_PATH)
+        return CWP_REJECT_PROTECTED_PATH;
+
+    // Hash tier: verification happens here, at containment-decision
+    // time, not at registration — hashing arbitrary file content isn't
+    // available in-kernel, and this is the choke point every containment
+    // request already passes through (§2.6 "minimal, fast-path
+    // evaluation" is why registration only carries the tier flag, not
+    // the hash check itself).
+    if (!have_exec_path) {
+        // §2.2 fail-closed: can't confirm identity, so don't expose to
+        // containment.
+        printf("[CWP] Unable to resolve exec path for PID %d during hash verification — failing closed (protected)\n", (int)pid);
+        return CWP_REJECT_PROTECTED_HASH;
+    }
+
+    char key[64] = {0};
+    strncpy(key, exec_path, sizeof(key) - 1);
+    const struct cwp_registry_entry *entry = cwp_registry_lookup(key);
+    if (!entry) {
+        // Registry entry vanished since this PID registered (e.g. an
+        // operator push replaced it) — fail closed rather than silently
+        // treat as unprotected.
+        printf("[CWP] Hash-tier registry entry for %s missing at verification time — failing closed (protected)\n", exec_path);
+        return CWP_REJECT_PROTECTED_HASH;
+    }
+
+    uint8_t actual_hash[KB_SHA256_DIGEST_SIZE];
+    if (kb_sha256_cached_file(exec_path, actual_hash) != 0) {
+        printf("[CWP] Failed to hash %s for identity verification — failing closed (protected)\n", exec_path);
+        return CWP_REJECT_PROTECTED_HASH;
+    }
+
+    if (memcmp(actual_hash, entry->expected_hash, KB_SHA256_DIGEST_SIZE) != 0) {
+        // Spoofed identity attempt (§7, §11.1, §13.3): this is NOT the
+        // protected workload, regardless of path match — do not exempt
+        // it from containment, but log distinctly from an ordinary
+        // "not protected" outcome so this is investigable as a
+        // potential attack, not silence.
+        char expected_hex[65], actual_hex[65];
+        kb_sha256_to_hex(entry->expected_hash, expected_hex);
+        kb_sha256_to_hex(actual_hash, actual_hex);
+        printf("[CWP] SECURITY EVENT — Identity Verification Failed\n"
+               "Path: %s\nPID: %d\nExpected Hash: %s\nObserved Hash: %s\n"
+               "Action: NOT registered as protected — eligible for normal containment\n",
+               exec_path, (int)pid, expected_hex, actual_hex);
+        return CWP_ALLOW;
+    }
+
+    return CWP_REJECT_PROTECTED_HASH;
+}
+
+// §3.3/§7.1: no compiled-in floor exists for CWP (see file-header note
+// above) — kept as an explicit, named no-op rather than omitted, so the
+// startup call sequence in main() mirrors CPM's exactly and this step
+// isn't mistaken for one that was simply forgotten.
+static void populate_cwp_workload_floor(void)
+{
+    printf("[CWP] No compiled-in workload floor (organization-specific by design) — awaiting operator policy push\n");
+}
+
+// §3.3 startup reconciliation: pre-register already-running processes
+// whose exec path matches the (already wire-pushed, if any)
+// protected_workload_paths_map. Hash-tier entries are registered here
+// too without verifying the hash — verification is always deferred to
+// cwp_classify() at containment-decision time (see that function's
+// comment), so this only needs the cheap path lookup, same as CPM's own
+// reconciliation scan.
+static void cwp_reconcile_running_processes(struct kbd_sensor_bpf *skel)
+{
+    int workloads_fd = bpf_map__fd(skel->maps.protected_workloads_map);
+    int paths_fd = bpf_map__fd(skel->maps.protected_workload_paths_map);
+    if (workloads_fd < 0 || paths_fd < 0) return;
+
+    DIR *proc = opendir("/proc");
+    if (!proc) {
+        fprintf(stderr, "[CWP] Failed to open /proc for startup reconciliation scan\n");
+        return;
+    }
+
+    struct dirent *ent;
+    int registered = 0;
+    while ((ent = readdir(proc)) != NULL) {
+        char *end;
+        long pid = strtol(ent->d_name, &end, 10);
+        if (*end != '\0' || pid <= 0) continue;
+
+        char path[PATH_MAX];
+        if (cpm_resolve_exec_path((pid_t)pid, path, sizeof(path)) != 0) continue;
+
+        char key[64] = {0};
+        strncpy(key, path, sizeof(key) - 1);
+
+        __u8 tier;
+        if (bpf_map_lookup_elem(paths_fd, key, &tier) != 0) continue;
+
+        __u32 upid = (__u32)pid;
+        if (bpf_map_update_elem(workloads_fd, &upid, &tier, BPF_ANY) == 0)
+            registered++;
+    }
+    closedir(proc);
+    printf("[CWP] Startup reconciliation: pre-registered %d already-running protected workload(s)\n", registered);
+}
+
+#define KB_CWP_WORKLOAD_KEY_SIZE 64
+// path(64) + identity_tier(1) + expected_hash(32). No policy_id/
+// owner_team/justification (see file-header note above) — those only
+// feed alerting escalation, deferred this pass.
+#define KB_CWP_WORKLOAD_ENTRY_SIZE (KB_CWP_WORKLOAD_KEY_SIZE + 1 + KB_SHA256_DIGEST_SIZE)
+#define KB_CWP_WORKLOADS_MAX_PAYLOAD (8 + CWP_MAX_REGISTRY_ENTRIES * KB_CWP_WORKLOAD_ENTRY_SIZE)
+
+// Validates and merges an operator-pushed workload-registry frame
+// (§7.4) into both protected_workload_paths_map (BPF) and cwp_registry
+// (userspace, for the hash bytes). Merge semantics, not replace — an
+// entry with a path already present is updated in place, matching the
+// codebase's existing sensitive-paths/protected-exec "additive overlay"
+// pattern rather than a hard reset. (Policy *removal* — CWP.md §12.2's
+// revocation_mode — has no wire representation yet; explicit follow-up.)
+static int apply_cwp_workloads_frame(const char *buf, uint32_t payload_len, struct kbd_sensor_bpf *skel)
+{
+    if (payload_len < 8) return -1;
+    uint16_t magic = *(const uint16_t *)buf;
+    uint8_t version = buf[2];
+    uint8_t msg_type = buf[3];
+    if (magic != KB_WIRE_MAGIC || version != KB_WIRE_VERSION || msg_type != KB_WIRE_MSG_CWP_WORKLOADS) {
+        return -1;
+    }
+
+    uint32_t count = *(const uint32_t *)(buf + 4);
+    size_t expected_size = 8 + (size_t)count * KB_CWP_WORKLOAD_ENTRY_SIZE;
+    if (payload_len < expected_size) return -1;
+
+    int paths_fd = bpf_map__fd(skel->maps.protected_workload_paths_map);
+    if (paths_fd < 0) {
+        fprintf(stderr, "apply_cwp_workloads_frame: failed to get protected_workload_paths_map fd\n");
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < count && i < CWP_MAX_REGISTRY_ENTRIES; i++) {
+        const char *raw = buf + 8 + (size_t)i * KB_CWP_WORKLOAD_ENTRY_SIZE;
+
+        char key[KB_CWP_WORKLOAD_KEY_SIZE] = {0};
+        memcpy(key, raw, KB_CWP_WORKLOAD_KEY_SIZE);
+        key[KB_CWP_WORKLOAD_KEY_SIZE - 1] = '\0';
+
+        uint8_t tier = (uint8_t)raw[KB_CWP_WORKLOAD_KEY_SIZE];
+        if (tier != CWP_IDENTITY_TIER_PATH && tier != CWP_IDENTITY_TIER_HASH) {
+            fprintf(stderr, "[CWP] Rejecting workload entry %s: invalid identity_tier %u\n", key, tier);
+            continue;
+        }
+
+        int err = bpf_map_update_elem(paths_fd, key, &tier, BPF_ANY);
+        if (err) {
+            fprintf(stderr, "[CWP] Failed to add protected workload path %s: %d\n", key, err);
+            continue;
+        }
+
+        struct cwp_registry_entry *slot = NULL;
+        for (int j = 0; j < cwp_registry_count; j++) {
+            if (memcmp(cwp_registry[j].path, key, sizeof(cwp_registry[j].path)) == 0) {
+                slot = &cwp_registry[j];
+                break;
+            }
+        }
+        if (!slot && cwp_registry_count < CWP_MAX_REGISTRY_ENTRIES) {
+            slot = &cwp_registry[cwp_registry_count++];
+        }
+        if (slot) {
+            memcpy(slot->path, key, sizeof(slot->path));
+            slot->identity_tier = tier;
+            memcpy(slot->expected_hash, raw + KB_CWP_WORKLOAD_KEY_SIZE + 1, KB_SHA256_DIGEST_SIZE);
+        }
+
+        printf("[CWP] Registered protected workload: %s (tier=%s)\n",
+               key, tier == CWP_IDENTITY_TIER_HASH ? "hash" : "path");
+    }
+    return 0;
+}
+
+// Non-blocking runtime check, mirrored on
+// read_cpm_protected_exec_from_bridge's MSG_PEEK/MSG_DONTWAIT pattern —
+// kb-control-plane has no sender for this msg_type yet either, so this
+// is a no-op today, ready the moment one exists.
+static void read_cwp_workloads_from_bridge(int fd, struct kbd_sensor_bpf *skel)
+{
+    uint32_t length = 0;
+    ssize_t n = recv(fd, &length, 4, MSG_PEEK | MSG_DONTWAIT);
+    if (n < 4) return;
+    if (length < 8 || length > KB_CWP_WORKLOADS_MAX_PAYLOAD) return;
+
+    char pkt_buf[4 + KB_CWP_WORKLOADS_MAX_PAYLOAD];
+    ssize_t peek_sz = recv(fd, pkt_buf, 4 + length, MSG_PEEK | MSG_DONTWAIT);
+    if (peek_sz < (ssize_t)(4 + length)) return;
+
+    uint8_t msg_type = (uint8_t)pkt_buf[4 + 3];
+    if (msg_type != KB_WIRE_MSG_CWP_WORKLOADS) return; // not ours; leave for other readers
+
+    recv(fd, pkt_buf, 4 + length, MSG_DONTWAIT);
+    apply_cwp_workloads_frame(pkt_buf + 4, length, skel);
+}
+
+// §14.3 periodic orphan-reconciliation sweep, distinct from startup
+// reconciliation above: catches a protected_workloads_map entry whose
+// exit hook was missed (unclean sensor restart mid-flight, hook attach
+// race, etc.) by cross-checking each entry's liveness against /proc.
+// Runs at low frequency (see KB_CWP_ORPHAN_SWEEP_EVERY_N_POLLS) and
+// iterates only this map, bounded by its own max size — not the full
+// process table (§15's performance requirement).
+static void cwp_sweep_orphaned_entries(struct kbd_sensor_bpf *skel)
+{
+    int workloads_fd = bpf_map__fd(skel->maps.protected_workloads_map);
+    if (workloads_fd < 0) return;
+
+    __u32 key, next_key;
+    int have_key = 0;
+    int swept = 0;
+
+    // bpf_map_get_next_key(fd, NULL, &next_key) starts iteration; delete
+    // during iteration is safe for BPF_MAP_TYPE_HASH (each call
+    // re-resolves from the given key), same pattern libbpf's own
+    // examples use.
+    while (bpf_map_get_next_key(workloads_fd, have_key ? &key : NULL, &next_key) == 0) {
+        key = next_key;
+        have_key = 1;
+
+        char proc_path[32];
+        snprintf(proc_path, sizeof(proc_path), "/proc/%u", key);
+        if (access(proc_path, F_OK) != 0) {
+            if (bpf_map_delete_elem(workloads_fd, &key) == 0) {
+                swept++;
+                // Deleting the current key breaks get_next_key's cursor
+                // (the key it would resolve "next" from no longer
+                // exists); restart iteration from the top. Bounded by
+                // the map's own max size (8192), not process count.
+                have_key = 0;
+            }
+        }
+    }
+    if (swept > 0)
+        printf("[CWP] Orphan sweep: removed %d stale protected-workload entr%s\n",
+               swept, swept == 1 ? "y" : "ies");
+}
+
 // Only ever called with control_fd (see main()'s poll loop) — resets that
 // global specifically on a dead connection, not bridge_fd, so the two
 // connections' reconnect tracking never cross-contaminate.
@@ -924,6 +1273,21 @@ static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
                 }
                 printf("[CPM] Containment Prevented\nPID: %u\nExec: %s\nReason: %s\n",
                        pid, exec_path, cpm_decision_reason(decision));
+                return;
+            }
+            // CWP gate (docs/features/CWP.md §8): evaluated strictly
+            // after CPM, never before and never merged with it — an
+            // over-broad CWP policy can only ever protect a workload
+            // CPM has already allowed through, never one it rejected.
+            enum cwp_decision wdecision = cwp_classify(skel, (pid_t)pid);
+            if (wdecision != CWP_ALLOW) {
+                char exec_path[PATH_MAX];
+                if (cpm_resolve_exec_path((pid_t)pid, exec_path, sizeof(exec_path)) != 0) {
+                    strncpy(exec_path, "unresolvable", sizeof(exec_path) - 1);
+                    exec_path[sizeof(exec_path) - 1] = '\0';
+                }
+                printf("[CWP] Containment Prevented\nPID: %u\nExecutable: %s\nReason: %s\n",
+                       pid, exec_path, cwp_decision_reason(wdecision));
                 return;
             }
             if (bpf_map_update_elem(map_fd, &pid, &level, BPF_ANY) != 0) {
@@ -1522,6 +1886,14 @@ int main(void)
     cpm_register_self(skel);
     cpm_reconcile_running_processes(skel);
 
+    // CWP (docs/features/CWP.md): no compiled-in floor to populate (see
+    // populate_cwp_workload_floor's comment) and no self-registration
+    // equivalent (CWP protects business workloads, not sensor
+    // components — that's CPM's job). Startup reconciliation still
+    // needs to run before BPF attach, same ordering reason as CPM's.
+    populate_cwp_workload_floor();
+    cwp_reconcile_running_processes(skel);
+
     // Merge in any operator-supplied additions from policy.yaml's
     // sensitive_paths (see kb-control-plane/internal/policy/policy.go),
     // pushed once by kbd right after accepting this connection. Must run
@@ -1559,6 +1931,7 @@ int main(void)
     printf("Press Ctrl+C to stop.\n\n");
 
     int poll_count = 0;
+    int cwp_sweep_poll_count = 0;
     while (running) {
         err = ring_buffer__poll(rb, 100);
         if (err == -EINTR) { err = 0; break; }
@@ -1567,12 +1940,18 @@ int main(void)
         control_ensure_connected();
         if (control_fd >= 0) {
             read_cpm_protected_exec_from_bridge(control_fd, skel);
+            read_cwp_workloads_from_bridge(control_fd, skel);
             handle_incoming_containment_cmd(control_fd, skel);
         }
 
         if (++poll_count >= KB_ENTROPY_SCAN_EVERY_N_POLLS) {
             poll_count = 0;
             scan_syscall_entropy(skel);
+        }
+
+        if (++cwp_sweep_poll_count >= KB_CWP_ORPHAN_SWEEP_EVERY_N_POLLS) {
+            cwp_sweep_poll_count = 0;
+            cwp_sweep_orphaned_entries(skel);
         }
     }
 

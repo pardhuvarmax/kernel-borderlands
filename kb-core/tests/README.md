@@ -29,9 +29,9 @@ Integration script that triggers all 9 telemetry event types sequentially to che
 *   **VFS and Hook Validation**: Triggers process execs, file accesses on `/etc/shadow` and `/etc/passwd`, outbound curls, raw socket binds, anonymous RWX maps, and `mprotect` W^X transitions.
 
 ### 3. CPM (Critical Process Module) Verification (`test_cpm.py`)
-Mock Control Plane driver that sends `kb_wire_containment_cmd` frames over a fake `kbd.sock` to verify `cpm_classify()`'s gate in `handle_incoming_containment_cmd()` (see [`docs/features/CPM.md`](../../docs/features/CPM.md)).
+Mock Control Plane driver that binds **both** sockets in the `kbd.sock`/`kbct.sock` split (see [`docs/architecture/boot_sequence_spec.md`](../../docs/architecture/boot_sequence_spec.md)) and sends `kb_wire_containment_cmd` frames over the control socket (`kbct.sock`) to verify `cpm_classify()`'s gate in `handle_incoming_containment_cmd()` (see [`docs/features/CPM.md`](../../docs/features/CPM.md), [`docs/features/cpm-implementation.md`](../../docs/features/cpm-implementation.md)).
 *   **Usage**:
-    1.  Terminal 1: `sudo KBD_SOCKET_PATH=/var/run/kbd.sock ./build/kbd_sensor`
+    1.  Terminal 1: `sudo ./build/kbd_sensor` (binds `/run/kb/kbd.sock` and `/run/kb/kbct.sock` by default; override with `KBD_SOCKET_PATH`/`KBD_CONTROL_SOCKET_PATH` env vars if needed)
     2.  Terminal 2: `sudo python3 tests/test_cpm.py`
 *   **Verifies**:
     -   PID 1 is rejected (`CPM_REJECT_PID1`).

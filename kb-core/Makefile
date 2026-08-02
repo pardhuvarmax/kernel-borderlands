@@ -86,6 +86,7 @@ $(BUILD)/kb_memory: $(COLLECTORS)/kb_memory.c $(OUTPUT)/kb_memory.skel.h | $(BUI
 
 SENSOR_SRCS := \
     $(SENSOR)/kbd_sensor.c \
+    $(SENSOR)/kb_sha256.c \
     $(BEHAVIOR)/kb_scoring.c \
     $(BEHAVIOR)/kb_evidence.c \
     $(BEHAVIOR)/kb_behavior.c \

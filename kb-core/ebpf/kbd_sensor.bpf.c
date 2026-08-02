@@ -155,6 +155,41 @@ struct {
     __type(value, __u8);
 } protected_exec_paths_map SEC(".maps");
 
+// ── CWP (Critical Workload Protection) — see docs/features/CWP.md ──
+// Evaluated strictly after CPM (§2.3, §8) — never merged with it, never
+// checked first. protected_workloads_map's value is a single tier byte
+// (0 = path, 1 = hash) rather than spec §6.1's full {protected,
+// identity_tier, policy_id} struct: policy_id only matters for the
+// owner_team/justification alerting lookups (§9), which are out of scope
+// for this pass (see kb-core/docs follow-up note in the implementation
+// record). Sized per §6.1 (8192, larger than CPM's 2048) since many
+// running instances of the same protected paths are expected in
+// microservice deployments. Entries added at exec() time
+// (kb_handle_exec) and removed at exit (kb_handle_exit), same
+// PID-reuse-safety pattern as protected_pids_map.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 8192);
+    __type(key,   __u32);   // PID
+    __type(value, __u8);    // identity_tier: 0 = path, 1 = hash
+} protected_workloads_map SEC(".maps");
+
+// Protected workload path registry (§5, §6.2), same key shape as
+// protected_exec_paths_map. Unlike CPM, there is no compiled-in floor —
+// CWP protects organization-specific business applications, which have
+// no universal safe-to-guess default (see cwd_sensor.c's populate
+// function for the full rationale). Populated entirely from operator-
+// pushed KB_WIRE_MSG_CWP_WORKLOADS frames. Value is identity_tier, not a
+// sentinel: the exec hook copies it straight into
+// protected_workloads_map so cwp_classify() knows which verification
+// path to take without a second lookup.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 64);
+    __type(key, char[64]);
+    __type(value, __u8);
+} protected_workload_paths_map SEC(".maps");
+
 struct kb_token_bucket {
     __u64 last_time;
     __u64 tokens;
@@ -284,6 +319,17 @@ int kb_handle_exec(struct trace_event_raw_sched_process_exec *ctx)
         __u8 one = 1;
         bpf_map_update_elem(&protected_pids_map, &pid, &one, BPF_ANY);
     }
+
+    // CWP registration path (docs/features/CWP.md §7): same path_buf,
+    // separate registry. The looked-up value (identity_tier) is copied
+    // straight through — hash-tier verification itself cannot happen
+    // here (no file-content hashing available in-kernel), so it's
+    // deferred to cwp_classify() at containment-decision time, same
+    // deviation CPM already documents for its own classifier.
+    __u8 *tier = bpf_map_lookup_elem(&protected_workload_paths_map, path_buf);
+    if (tier) {
+        bpf_map_update_elem(&protected_workloads_map, &pid, tier, BPF_ANY);
+    }
     return 0;
 }
 
@@ -302,6 +348,9 @@ int kb_handle_exit(struct trace_event_raw_sched_process_template *ctx)
     // exits, so a later, unrelated process reusing this PID never
     // inherits it. No-op if the PID was never protected.
     bpf_map_delete_elem(&protected_pids_map, &pid);
+
+    // CWP de-registration (§7.3/§14.1) — same PID-reuse-safety reasoning.
+    bpf_map_delete_elem(&protected_workloads_map, &pid);
     return 0;
 }
 

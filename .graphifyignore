@@ -1,0 +1,4 @@
+# Vendored BPF CO-RE/BTF header - thousands of kernel struct definitions
+# (task_struct, sk_buff, tcp_sock, ...) that drown out every god-node and
+# community list with zero project-specific signal. See graphify-out/README.md.
+kb-core/include/vmlinux.h

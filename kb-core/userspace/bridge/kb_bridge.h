@@ -39,6 +39,15 @@
 // in kb-core/README.md), so in practice no frame with this msg_type
 // exists on the wire today.
 #define KB_WIRE_MSG_CPM_PROTECTED_EXEC  7
+// CWP (docs/features/CWP.md §7.4) operator-pushed protected-workload
+// registry. Entry shape: 64-byte zero-padded path + 1-byte identity_tier
+// (0=path, 1=hash) + 32-byte expected SHA-256 (zero if tier=path) — see
+// KB_CWP_WORKLOAD_ENTRY_SIZE in kbd_sensor.c. Deliberately omits
+// policy_id/owner_team/justification (§6.2): those only feed the
+// severity-escalated alerting pipeline (§9), out of scope for this pass.
+// C-side receiver only; kb-control-plane has no sender for this yet
+// (open follow-up, same status as KB_WIRE_MSG_CPM_PROTECTED_EXEC above).
+#define KB_WIRE_MSG_CWP_WORKLOADS  8
 
 #pragma pack(push, 1)
 struct kb_wire_header {
