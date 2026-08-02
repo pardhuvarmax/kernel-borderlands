@@ -66,4 +66,4 @@ Hunter is a **fine-tuned LLM running a multi-step tool-call loop** (reason → c
 
 ## GPU
 
-Needed for training only (this pipeline, run by the dev team) — not for running the product. Customers/production deployments run inference only (RL policies + the fine-tuned LLM), which is fully functional on CPU; GPU only affects training/inference *speed*, not whether it works. See the roadmap's GPU discussion for the full reasoning.
+Needed for training only (this pipeline, run by the dev team) — not for running the product. Customers/production deployments run inference only (RL policies + the fine-tuned LLM), which is fully functional on CPU; GPU only affects training/inference *speed*, not whether it works. See the roadmap's GPU discussion for the full reasoning. 
