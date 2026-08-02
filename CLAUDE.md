@@ -52,7 +52,8 @@ For every non-trivial task:
 1. Identify the relevant documentation. Read only the files necessary for the current task.
 2. Verify expected behavior and interfaces in `docs/specifications/`.
 3. Confirm architectural consistency using `docs/architecture/`.
-4. Implement the requested changes.
+4a. Implement the requested changes.
+4b. Update changelog.md with relavent changes that happend in the repo with relavent developer names.  
 5. If the implementation conflicts with the documentation, do not guess or silently change behavior—explain the conflict and ask for clarification.
 6. If required documentation does not exist, state that explicitly instead of inferring undocumented architecture.
 7. Prefer the smallest correct change that satisfies the request. Avoid unrelated refactors.
