@@ -59,7 +59,7 @@ cd kb-op/kb-tui && cargo build --release && cd ../..
 
 # kb-op/kb-mcp, kbctl (Go)
 cd kb-op/kb-mcp && go build -o kb-mcp main.go && cd ../..
-cd kb-op/kbctl && go build -o kbctl main.go && cd ../..
+cd kb-op/kbctl && go build -o kbctl . && cd ../..
 ```
 
 ---
@@ -93,7 +93,7 @@ cd kb-control-plane && go build -o bin/kbd cmd/kbd/main.go && cd ..
 # kb-op
 cd kb-op/kb-tui && cargo build --release && cd ../..
 cd kb-op/kb-mcp && go build -o kb-mcp main.go && cd ../..
-cd kb-op/kbctl && go build -o kbctl main.go && cd ../..
+cd kb-op/kbctl && go build -o kbctl . && cd ../..
 ```
 
 `kb-aads` and `kb-dashboard` are not compiled ahead of time — run directly (Python) or via dev server (Vite).
@@ -175,7 +175,7 @@ cd kb-op/kb-dashboard
 npm run dev
 # http://localhost:5173
 ```
-**Gap:** no `.env`/`VITE_*` variable or config found in the repo for the dashboard's API/WebSocket target — `vite.config.ts` is default/unmodified. The dashboard's connection to `kbd` is not documented or configurable at this time; treat it as unverified/stubbed until the wiring is confirmed in source.
+**Connects via plain HTTP, not the UDS gateway.** `src/App.tsx` hardcodes REST/SSE calls to `http://localhost:8080/api/{processes,alerts,logs,services,metrics,events,isolate,restore}` — no `.env`/`VITE_*` var, just a literal string, so this only works when the dashboard and `kbd` are on the same host (or you're tunneling `:8080`). `kbd` serves this itself: `internal/controlplane/controlplane.go` starts `cp.StartHTTPServer(":8080")` ("HTTP API & SSE server ... for web dashboard"), separate from the `kba.sock` gRPC gateway `kb-tui`/`kbctl`/`kb-mcp` use. Because it's a plain TCP port ≥1024, **`kbd` doesn't need root for this part** and neither does the dashboard's dev server — no `sudo npm run dev`.
 
 ### 7.3 `kb-mcp`
 ```bash
@@ -231,8 +231,9 @@ cd kb-op/kbctl && ./kbctl stats
 - ~~`scripts/setup/install.sh` does not exist~~ — **fixed**: created (see §1).
 - ~~`config/kb.yaml`, `allowlist.yaml`, `dashboard.yaml` don't exist~~ — **fixed**: created as explicitly-marked scaffolding (see §2). Still not wired into any loader — that's follow-up implementation work, not a docs gap anymore. There are no `*.yaml.example` files anywhere despite `config/README.md` describing a copy-from-example step; the files were created directly instead since no examples exist to copy.
 - `kb-control-plane` build command differs between `CLAUDE.md`/[developer-commands.md](developer-commands.md) (`go build -o bin/kbd cmd/kbd/main.go`) and `kb-control-plane/README.md` (`go build -o kbd cmd/kbd/main.go`, run from inside the subdirectory). Functionally equivalent, just pick one path convention and stay consistent.
+- `kb-op/kbctl`'s documented build command (`go build -o kbctl main.go`, per `kb-op/kbctl/README.md` and `developer-commands.md`) **fails to compile**: `kbctl/` has five sibling files in the same package (`cmd_audit.go`, `cmd_policy.go`, `cmd_process.go`, `cmd_stats.go`, `cmd_zone.go`) that `go build` silently drops when given a single filename instead of the package — surfaces as `undefined: policyCmd`/`zoneCmd`/etc. This guide uses `go build -o kbctl .` (build the whole package) instead, confirmed working. The two source READMEs are still wrong and should be corrected.
 - `kb-op/README.md`'s architecture diagram labels the gRPC gateway "Port 50051" — **traced, not stale**: it's the `grpc_port` value from the unconsumed `kb.yaml` example schema (both the one now at `config/kb.yaml` and the pre-existing one at `kb-control-plane/config/kb.yaml`), not a real bound port. Every subsystem README (`kb-tui`, `kbctl`, `kb-mcp`) confirms the actual transport is the UDS `kba.sock`.
-- `kb-dashboard`'s connection to `kbd` (API base URL / WS endpoint) has no discoverable config in the repo. `config/dashboard.yaml` now documents the *intended* shape (§2) but nothing reads it yet — implementing that loader is separate follow-up work, not something this guide does.
+- ~~`kb-dashboard`'s connection to `kbd` has no discoverable config~~ — **corrected, not a gap**: traced it to `src/App.tsx`'s hardcoded `http://localhost:8080/api/*` calls, served by `kbd`'s own `StartHTTPServer(":8080")` (`internal/controlplane/controlplane.go`). Real and wired, just not configurable — `config/dashboard.yaml` (§2) still isn't read by anything; a future config loader would need to replace this hardcoded string, not add to it.
 - There are **two separate, non-identical `config/` directories** in this repo: top-level `config/` (this guide's subject, referenced by `CLAUDE.md`) and `kb-control-plane/config/` (older, has its own `kb.yaml`/`policy.yaml`/`allowlist.yaml`/`rules.yaml`). Neither `--policy` default nor `kb-aads` reads from the `kb-control-plane/config/` copy — confirm which one is authoritative before consolidating or deleting either.
 
 Fix or confirm these before treating this guide as authoritative for onboarding new contributors.

@@ -22,11 +22,16 @@ class RaySwarmOrchestrator:
     def __init__(self, ray_mode: str = "local"):
         if ray_mode == "cluster":
             # Join an existing head node started via `ray start --head`.
+            # dashboard_host is a no-op here since the dashboard is served
+            # by the head node's own `ray start`, not this init() call.
             ray.init(address="auto", ignore_reinit_error=True)
         else:
             # Single-node dev: starts a local head in-process, no
-            # external `ray start` step required.
-            ray.init(ignore_reinit_error=True)
+            # external `ray start` step required. dashboard_host="0.0.0.0"
+            # so the dashboard is reachable from outside the VM (default
+            # is 127.0.0.1, which only NAT/hypervisor port-forwarding
+            # can't reach).
+            ray.init(ignore_reinit_error=True, dashboard_host="0.0.0.0")
 
         self.agents = {}
         self.agent_counter = 0

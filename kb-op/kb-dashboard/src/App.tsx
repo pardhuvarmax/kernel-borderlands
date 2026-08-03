@@ -25,6 +25,12 @@ interface KBAlert {
 
 interface ChartPoint { t: string; safe: number; sus: number; bl: number; }
 
+// kbd's HTTP/SSE API lives on the same host the dashboard was loaded from,
+// port 8080 — a hardcoded "localhost" here would resolve to the browser's
+// own machine instead of the dev host whenever the dashboard is opened
+// remotely (e.g. over Tailscale/VM port-forwarding).
+const API_BASE = `http://${window.location.hostname}:8080`;
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const ts = () =>
   new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -203,13 +209,13 @@ export default function App() {
     let active = true;
     let eventSource: EventSource | null = null;
 
-    addLog('[CONSOLE] Connecting to live API endpoint at http://localhost:8080...', 'info');
+    addLog(`[CONSOLE] Connecting to live API endpoint at ${API_BASE}...`, 'info');
 
     // Helper to fetch initial state
     const fetchInitialState = async () => {
       try {
         // Fetch active processes
-        const resProcs = await fetch('http://localhost:8080/api/processes');
+        const resProcs = await fetch(`${API_BASE}/api/processes`);
         if (!resProcs.ok) throw new Error('Failed to fetch processes');
         const procsData = await resProcs.json();
         if (active) {
@@ -226,7 +232,7 @@ export default function App() {
         }
 
         // Fetch recent alerts
-        const resAlerts = await fetch('http://localhost:8080/api/alerts');
+        const resAlerts = await fetch(`${API_BASE}/api/alerts`);
         if (!resAlerts.ok) throw new Error('Failed to fetch alerts');
         const alertsData = await resAlerts.json();
         if (active) {
@@ -245,7 +251,7 @@ export default function App() {
         }
 
         // Fetch recent logs
-        const resLogs = await fetch('http://localhost:8080/api/logs');
+        const resLogs = await fetch(`${API_BASE}/api/logs`);
         if (!resLogs.ok) throw new Error('Failed to fetch logs');
         const logsData = await resLogs.json();
         if (active) {
@@ -257,14 +263,14 @@ export default function App() {
         }
 
         // Fetch services health
-        const resServ = await fetch('http://localhost:8080/api/services');
+        const resServ = await fetch(`${API_BASE}/api/services`);
         if (resServ.ok) {
           const servData = await resServ.json();
           if (active) setServices(servData);
         }
 
         // Fetch performance metrics
-        const resMet = await fetch('http://localhost:8080/api/metrics');
+        const resMet = await fetch(`${API_BASE}/api/metrics`);
         if (resMet.ok) {
           const metData = await resMet.json();
           if (active) setMetricsData(metData);
@@ -280,7 +286,7 @@ export default function App() {
 
     // Setup SSE connection
     try {
-      eventSource = new EventSource('http://localhost:8080/api/events');
+      eventSource = new EventSource(`${API_BASE}/api/events`);
 
       eventSource.addEventListener('connected', () => {
         addLog('[CONSOLE] SSE Connection established.', 'success');
@@ -369,7 +375,7 @@ export default function App() {
     // Services update ticker
     const servicesTicker = setInterval(async () => {
       try {
-        const res = await fetch('http://localhost:8080/api/services');
+        const res = await fetch(`${API_BASE}/api/services`);
         if (!res.ok) throw new Error();
         const data = await res.json();
         if (active) setServices(data);
@@ -381,7 +387,7 @@ export default function App() {
     // Metrics update ticker
     const metricsTicker = setInterval(async () => {
       try {
-        const res = await fetch('http://localhost:8080/api/metrics');
+        const res = await fetch(`${API_BASE}/api/metrics`);
         if (!res.ok) throw new Error();
         const data = await res.json();
         if (active) setMetricsData(data);
@@ -424,7 +430,7 @@ export default function App() {
       addAlert({ id, type: 'MANUAL_QUARANTINE', pid, comm, severity: 'CRITICAL', ts: ts(), evidence: ['manual_operator_action', 'containment_level_4'] });
       addLog(`[OPERATOR] Manual quarantine — PID ${pid} (${comm})`, 'err');
     } else {
-      fetch('http://localhost:8080/api/isolate', {
+      fetch(`${API_BASE}/api/isolate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pid })
@@ -447,7 +453,7 @@ export default function App() {
       setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'SAFE', score: 0.04, quorumPending: false } : p));
       addLog(`[OPERATOR] Restored PID ${pid} (${comm}) → SAFE`, 'success');
     } else {
-      fetch('http://localhost:8080/api/restore', {
+      fetch(`${API_BASE}/api/restore`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pid })
