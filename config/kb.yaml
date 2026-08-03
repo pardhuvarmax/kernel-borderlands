@@ -1,0 +1,26 @@
+# kb.yaml — Main system configuration.
+#
+# SCAFFOLDING: not consumed by kb-control-plane yet. No Go code loads this
+# file today (verified by grep across kb-control-plane/ — cmd/kbd/main.go
+# only takes --db and --policy flags; port/scoring/audit values below are
+# currently hardcoded or unimplemented). This exists to satisfy the file
+# list in config/README.md and give the intended shape a home; do not treat
+# values here as authoritative runtime behavior until a loader reads it.
+#
+# Schema mirrors the (also-unconsumed) example in
+# kb-control-plane/config/README.md.
+
+grpc_port: 50051
+
+scoring:
+  alpha: 0.3
+  thresholds:
+    suspicious: 40
+    borderlands: 75
+
+enforcement:
+  mode: permissive  # permissive | enforcing
+
+audit:
+  path: /var/log/kb/audit.log
+  remote_siem: ""

@@ -1,0 +1,16 @@
+# allowlist.yaml — Process/path allowlist.
+#
+# SCAFFOLDING: not consumed by kb-control-plane yet — same status as
+# kb-control-plane/config/allowlist.yaml, which says outright "Not yet
+# consumed by the daemon". No Go code reads this file today; wiring it
+# into the Policy Engine alongside policy.yaml is future work, not done.
+#
+# Intent (once wired): comm names exempt from default scoring thresholds
+# because they are known, trusted, and have unusual-but-legitimate
+# behavioral signatures (init systems, package managers, etc.).
+
+allow:
+  - comm: systemd
+    reason: "PID 1 / init system"
+  - comm: sshd
+    reason: "Trusted remote access daemon"

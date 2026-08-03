@@ -1,0 +1,18 @@
+# dashboard.yaml — Dashboard server configuration.
+#
+# SCAFFOLDING: not consumed by kb-op/kb-dashboard yet. No .env, VITE_*
+# variable, or config loader exists in kb-dashboard's source today (its
+# vite.config.ts is the default/unmodified template) — the dev server's
+# connection to kbd is currently undocumented/unwired. This file records
+# the intended shape so a future config loader has a documented target;
+# do not assume the dashboard reads these values.
+
+server:
+  dev_port: 5173
+
+control_plane:
+  # Intended target once wired — kb-tui/kbctl/kb-mcp all reach kbd over
+  # this same UDS gRPC gateway; the dashboard would need a WS/HTTP bridge
+  # in front of it since browsers can't dial a UDS directly.
+  grpc_socket: /run/kb/kba.sock
+  ws_bridge_url: ""   # not implemented — placeholder for a future WS proxy

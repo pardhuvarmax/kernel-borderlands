@@ -8,7 +8,7 @@ Sources consulted: [developer-commands.md](developer-commands.md), [../architect
 
 ## 0. Why this order
 
-Unlike systemd's boot sequence, `kb-control-plane` (not `kb-core`) owns `/run/kb/` and creates all three of its sockets on startup. `kb-core`'s sensor is a *client* of those sockets — it has no socket-creation or config-discovery logic of its own. `kb-aads` and every `kb-op` interface are gRPC clients of `kba.sock`. So the only safe manual order is:
+Unlike systemd's boot sequence, `kb-control-plane` (not `kb-core`) owns the three sockets under `/run/kb/` and binds them on startup — but it does **not** create the `/run/kb/` directory itself (systemd's `RuntimeDirectory=kb` does that in production; see §4 below for the manual equivalent). `kb-core`'s sensor is a *client* of those sockets — it has no socket-creation, directory-creation, or config-discovery logic of its own. `kb-aads` and every `kb-op` interface are gRPC clients of `kba.sock`. So the only safe manual order is:
 
 ```
 kb-control-plane (kbd)  →  kb-core (kbd_sensor)  →  kb-aads  →  kb-op (tui / dashboard / mcp / kbctl)
@@ -32,7 +32,7 @@ Starting `kb-core` before `kbd` will fail to connect (`kbd.sock`/`kbct.sock` don
 
 Additional for `kb-core`: BPF LSM enabled in the kernel command line (`lsm=...,bpf` in GRUB) — see [enabling-bpf-lsm.md](../architecture/enabling-bpf-lsm.md).
 
-**Note:** [installation.md](../getting-started/installation.md) references `scripts/setup/install.sh` as the "Automatic Installation" method. That script **does not exist in the repo** (`scripts/setup/` contains only a README). Use the manual per-subsystem install steps below instead.
+**Note:** [installation.md](../getting-started/installation.md) references `scripts/setup/install.sh` as the "Automatic Installation" method — it's now present at `scripts/setup/install.sh` (created alongside this guide; idempotent, checks/builds libbpf, sets up the `kb-aads` venv, downloads Go modules, installs npm deps, and fetches Rust crates for `kb-checker`/`kb-tui`). It does not build or run any KB binary and does not touch `/run/kb` or `/etc/kb` — that's still §3/§4 below. The manual per-subsystem steps below remain valid as an alternative or for partial re-installs.
 
 ### 1.1 Manual dependency install
 
@@ -64,12 +64,17 @@ cd kb-op/kbctl && go build -o kbctl main.go && cd ../..
 
 ---
 
-## 2. Config gap — read before running
+## 2. Config files — which ones actually do something
 
-`config/README.md` documents five files: `kb.yaml`, `policy.yaml`, `allowlist.yaml`, `agents.yaml`, `dashboard.yaml`, and says to "copy `*.yaml.example` to `*.yaml`". As of this writing, **only `policy.yaml` and `agents.yaml` actually exist**; there are no `.yaml.example` files anywhere in the repo, and `kb.yaml`, `allowlist.yaml`, `dashboard.yaml` are absent. This run guide only exercises the two files that exist. If a task needs the other three, treat them as undocumented/to-be-created — don't assume defaults.
+`config/README.md` documents five files: `kb.yaml`, `policy.yaml`, `allowlist.yaml`, `agents.yaml`, `dashboard.yaml`. All five now exist, but **only two are actually read by any code path** — the other three are scaffolding, explicitly marked as such in their own file headers:
 
-- `config/policy.yaml` — enforcement thresholds, per-process policy overrides, additive sensitive paths. Consumed by `kbd` via `--policy`.
-- `config/agents.yaml` — AADS swarm composition, Ray mode, `control_plane.grpc_socket`. Consumed by `kb-aads/main.py` (hardcoded relative path `../config/agents.yaml`, no env override).
+- `config/policy.yaml` — **live.** Enforcement thresholds, per-process policy overrides, additive sensitive paths. Consumed by `kbd` via `--policy`.
+- `config/agents.yaml` — **live.** AADS swarm composition, Ray mode, `control_plane.grpc_socket`. Consumed by `kb-aads/main.py` (hardcoded relative path `../config/agents.yaml`, no env override).
+- `config/kb.yaml` — **not consumed.** No Go code loads it (grep-verified across `kb-control-plane/`); `cmd/kbd/main.go` only takes `--db`/`--policy` flags. There's also a second, separate, equally-unconsumed `kb-control-plane/config/kb.yaml` with the same example schema — don't confuse the two directories.
+- `config/allowlist.yaml` — **not consumed.** Not wired into the Policy Engine yet (mirrors `kb-control-plane/config/allowlist.yaml`, which says so in its own header).
+- `config/dashboard.yaml` — **not consumed.** `kb-dashboard` has no `.env`/`VITE_*`/config loader in source today; this file records the intended shape only.
+
+This run guide only exercises the two live files. Don't assume `kb.yaml`/`allowlist.yaml`/`dashboard.yaml` change runtime behavior until a loader is actually written for them.
 
 ---
 
@@ -95,7 +100,17 @@ cd kb-op/kbctl && go build -o kbctl main.go && cd ../..
 
 ---
 
-## 4. Step 2 — Run `kb-control-plane` (`kbd`) first
+## 4. Step 2 — Create `/run/kb/`, then run `kb-control-plane` (`kbd`)
+
+**`kbd` does not create `/run/kb/` itself.** Verified in `kb-control-plane/internal/controlplane/controlplane.go`: the listener setup comment explicitly notes "`the UDS socket is NOT bound here`" and is written to stay "`safe to call in test environments where /run/kb/ may not exist`"; the actual bind path (`listenUnix`) only removes a *stale socket file* (`os.Remove`) before calling `net.Listen("unix", path)` — there is no `MkdirAll` anywhere in that flow. In production this directory is created by systemd (`RuntimeDirectory=kb` in `kbd.service`, see [boot_sequence_spec.md](../architecture/boot_sequence_spec.md) §3). For a manual run, create it yourself first or `kbd` will fail to bind with an error like `bind: no such file or directory`:
+
+```bash
+sudo mkdir -p /run/kb
+sudo chown root:root /run/kb      # match production ownership; adjust group if kbd doesn't run as root
+sudo chmod 0775 /run/kb           # matches RuntimeDirectoryMode in kbd.service
+```
+
+`/run` is normally a tmpfs, so this does not persist across reboot — recreate it each time you start the stack from a clean boot.
 
 ```bash
 cd kb-control-plane
@@ -107,7 +122,7 @@ Flags (cobra, `cmd/kbd/main.go`):
 - `--policy` / `-p` — policy YAML path (default `config/policy.yaml`, relative to CWD)
 
 On startup `kbd`:
-- Creates `/run/kb/` and binds `kbd.sock`, `kbct.sock`, `kba.sock` (root:root, 0660) — you likely need `sudo` for this on a real `/run`, or point at a writable alternate runtime dir if the code supports it.
+- Binds `kbd.sock`, `kbct.sock`, `kba.sock` inside `/run/kb/` (root:root, 0660 per the socket-topology table in [boot_sequence_spec.md](../architecture/boot_sequence_spec.md) §1) — needs `sudo`/root on a real `/run` given that ownership, or run against a writable alternate directory if you patch the hardcoded `/run/kb/...` paths in `kb-control-plane/internal/ipc/sockets.go` and `wire.go` for local dev.
 - Starts the SSH console service (host key `/etc/kb/ssh_host_ed25519_key`, `authorized_keys` at `/etc/kb/authorized_keys`, with a workspace-local dev fallback + warning if those paths are missing).
 
 **Verify before continuing:**
@@ -182,7 +197,10 @@ Talks gRPC over `kba.sock`, same channel as `kb-tui`/`kb-mcp`.
 ## 8. Full run order — copy/paste summary
 
 ```bash
-# Terminal 1 — control plane (start first, owns /run/kb/*)
+# Step 0 — create the runtime dir kbd expects but does not create itself
+sudo mkdir -p /run/kb && sudo chown root:root /run/kb && sudo chmod 0775 /run/kb
+
+# Terminal 1 — control plane (start first, binds sockets under /run/kb/)
 cd kb-control-plane && ./bin/kbd --db data/state.db --policy ../config/policy.yaml
 
 # Terminal 2 — sensor (after /run/kb/*.sock exist)
@@ -210,10 +228,11 @@ cd kb-op/kbctl && ./kbctl stats
 
 ## 9. Known documentation gaps / inconsistencies found while writing this guide
 
-- `scripts/setup/install.sh`, referenced by [installation.md](../getting-started/installation.md), does not exist — `scripts/setup/` has only a README.
-- `config/README.md` documents `kb.yaml`, `allowlist.yaml`, `dashboard.yaml` and a `*.yaml.example` copy step; none of the examples exist, and only `policy.yaml`/`agents.yaml` are present.
+- ~~`scripts/setup/install.sh` does not exist~~ — **fixed**: created (see §1).
+- ~~`config/kb.yaml`, `allowlist.yaml`, `dashboard.yaml` don't exist~~ — **fixed**: created as explicitly-marked scaffolding (see §2). Still not wired into any loader — that's follow-up implementation work, not a docs gap anymore. There are no `*.yaml.example` files anywhere despite `config/README.md` describing a copy-from-example step; the files were created directly instead since no examples exist to copy.
 - `kb-control-plane` build command differs between `CLAUDE.md`/[developer-commands.md](developer-commands.md) (`go build -o bin/kbd cmd/kbd/main.go`) and `kb-control-plane/README.md` (`go build -o kbd cmd/kbd/main.go`, run from inside the subdirectory). Functionally equivalent, just pick one path convention and stay consistent.
-- `kb-op/README.md`'s architecture diagram labels the gRPC gateway "Port 50051," but every subsystem README (`kb-tui`, `kbctl`, `kb-mcp`) describes the actual transport as the UDS `kba.sock`, not a TCP port. Treat "50051" as a stale/illustrative diagram artifact, not a real bound port, until contradicted by source.
-- `kb-dashboard`'s connection to `kbd` (API base URL / WS endpoint) has no discoverable config in the repo — flagged above, not fixed here.
+- `kb-op/README.md`'s architecture diagram labels the gRPC gateway "Port 50051" — **traced, not stale**: it's the `grpc_port` value from the unconsumed `kb.yaml` example schema (both the one now at `config/kb.yaml` and the pre-existing one at `kb-control-plane/config/kb.yaml`), not a real bound port. Every subsystem README (`kb-tui`, `kbctl`, `kb-mcp`) confirms the actual transport is the UDS `kba.sock`.
+- `kb-dashboard`'s connection to `kbd` (API base URL / WS endpoint) has no discoverable config in the repo. `config/dashboard.yaml` now documents the *intended* shape (§2) but nothing reads it yet — implementing that loader is separate follow-up work, not something this guide does.
+- There are **two separate, non-identical `config/` directories** in this repo: top-level `config/` (this guide's subject, referenced by `CLAUDE.md`) and `kb-control-plane/config/` (older, has its own `kb.yaml`/`policy.yaml`/`allowlist.yaml`/`rules.yaml`). Neither `--policy` default nor `kb-aads` reads from the `kb-control-plane/config/` copy — confirm which one is authoritative before consolidating or deleting either.
 
 Fix or confirm these before treating this guide as authoritative for onboarding new contributors.
