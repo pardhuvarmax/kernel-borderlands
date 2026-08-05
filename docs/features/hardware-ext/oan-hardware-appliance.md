@@ -419,6 +419,20 @@ So filling one chassis from a single host up to the full 5-host Family/Colony co
 
 Model B stays markedly cheaper at any scale past a handful of hosts, and the gap holds even with the 5-host cap forcing multiple chassis, because each chassis still amortizes its SBC/TPM/ESP32/display cost across 5 hosts instead of 1. A multi-channel relay/PDU board further undercuts buying N single-relay modules per chassis. Model A stays simpler to build and reason about for one host, or for hosts that aren't physically near each other — which is exactly the bench prototype's situation, hence §10 is written as Model A only.
 
+### 9.3.3 Per-Person Split (Team of 10), Model B
+
+| Config | Hosts | Model B total (USD) | Model B total (INR) | Per person (USD) | Per person (INR) |
+|---|---|---|---|---|---|
+| Single | 1 | $106–$195 | ₹9,220–₹16,965 | $10.60–$19.50 | ₹922–₹1,697 |
+| Triple | 3 | $170–$289 | ₹14,790–₹25,145 | $17.00–$28.90 | ₹1,479–₹2,515 |
+| Pentagon (cap) | 5 | $234–$383 | ₹20,360–₹33,320 | $23.40–$38.30 | ₹2,036–₹3,332 |
+
+### 9.3.4 Single vs. Pentagon: Where the Money Actually Goes Further
+
+Pentagon costs roughly **2.2x more per person** than Single ($23.40–$38.30 vs. $10.60–$19.50) — but for that, it covers **5x the hosts**, not 1. Looked at per-host instead of per-person, the ranking flips: Single is **$106.00–$195.00/host** (no chassis to amortize — one host carries the entire shared cost), Triple is **$56.67–$96.33/host**, and Pentagon is **$46.80–$76.60/host** — under half of Single's per-host cost, because the shared SBC/ESP32/TPM/display gets spread across 5 machines instead of 1. This is the same ~2.3–2.5x ratio the cost-reduced BOM in `oan-cheap.md` §5.2 shows — the effect comes from chassis-sharing arithmetic, not from which parts were bought, so it holds regardless of BOM tier.
+
+So for a team actually protecting more than one machine, Single is the worse deal per host covered, not the cheaper one — the higher Pentagon total buys proportionally far more for a comparatively small bump in per-person cost. Single only makes sense when there's genuinely just one host to protect, or when hosts aren't co-located and can't share a chassis at all (Model A, §9.1).
+
 ## 9.4 Relationship to FMS
 
 Both models can sit underneath FMS (`oan-fms.md`) unchanged — FMS coordinates whatever OAN units/chassis exist (one per host in Model A, one 5-host-capped chassis in Model B — e.g. 6 chassis for the 30-host lab example in §9.2) over the Fabric Management Plane, and never touches the OOB Trust Plane in either case. Choosing between Model A and B, and how many Model B chassis a Colony needs, is a hardware-topology decision; it doesn't change FMS's design, and a real deployment could mix both (shared chassis for lab benches, dedicated units for remote/standalone hosts elsewhere) without FMS needing to know the difference.

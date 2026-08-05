@@ -105,6 +105,20 @@ Same single/triple/pentagon shape as `oan-hardware-appliance.md` §9.3, recomput
 
 These totals keep the discrete TPM per §3.7's verdict. Skipping it (fTPM) would land Pentagon around $99–$148 / ₹8,613–₹12,876, ~$9.90–$14.80/person — but that number is included here only to show the trade-off isn't large enough to matter, not as an available option. It also isn't reliably achievable on a Pi-based chassis at all without the OP-TEE engineering project described in §3.7.
 
+## 5.1 Per-Person Split (Team of 10)
+
+| Config | Hosts | Cheap total (USD) | Cheap total (INR) | Per person (USD) | Per person (INR) |
+|---|---|---|---|---|---|
+| Single | 1 | $54–$76 | ₹4,698–₹6,612 | $5.40–$7.60 | ₹470–₹661 |
+| Triple | 3 | $84–$122 | ₹7,308–₹10,614 | $8.40–$12.20 | ₹731–₹1,061 |
+| Pentagon (cap) | 5 | $114–$168 | ₹9,918–₹14,616 | $11.40–$16.80 | ₹992–₹1,462 |
+
+## 5.2 Single vs. Pentagon: Where the Money Actually Goes Further
+
+Pentagon costs roughly **2.1x more per person** than Single ($11.40–$16.80 vs. $5.40–$7.60) — but for that, it covers **5x the hosts**, not 1. Looked at per-host instead of per-person, the ranking flips: Single is **$54.00–$76.00/host** (no chassis to amortize — one host carries the entire shared cost), Triple is **$28.00–$40.67/host**, and Pentagon is **$22.80–$33.60/host** — under half of Single's per-host cost, because the shared SBC/ESP32/TPM gets spread across 5 machines instead of 1.
+
+So for a team actually protecting more than one machine, Single is the worse deal per host covered, not the cheaper one — the higher Pentagon total buys proportionally far more for a comparatively small bump in per-person cost. Single only makes sense when there's genuinely just one host to protect, or when hosts aren't co-located and can't share a chassis at all (Model A territory, `oan-hardware-appliance.md` §9.1).
+
 ---
 
 # 6. What Not to Cut
