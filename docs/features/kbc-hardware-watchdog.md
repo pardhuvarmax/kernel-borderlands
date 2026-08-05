@@ -46,7 +46,7 @@ graph LR
         KBC["kb-checker<br/>(existing, software)"]
         TPMHW["TPM 2.0<br/>(hardware root of trust)"]
         CORE --> CP
-        CP -. UDS: kba.sock/kbc.sock .-> KBC
+        CP -. "UDS (kba.sock/kbc.sock)" .-> KBC
         KBC --- TPMHW
     end
 
