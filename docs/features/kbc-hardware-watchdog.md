@@ -38,21 +38,69 @@ Scoped to `kb-checker` deliberately, not as an oversight:
 
 # 2. Proposed Architecture
 
-```
-┌─────────────────────────────┐        out-of-band link         ┌──────────────────────────┐
-│         KB Host             │   (serial TTL, or dedicated      │   Watchdog SBC (Pi)      │
-│  kb-core / kb-control-plane │◄─────────── NIC — never the ────►│  independent attestation │
-│  kb-checker (existing, SW)  │        host's primary network)   │  + relay fencing control │
-└──────────────┬──────────────┘                                  └────────────┬─────────────┘
-               │ TPM 2.0 (measured boot,                                       │
-               │ seals kb-checker integrity state)                             │ GPIO
-               ▼                                                               ▼
-      hardware root of trust                                          relay: power/reset cutoff
+```mermaid
+graph LR
+    subgraph HOST["KB Host (existing)"]
+        CORE["kb-core<br/>eBPF sensors, Ring 0"]
+        CP["kb-control-plane<br/>(kbd)"]
+        KBC["kb-checker<br/>(existing, software)"]
+        TPMHW["TPM 2.0<br/>(hardware root of trust)"]
+        CORE --> CP
+        CP -. UDS: kba.sock/kbc.sock .-> KBC
+        KBC --- TPMHW
+    end
+
+    subgraph SBC["Watchdog SBC — proposed"]
+        ATT["Attestation / heartbeat logic"]
+        FENCE["Relay fencing control (GPIO)"]
+        ATT --> FENCE
+    end
+
+    KBC <-->|"out-of-band link<br/>(serial TTL or dedicated NIC —<br/>never the host's primary network)"| ATT
+    FENCE -->|"power / reset cutoff"| HOST
 ```
 
 - **Link**: deliberately *not* the host's normal network path (per `kb-checker`'s existing "no network footprint" pillar — the out-of-band link should not become a new attack surface reachable from the host's regular network stack).
 - **TPM 2.0**: measured boot + sealing of `kb-checker`'s own integrity state, so a compromised kernel can't forge what it reports upstream.
 - **Relay/fencing**: physical power or reset cutoff the SBC can trigger independently of host software cooperating — the hardware analogue of `kb-checker`'s existing 3-layer quarantine containment (`systemctl stop` → `SIGKILL` → `iptables` drop, see its README's flow diagram), as a last-resort layer *below* all three.
+
+## 2.1 Proposed Attestation / Heartbeat Flow (illustrative)
+
+**Illustrative only** — no wire protocol exists yet (see §4.1). This shows the intended shape of the interaction, not a contract to build against.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant KBC as kb-checker (host, existing)
+    participant TPM as TPM 2.0 (host)
+    participant SBC as Watchdog SBC (proposed)
+    participant RELAY as Relay (host power/reset)
+
+    loop Heartbeat interval (TBD)
+        KBC->>TPM: Seal current integrity state
+        TPM-->>KBC: Sealed attestation blob
+        KBC->>SBC: Send attestation over out-of-band link
+        SBC->>SBC: Verify attestation, reset liveness timer
+    end
+
+    Note over SBC: If attestation missing/invalid<br/>beyond timeout (fail-open vs. fail-closed: TBD, see §4.2)
+    SBC->>RELAY: Trigger fencing
+    RELAY-->>SBC: Ack cutoff
+```
+
+## 2.2 Fencing as an Extension of the Existing Quarantine Chain (illustrative)
+
+`kb-checker` already escalates through a 3-layer software chain on tampering (see its [README](../../kb-checker/README.md) flow diagram). This proposal adds hardware fencing as a fourth, physically-independent layer below it — exact trigger conditions unresolved, see §4.3.
+
+```mermaid
+graph TD
+    A["Integrity violation detected"] --> B["1. systemctl stop kb-sensor"]
+    B -->|fails| C["2. SIGKILL userspace"]
+    C -->|fails| D["3. iptables network drop"]
+    D -->|fails, or heartbeat to SBC lost| E["4. Hardware fencing (proposed)"]
+    E --> F["Watchdog SBC triggers relay"]
+    F --> G["Host power / reset cutoff"]
+```
 
 ---
 
@@ -74,7 +122,37 @@ Scoped to a bench-buildable prototype for a physical review demo — no FPGA/DPU
 
 Host side: existing dev machine running `kb-core`/`kb-control-plane`/`kb-checker` — needs a free USB/serial port and, if used, a TPM header. No new host hardware required.
 
-## 3.1 Tiers Considered and Rejected (for now)
+## 3.1 Physical Wiring (illustrative)
+
+Pin-level wiring for the prototype BOM above — a bench layout, not a schematic.
+
+```mermaid
+graph TD
+    subgraph Host["Host Machine"]
+        USB["Free USB port"]
+        PWRHDR["Power / reset header"]
+        TPMHDR["TPM header / SPI bus (if present)"]
+    end
+
+    subgraph Pi["Raspberry Pi (Watchdog SBC)"]
+        UART["GPIO UART pins (14/15)"]
+        GPIOPIN["GPIO pin -> relay control"]
+        SD["microSD: Pi OS + watchdog binary"]
+        I2C["I2C bus"]
+    end
+
+    TPMMOD["Discrete TPM 2.0 module"]
+    RELAY["GPIO relay module"]
+    OLED["I2C OLED display (optional)"]
+
+    USB <-->|"USB-to-TTL cable (FTDI/CP2102)"| UART
+    TPMHDR --- TPMMOD
+    GPIOPIN --> RELAY
+    RELAY -->|"NO/NC contacts"| PWRHDR
+    I2C --- OLED
+```
+
+## 3.2 Tiers Considered and Rejected (for now)
 
 - **Inline hardware (smart NIC/FPGA/DPU)** sitting in the data path, independently observing traffic/syscalls without trusting host telemetry at all — the most complete answer, but real DPU hardware runs $1.5k–$8k+ and even a cheap Zynq-class FPGA prototype ($150–$300) needs RTL/embedded toolchain work spanning weeks. Rejected for the initial prototype on cost/scope; noted here as a possible future tier, not pursued further in this document.
 
