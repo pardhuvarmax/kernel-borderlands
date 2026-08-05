@@ -307,19 +307,21 @@ The detailed design direction for this — fleet hierarchy (Fabric/Colony/Family
 
 Scoped to a bench-buildable single-host prototype for a physical review demo — not the production appliance described in §11. No FPGA/DPU inline-hardware tier (evaluated and dropped, see §10.2).
 
-| Component | Purpose | Est. Cost |
-|---|---|---|
-| Raspberry Pi 4/5 (or Pi Zero 2 W) | SBC — attestation engine, off-host | $35–$80 |
-| microSD card (32GB+) | Pi OS + watchdog binary | $8 |
-| STM32 dev board (e.g. Nucleo-F103RB or "Blue Pill" F103C8) | Deterministic safety controller, relay control | $10–$25 |
-| ESP32 dev board (e.g. ESP32-WROOM DevKitC) | Management/comms processor | $6–$10 |
-| USB-to-TTL serial cable (FTDI/CP2102) | Out-of-band link, host ↔ SBC | $8 |
-| *(alt.)* Dedicated 2nd Ethernet NIC + cable | Out-of-band link if demoing network attestation instead of serial | $10–$20 |
-| Discrete TPM 2.0 module (LPC/SPI breakout) | Hardware root of trust, if host/SBC board lacks one | $20–$40 |
-| GPIO relay module | Physical power/reset fencing of host, demo visual | $6 |
-| Jumper wires + small breadboard/perfboard | Wiring for TPM, STM32, ESP32, relay | $8 |
-| I2C OLED/LCD display (optional) | Live status readout for the demo | $5–$10 |
-| **Total** | | **~$105–$215** |
+| Component | Purpose | Est. Cost (USD) | Est. Cost (INR) |
+|---|---|---|---|
+| Raspberry Pi 4/5 (or Pi Zero 2 W) | SBC — attestation engine, off-host | $35–$80 | ₹3,050–₹6,950 |
+| microSD card (32GB+) | Pi OS + watchdog binary | $8 | ₹700 |
+| STM32 dev board (e.g. Nucleo-F103RB or "Blue Pill" F103C8) | Deterministic safety controller, relay control | $10–$25 | ₹875–₹2,175 |
+| ESP32 dev board (e.g. ESP32-WROOM DevKitC) | Management/comms processor | $6–$10 | ₹525–₹875 |
+| USB-to-TTL serial cable (FTDI/CP2102) | Out-of-band link, host ↔ SBC | $8 | ₹700 |
+| *(alt.)* Dedicated 2nd Ethernet NIC + cable | Out-of-band link if demoing network attestation instead of serial | $10–$20 | ₹875–₹1,750 |
+| Discrete TPM 2.0 module (LPC/SPI breakout) | Hardware root of trust, if host/SBC board lacks one | $20–$40 | ₹1,750–₹3,500 |
+| GPIO relay module | Physical power/reset fencing of host, demo visual | $6 | ₹525 |
+| Jumper wires + small breadboard/perfboard | Wiring for TPM, STM32, ESP32, relay | $8 | ₹700 |
+| I2C OLED/LCD display (optional) | Live status readout for the demo | $5–$10 | ₹440–₹875 |
+| **Total** | | **~$105–$215** | **~₹9,150–₹18,700** |
+
+INR figures are an approximate conversion at ~₹87/USD (rough, for scoping only — not a sourcing quote; actual India import/GST pricing on these boards runs higher than a flat conversion, particularly for the Pi and TPM module).
 
 Host side: existing dev machine running `kb-core`/`kb-control-plane`/`kb-checker` — needs a free USB/serial port and, if used, a TPM header. No new host hardware required.
 
