@@ -143,6 +143,20 @@ Responsibilities:
 
 The STM32 continues operating even if Linux on the SBC crashes — this is the point of splitting it out from the SBC rather than running the watchdog timer as a Linux process, which would reintroduce the same "watchdog shares a failure domain with what it watches" problem OAN exists to solve, just one level down.
 
+### 4.2.1 Why a Dedicated MCU, Not the SBC or the ESP32
+
+**Why not let the SBC drive the relay directly?** Because then fencing depends on Linux being alive and scheduled promptly. If the SBC hangs, panics, or is simply busy at the wrong moment, the relay decision hangs with it — recreating, one level down, the exact "watchdog shares a failure domain with what it watches" problem OAN exists to solve for the host (§1.2).
+
+**Why not use the ESP32, since it's already onboard (§4.3)?** Because the ESP32 runs a full WiFi/networking stack — a much larger, more remotely-reachable attack surface, and the piece most likely to run stock SDK code with known CVEs. Putting fencing authority there would hand the least-trusted onboard chip the most consequential action.
+
+**What the STM32 specifically provides that neither of those does:**
+- A hardware independent watchdog timer (IWDG) peripheral — a native chip feature built exactly for "if nothing resets me in time, act," not something bolted on in software.
+- No OS, no network stack, no scheduler — one small deterministic firmware loop, so a heartbeat-timeout decision fires in a fixed, predictable number of cycles rather than "whenever Linux gets around to it."
+- Its own clock and power behavior independent of the SBC — an SBC crash, freeze, or even attacker code execution *on* the SBC doesn't reach it, because it isn't running general-purpose software there's anything to exploit into.
+- Cheap and simple precisely because it isn't doing policy/attestation logic (that stays on the SBC) — it only watches a timer and flips a relay, a job small enough for a $10–$25 commodity board to do with high confidence, no custom safety-rated silicon required.
+
+Shorthand for the three-chip split: **SBC = brain** (complex, capable, but crashable), **ESP32 = mouth** (talks to the network, never decides anything), **STM32 = spinal reflex** (dumb, minimal, but keeps firing even if the brain goes dark).
+
 ## 4.3 ESP32
 
 Purpose: dedicated management processor.
@@ -283,23 +297,133 @@ Tentative mapping to `kb-checker`'s existing chain (needs confirmation, not a co
 
 # 9. Cluster Support (Future Work — out of prototype scope)
 
-One appliance can, in principle, supervise many hosts:
+This is explicitly **not** part of the bench-buildable prototype scoped in §10 — a single-host attestation link is the whole prototype goal. Everything in this section is direction, not a commitment, and — as of this pass — deliberately covers **two different models** for "one OAN, many hosts" rather than picking one, because they trade off differently and the prototype doesn't force a choice yet.
+
+The one constraint that holds under **both** models, non-negotiably: the OOB Trust Plane (attestation + relay fencing, §3.1) is physical and point-to-point. It cannot be shared over ordinary networking between hosts — that would just recreate the same-network attack surface OAN exists to avoid. What can differ between models is only *where the other end of that physical link terminates*.
+
+## 9.1 Model A — Dedicated OAN per Host
+
+Each host gets its own complete OAN unit, exactly as built out in §4/§10 (its own SBC, STM32, ESP32, TPM, relay, display).
 
 ```mermaid
 graph TD
-    OAN["OAN"] --> H1["Host 1: kb-core"]
-    OAN --> H2["Host 2: kb-core"]
-    OAN --> H3["Host 3: kb-core"]
+    OAN1["OAN unit 1"] -->|"OOB Trust Plane"| H1["Host 1: kb-checker"]
+    OAN2["OAN unit 2"] -->|"OOB Trust Plane"| H2["Host 2: kb-checker"]
+    OAN3["OAN unit 3"] -->|"OOB Trust Plane"| H3["Host 3: kb-checker"]
+    OAN1 -.->|"Fabric Management Plane"| FMS["FMS — oan-fms.md"]
+    OAN2 -.-> FMS
+    OAN3 -.-> FMS
 ```
 
-This is explicitly **not** part of the bench-buildable prototype scoped in §10 — a single-host attestation link is the whole prototype goal. Listed here as direction, not a commitment:
+Simplest to reason about: every host's trust boundary is entirely self-contained hardware, with no shared failure domain between hosts at all. FMS, if present, only adds fleet visibility/policy on top (per the Local Autonomy Principle, `oan-fms.md` §3.1) — it never changes what any single OAN unit can do on its own. Costs scale linearly with host count, since each host duplicates the full BOM (§10).
 
-- Fleet-wide policy management.
-- Distributed attestation.
-- Multi-host correlation.
-- Coordinated response.
+## 9.2 Model B — Shared Chassis, Capped at 5 Hosts
 
-The detailed design direction for this — fleet hierarchy (Fabric/Colony/Family/Node), discovery, policy inheritance, cross-host correlation, recovery coordination — is written up separately as the **Fabric Management Service (FMS)**: see [`oan-fms.md`](oan-fms.md). It is proposed as an SBC-side service *within* OAN (§4.1), not a separate appliance, and is scoped explicitly to come after a working single-host OAN prototype, not before. FMS runs on the Fabric Management Plane (§3.1), separate from this doc's OOB Trust Plane, and is classified non-security-critical (`oan-fms.md` §3.1) so that fleet coordination never sits in the runtime security path of any individual host.
+**Decided (this pass): a Model B chassis serves a hard maximum of 5 hosts.** Below the cap, everything below is direction. Above it, deploy another chassis rather than growing one further — see rationale at the end of this subsection.
+
+One physical box hosts up to 5 independent STM32+relay channels behind a single shared SBC, ESP32, TPM, and display. The transport for those channels is a **dedicated, physically isolated Ethernet segment** — its own small unmanaged switch, with no uplink to the production LAN — not point-to-point serial cable runs. Serial only worked as a mental model for "a couple of machines on the same desk"; it doesn't hold up even at 5 hosts spread across a lab bench, and the isolated-Ethernet form is exactly what enterprise BMC/IPMI management networks and managed PDUs already do at this scale, for the same trust reason: physically/logically separate from anything the host's own kernel drives, so a rooted host can go silent or send garbage on it but can't forge a valid signed attestation or reach other hosts' channels.
+
+```mermaid
+graph TD
+    subgraph CHASSIS["Shared OAN chassis — max 5 hosts"]
+        SBC["SBC — shared"]
+        ESP32C["ESP32 — shared, owns the OOB switch port"]
+        TPMC["TPM — shared"]
+        DISPC["Display — shared"]
+        STM1["STM32 channel 1"]
+        STM2["STM32 channel 2"]
+        STM3["..."]
+        STM5["STM32 channel 5"]
+        SBC --- STM1
+        SBC --- STM2
+        SBC --- STM3
+        SBC --- STM5
+        SBC --- ESP32C
+        SBC --- TPMC
+        SBC --- DISPC
+    end
+    SWITCH["Dedicated OOB switch<br/>no uplink to production LAN"]
+    ESP32C --- SWITCH
+    SWITCH -->|"isolated Ethernet, signed payloads"| H1["Host 1 — dedicated NIC/dongle, not the host's main NIC"]
+    SWITCH -->|"isolated Ethernet, signed payloads"| H2["Host 2"]
+    SWITCH -->|"isolated Ethernet, signed payloads"| H5["Host 5"]
+    STM1 -->|"relay"| RELAY1["Relay ch. 1"] --> H1
+    STM2 -->|"relay"| RELAY2["Relay ch. 2"] --> H2
+    STM5 -->|"relay"| RELAY5["Relay ch. 5"] --> H5
+```
+
+Each host's OOB link terminates on a dedicated interface distinct from that host's own main NIC — a small dongle or the STM32/companion channel itself, not a VLAN carved out of the host's primary network path. A VLAN on the host's own NIC doesn't count as out-of-band: the host's kernel still drives that interface and can block or forge traffic on it. Power fencing scales the same way a rack PDU does — a single 5–8 outlet managed relay/PDU block, control channel on the same isolated switch, rather than 5 loose single relay modules.
+
+**Why cap at 5, not scale one chassis further:**
+- **Blast radius.** If the shared chassis itself fails or is physically tampered with, only 5 hosts lose OOB coverage, not the whole lab. Model A's per-host isolation is fully preserved at small scale; Model B trades some of that away for cost, and 5 is where that trade stops being worth pushing further.
+- **Commodity part sizes.** 5-8 channel relay/PDU boards and 5-8 port unmanaged switches are the natural off-the-shelf sizes — going bigger means custom boards instead of commodity ones, which changes the cost model in §9.3 entirely.
+- **USB/GPIO fan-out on the SBC.** A Raspberry Pi's USB and GPIO budget gets cramped well before 10+ channels; 5 keeps the shared SBC side of the design within what a stock board (no custom PCB) can drive.
+
+A lab of 30 machines under this cap needs **6 Model B chassis units**, each with its own isolated switch segment, each independently reporting up to FMS (§9.4) — not one giant chassis and not 30 individual OAN units.
+
+### 9.2.1 What Each Host Needs vs. What's Shared
+
+Model B does **not** make per-host hardware free — it only removes the *redundant* per-host hardware. Every host still needs its own physical wiring, because fencing and attestation are inherently host-specific:
+
+- **Per host, always required, never shared:** a relay tap wired into that host's own power/reset header (fencing has to switch that machine's power specifically), a dedicated OOB link endpoint (a small dongle/NIC distinct from the host's normal network card, not a VLAN on it — the host's own kernel still drives that), and the STM32 channel logic watching that one link/relay pair.
+- **Shared once, across up to 5 hosts:** the SBC (attestation engine, policy, dashboard), the ESP32 (owns the isolated switch port, fleet-facing comms), the TPM (root of trust), and the display.
+
+So the "one main OAN" for a group of up to 5 desktops is the shared brain — each desktop just gets cheap wiring back to it, not its own copy of the brain. Past 5 desktops, that stops working and you stand up another independent chassis (another "main OAN") for the next batch, rather than growing one chassis indefinitely (§9.2's blast-radius/commodity-part reasoning above).
+
+## 9.3 Cost Comparison
+
+Splitting §10's BOM into "shared once per chassis" (SBC, microSD, ESP32, TPM, display) vs. "per host" (STM32, relay channel, OOB link hardware) components — INR at the same approximate ~₹87/USD used in §10:
+
+| | Cost (USD) | Cost (INR) |
+|---|---|---|
+| Shared once, per chassis (Model B only) | $74–$148 | ₹6,440–₹12,880 |
+| Per host — Model A (full unit) | $105–$215 | ₹9,135–₹18,705 |
+| Per host — Model B (one channel, within the 5-host cap) | $32–$47 | ₹2,785–₹4,090 |
+
+Worked examples — single (1), triple (3), and pentagon (5, the cap) host configurations, all within **one** Model B chassis, plus the 30-host lab case needing 6 chassis:
+
+| Config | Hosts | Chassis | Model A total (USD / INR) | Model B total (USD / INR) |
+|---|---|---|---|---|
+| Single | 1 | 1 | $105–$215 / ₹9,135–₹18,705 | $106–$195 / ₹9,220–₹16,965 |
+| Triple | 3 | 1 | $315–$645 / ₹27,405–₹56,115 | $170–$289 / ₹14,790–₹25,145 |
+| Pentagon (cap) | 5 | 1 | $525–$1,075 / ₹45,675–₹93,525 | $234–$383 / ₹20,360–₹33,320 |
+| Lab (worked example, §9.2) | 30 | 6 | $3,150–$6,450 / ₹2,74,050–₹5,61,150 | $1,404–$2,298 / ₹1,22,150–₹1,99,925 |
+
+Each Model B total = one chassis's shared cost + (per-host cost × hosts on that chassis); the lab row sums that across all 6 chassis.
+
+### 9.3.1 Per-Host Cost Breakdown
+
+The $32–$47 / ₹2,785–₹4,090 per-host figure is four parts, not one:
+
+| Part | Cost (USD) | Cost (INR) | Note |
+|---|---|---|---|
+| STM32 dev board (that host's channel) | $10–$25 | ₹870–₹2,175 | e.g. Nucleo-F103RB or "Blue Pill" F103C8 |
+| Relay (that host's fencing channel) | $6 | ₹520 | cheaper per-channel if bought as part of a shared 5–8 channel relay/PDU board rather than individually |
+| OOB dongle/link hardware | $8 | ₹700 | **approximate** — still borrowing Model A's serial-cable line item as a stand-in, not yet priced against an actual small Ethernet dongle/module (§14 Open Question 9) |
+| Wiring/connectors | $8 | ₹700 | jumper wire, connector, cable run to that host |
+| **Total per host** | **$32–$47** | **₹2,785–₹4,090** | |
+
+### 9.3.2 Marginal Cost of Filling a Chassis to the 5-Host Cap
+
+The shared chassis (SBC + ESP32 + TPM + display) is bought exactly **once** per chassis, at $74–$148 / ₹6,440–₹12,880, regardless of whether it's serving 1 host or the full 5-host cap — it does not change as hosts are added, only as a new chassis is stood up past host 5 (§9.2). Every host added past the first pays only the per-host line from §9.3.1:
+
+| Adding host # | Extra cost (USD) | Extra cost (INR) |
+|---|---|---|
+| 2nd | $32–$47 | ₹2,785–₹4,090 |
+| 3rd | $32–$47 | ₹2,785–₹4,090 |
+| 4th | $32–$47 | ₹2,785–₹4,090 |
+| 5th | $32–$47 | ₹2,785–₹4,090 |
+| **Total extra, hosts 2–5** | **$128–$188** | **₹11,140–₹16,360** |
+
+So filling one chassis from a single host up to the full 5-host Family/Colony costs the fixed chassis price once ($74–$148), plus $128–$188 in incremental per-host wiring — landing at the Pentagon row's $234–$383 / ₹20,360–₹33,320 total above. The cost curve is flat on the expensive shared parts and only climbs on cheap, per-host wiring, which is the entire point of Model B over Model A.
+
+Model B stays markedly cheaper at any scale past a handful of hosts, and the gap holds even with the 5-host cap forcing multiple chassis, because each chassis still amortizes its SBC/TPM/ESP32/display cost across 5 hosts instead of 1. A multi-channel relay/PDU board further undercuts buying N single-relay modules per chassis. Model A stays simpler to build and reason about for one host, or for hosts that aren't physically near each other — which is exactly the bench prototype's situation, hence §10 is written as Model A only.
+
+## 9.4 Relationship to FMS
+
+Both models can sit underneath FMS (`oan-fms.md`) unchanged — FMS coordinates whatever OAN units/chassis exist (one per host in Model A, one 5-host-capped chassis in Model B — e.g. 6 chassis for the 30-host lab example in §9.2) over the Fabric Management Plane, and never touches the OOB Trust Plane in either case. Choosing between Model A and B, and how many Model B chassis a Colony needs, is a hardware-topology decision; it doesn't change FMS's design, and a real deployment could mix both (shared chassis for lab benches, dedicated units for remote/standalone hosts elsewhere) without FMS needing to know the difference.
+
+Design direction for the fleet layer itself — fleet hierarchy (Fabric/Colony/Family/Node), discovery, policy inheritance, cross-host correlation, recovery coordination — is written up separately as the **Fabric Management Service (FMS)**: see [`oan-fms.md`](oan-fms.md). It is proposed as an SBC-side service *within* OAN (§4.1), not a separate appliance, and is scoped explicitly to come after a working single-host OAN prototype, not before. FMS runs on the Fabric Management Plane (§3.1), separate from this doc's OOB Trust Plane, and is classified non-security-critical (`oan-fms.md` §3.1) so that fleet coordination never sits in the runtime security path of any individual host.
 
 ---
 
@@ -423,6 +547,8 @@ This is a proposal, not a spec. The following are explicitly unresolved and shou
 6. **Internal SBC↔STM32↔ESP32 protocol.** New in v0.2 — how the three onboard processors talk to each other (bus choice, message format, and critically, how the SBC's attestation verdict reaches the STM32 in a way the STM32 can trust without itself re-implementing crypto verification).
 7. **Cluster protocol (§9).** Design direction now written up in [`oan-fms.md`](oan-fms.md) (Fabric Management Service), but entirely undesigned at the protocol/schema level and flagged as future work, not prototype scope — see that doc's own Open Questions.
 8. **Research contribution claims (§13).** Need a literature comparison (HSM/BMC-based watchdogs, academic OOB attestation work) before being asserted as novel in any paper draft.
+9. **Model B's isolated-Ethernet BOM is approximate, not itemized.** §9.2/§9.3 cost Model B's per-host link using the same $32–$47 line items as Model A's serial cable (STM32 + relay + link hardware + wiring), but the transport was revised to a dedicated isolated-Ethernet dongle/NIC per host plus a shared 5–8 port unmanaged switch per chassis — neither the per-host dongle nor the shared switch has its own priced BOM line yet. Likely similar order of magnitude (a small Ethernet module is roughly serial-cable cost; a small unmanaged switch is ~$15–$25 one-time per chassis) but not confirmed.
+10. **§9.2's 5-host cap and isolated-Ethernet transport are decided as design principles, not as a built/tested reference design.** Neither Model A nor Model B has been chosen as *the* prototype target — §10's BOM stays Model A only because that's what the single-host bench prototype needs; a Model B chassis (with its custom breakout PCB/enclosure, once beyond loose dev boards) is unbuilt and unbudgeted beyond the approximate figures in §9.3.
 
 ---
 
