@@ -111,8 +111,8 @@ sequenceDiagram
     *   *If checks pass (or warning cap fallback triggered)*: `kb-checker` starts its scheduled background verification loops (running every 5s/30s/60s).
     *   *If checks fail*: `kb-checker` executes the **Tampering Containment Protocol**: unloads `kbd_sensor` from kernel memory, sends the failure report and stack trace to `kbd` over `kba.sock`, and exits with code 1.
 *   **`T+8.50s` — Phase 3: Ray Swarm / Workload Activation**:
-    *   *If `kb-checker` succeeded*: Systemd releases the gate and starts the Swarm Node Agent (`kbd-agent.service` / Ray workload manager).
-    *   *If `kb-checker` failed (or crashed)*: Systemd dependency rules (`Requires=kb-checker.service`) prevent `kbd-agent.service` from ever starting. The AADS compute subsystem remains offline.
+    *   *If `kb-checker` succeeded*: Systemd releases the gate and starts the Swarm Node Agent (`kbagents.service` / Ray workload manager).
+    *   *If `kb-checker` failed (or crashed)*: Systemd dependency rules (`Requires=kb-checker.service`) prevent `kbagents.service` from ever starting. The AADS compute subsystem remains offline.
 *   **`T+9.50s` — Node Registration**:
     *   The active Ray Agent establishes a connection to `/run/kb/kba.sock` and registers its GPU/CPU capacities with the Go Control Plane.
 *   **`T+10.00s` — Full Operational State**:
@@ -164,6 +164,86 @@ PIDFile=/run/kb/kb-checker.pid
 WantedBy=multi-user.target
 ```
 
+### `/etc/systemd/system/kbagents.service`
+
+Previously referenced only by name in the boot narrative (§2) and dependency diagrams, with
+no unit file written down. Added here — `ExecStart=` follows the same `/usr/local/bin/<name>`
+convention as `kbd.service`/`kb-checker.service`, per the compiled-binary packaging decision
+recorded in `docs/features/cpm-implementation.md`. **Note:** unlike `kbd`/`kb-checker`, kb-aads
+(`kb-aads/main.py`) has no actual compiled-binary build/install step anywhere in this repo
+today (it runs as `python3 main.py`) — this unit file documents the target packaging
+convention, not a build that currently exists. Producing `/usr/local/bin/kbagents` (e.g. via a
+wrapper script or a PyInstaller/similar build step) is follow-up work, not done by this change.
+
+```ini
+[Unit]
+Description=Kernel Borderlands Ray Swarm Node Agent (AADS)
+After=kb-checker.service
+Requires=kb-checker.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kbagents --config /etc/kb/config.yaml --grpc-socket /run/kb/kba.sock
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### `/etc/systemd/system/kbopd.service`
+
+The operator dashboard (`kb-op/kb-dashboard`). Not currently deployed as a daemon — it runs
+today only as a Vite dev-server (`npm run dev`), no compiled binary. Written here in advance,
+same treatment as `kbagents.service`: a target packaging convention for CPM to protect once a
+real production build exists, not a unit that's installed anywhere yet. Depends on
+`kbd.service` (the dashboard consumes `kbd`'s gRPC/WebSocket API), not on
+`kb-checker.service` — it isn't part of the AADS compute gate.
+
+```ini
+[Unit]
+Description=Kernel Borderlands Operator Dashboard
+After=kbd.service
+Requires=kbd.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kbopd --config /etc/kb/config.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### `/etc/systemd/system/kbopt.service`
+
+The SSH terminal console (`kb-op/kb-tui`), which hosts its own SSH server on port 2222 for
+operators to connect into — an actual persistent daemon, not a per-session interactive tool.
+Unlike `kbopd`/`kbagents`, `kb-tui` already has a real compiled-binary build step
+(`go build -o kb-tui cmd/main.go`, `docs/development/developer-commands.md`); what's missing
+is only the install path/unit file, not the packaging step itself. Depends on `kbd.service`
+for the same reason `kbopd` does.
+
+```ini
+[Unit]
+Description=Kernel Borderlands SSH Terminal Console
+After=kbd.service
+Requires=kbd.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kbopt --config /etc/kb/config.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ---
 
 ## 4. Race Conditions & Fail-Safe Paths
@@ -200,7 +280,7 @@ graph TD
     C3 --> C4[System enters Quarantine: Only Control Plane active]
     
     B -->|kb-checker kbc fails to start| D[Halting AADS Subsystem]
-    D --> D1[Systemd blocks kbd-agent / Ray Agent startup]
+    D --> D1[Systemd blocks kbagents / Ray Agent startup]
     D1 --> D2[Workload execution denied]
     D2 --> D3[System enters Quarantine: Only Control Plane active]
 ```
@@ -231,7 +311,7 @@ If `kb-checker` detects an eBPF integrity violation (signature hash mismatch in 
 
 ### Scenario B: `kb-checker` (kbc) Daemon Failure
 If the safety watchdog daemon `kb-checker` crashes, is killed, or fails to initialize successfully:
-1. **AADS Subsystem Halt**: Because the Ray Swarm agent (`kbd-agent.service`) has a strict systemd dependency chaining of `Requires=kb-checker.service` and `After=kb-checker.service`, the Ray agent is completely blocked from starting.
+1. **AADS Subsystem Halt**: Because the Ray Swarm agent (`kbagents.service`) has a strict systemd dependency chaining of `Requires=kb-checker.service` and `After=kb-checker.service`, the Ray agent is completely blocked from starting.
 2. **Workload Denial**: No ML agent distributed workloads are allowed to execute on the node.
 3. **System State**: The node is quarantined from the Ray Swarm cluster. The Go Control Plane (`kbd.service`) stays active, allowing administrators to query the system state remotely over `kba.sock` to diagnose the watchdog crash.
 

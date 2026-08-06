@@ -751,12 +751,38 @@ static void cpm_reconcile_running_processes(struct kbd_sensor_bpf *skel)
     printf("[CPM] Startup reconciliation: pre-registered %d already-running protected process(es)\n", registered);
 }
 
-// Compiled-in floor (§3.1/§5.2). Sibling-subsystem binaries (kbd,
-// kb-checker, kbctl) are deliberately NOT listed here — their install
-// paths aren't documented anywhere in this repo, and guessing wrong would
-// silently fail to protect them while appearing to. kbd_sensor protects
-// itself via cpm_register_self() instead, which doesn't depend on this
-// registry.
+// Compiled-in floor (§3.1/§5.2). kbctl is deliberately NOT listed here — it's
+// a one-shot CLI (not a daemon), has no systemd unit, and its install path
+// isn't documented anywhere in this repo; guessing wrong would silently fail
+// to protect it while appearing to. kbd_sensor protects itself via
+// cpm_register_self() instead, which doesn't depend on this registry.
+//
+// kb-checker and kbd ARE listed below: their install paths are documented at
+// /usr/local/bin/kb-checker and /usr/local/bin/kbd in their respective
+// systemd ExecStart= lines (docs/architecture/boot_sequence_spec.md).
+// Protecting kbd's PID/exec-path also covers CPM.md's "policy-engine" —
+// policy evaluation (kb-control-plane/internal/policy/) runs inside the kbd
+// process, not as a separate binary, so there's nothing distinct to add for
+// it. Without the kb-checker/kbd entries, a malfunctioning or manipulated
+// detection engine could recommend either of them for containment through
+// KB's own pipeline with nothing to stop it.
+//
+// kb-agent (kbagents.service, Ray Swarm node agent), kbopd (kbopd.service,
+// operator dashboard), and kbopt (kbopt.service, SSH terminal console) are
+// also listed below, at /usr/local/bin/kbagents, /usr/local/bin/kbopd, and
+// /usr/local/bin/kbopt respectively, per the unit files now written into
+// docs/architecture/boot_sequence_spec.md.
+// NOTE: unlike kb-checker/kbd, kbagents and kbopd are packaging *decisions*,
+// not builds that exist yet — kb-aads (kb-aads/main.py) currently runs as
+// `python3 main.py`, and kb-op/kb-dashboard currently runs only via `npm run
+// dev` (Vite dev-server) — neither has a compiled-binary install step
+// producing these paths anywhere in this repo. Those two floor entries
+// protect nothing in practice yet (no process execs from either path) but
+// are harmless and become correct the moment each is packaged.
+// kbopt is different: kb-tui already has a real compiled-binary build step
+// (`go build -o kb-tui cmd/main.go`) — only the /usr/local/bin/kbopt install
+// path/unit file was missing, not the packaging step, so this entry is
+// closer to kb-checker/kbd in that a real binary just needs to land there.
 static void populate_protected_exec_paths(struct kbd_sensor_bpf *skel)
 {
     int map_fd = bpf_map__fd(skel->maps.protected_exec_paths_map);
@@ -775,6 +801,11 @@ static void populate_protected_exec_paths(struct kbd_sensor_bpf *skel)
         "/usr/bin/dbus-daemon",
         "/usr/bin/NetworkManager",
         "/usr/sbin/NetworkManager",
+        "/usr/local/bin/kb-checker",
+        "/usr/local/bin/kbd",
+        "/usr/local/bin/kbagents",
+        "/usr/local/bin/kbopd",
+        "/usr/local/bin/kbopt",
     };
     __u8 one = 1;
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {

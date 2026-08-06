@@ -6,7 +6,7 @@
 ---
 
 ## 1. Objective
-To secure communications between the Go Control Plane (`kbd`), the Rust Safety Watchdog (`kb-checker`), and the Ray Swarm agent (`kbd-agent`), the control plane must bind its gRPC server to a Unix Domain Socket (UDS) located at `/run/kb/kba.sock`. There is no TCP fallback — UDS is the only transport, everywhere, including local/dev environments.
+To secure communications between the Go Control Plane (`kbd`), the Rust Safety Watchdog (`kb-checker`), and the Ray Swarm agent (`kbagents`), the control plane must bind its gRPC server to a Unix Domain Socket (UDS) located at `/run/kb/kba.sock`. There is no TCP fallback — UDS is the only transport, everywhere, including local/dev environments.
 
 This eliminates network exposure, implements local filesystem group access control, and allows standard systemd boot sequencing.
 
@@ -100,4 +100,4 @@ Any code that checks whether the gRPC service is reachable (e.g. dashboard healt
 
 ## 3. Impact & Dependency Checks
 1. **Watchdog Connection (`kb-checker`)**: The Rust watchdog is configured to connect to `/run/kb/kba.sock`. Once this change is compiled, `kb-checker` will establish a connection immediately at boot-time Phase 2.
-2. **Ray Agent Connection (`kbd-agent`)**: Ray nodes must be configured to pass UDS paths (`unix:///run/kb/kba.sock`) to their gRPC dial options.
+2. **Ray Agent Connection (`kbagents`)**: Ray nodes must be configured to pass UDS paths (`unix:///run/kb/kba.sock`) to their gRPC dial options.

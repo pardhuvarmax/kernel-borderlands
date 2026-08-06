@@ -77,9 +77,31 @@ noted as open follow-up work rather than silently done or silently skipped.
 - **`populate_protected_exec_paths(skel)`**: compiled-in floor, mirrors
   `populate_sensitive_paths()` (line 880) exactly in structure. Floor list: `systemd`,
   `systemd-logind`, `systemd-udevd`, `dbus-daemon`, `NetworkManager` at their standard
-  distro paths (spec §3.1 examples) — sibling-subsystem binaries (`kbd`, `kb-checker`,
-  `kbctl`) are **not** guessed into this list since their install paths aren't documented
-  anywhere in this repo; that's a real gap, called out in the handoff, not papered over.
+  distro paths (spec §3.1 examples), plus `/usr/local/bin/kb-checker`, `/usr/local/bin/kbd`,
+  `/usr/local/bin/kbagents`, `/usr/local/bin/kbopd`, and `/usr/local/bin/kbopt` (install
+  paths per the `kb-checker.service`/`kbd.service`/`kbagents.service`/`kbopd.service`/
+  `kbopt.service` `ExecStart=` lines in `docs/architecture/boot_sequence_spec.md`) — added so
+  a malfunctioning or manipulated detection engine can't get any of KB's own components
+  recommended for containment through KB's own pipeline. Protecting `kbd` also covers
+  CPM.md's `policy-engine`: policy evaluation (`kb-control-plane/internal/policy/`) runs
+  inside the `kbd` process, not as a separate binary, so there's nothing distinct to add for
+  it. `kbopd`/`kbopt` cover CPM.md's `dashboard` name — clarified to mean both operator
+  interfaces under `kb-op` (the web dashboard and the SSH terminal console), not just the
+  web dashboard.
+  **Caveat on `kbagents`/`kbopd`:** unlike `kbd`/`kb-checker`, both entries document
+  packaging *decisions*, not builds that exist — kb-aads (`kb-aads/main.py`) currently runs
+  as `python3 main.py`, and `kb-op/kb-dashboard` currently runs only via `npm run dev`
+  (Vite dev-server); neither has a compiled-binary install step producing these paths
+  anywhere in this repo. Both floor entries are correct and harmless today (no process execs
+  from either path, so they never match) and become load-bearing the moment each is
+  packaged — tracked as follow-up below.
+  `kbopt` is different: `kb-tui` already has a real compiled-binary build step
+  (`go build -o kb-tui cmd/main.go`, `docs/development/developer-commands.md`) — an SSH
+  server on port 2222, a genuine persistent daemon, not a per-session tool — so only its
+  `/usr/local/bin/kbopt` install path/unit file was missing, not the packaging step itself.
+  `kbctl` is still **not** guessed into this list — it's a one-shot CLI (not a daemon), has
+  no systemd unit, and its install path isn't documented anywhere in this repo. That remains
+  a real, separate gap — called out in the handoff, not papered over.
 - **CPM self-protection at startup**: register the sensor's own PID (`getpid()`) into
   `protected_pids_map` directly, before the bridge connects or any containment command can
   arrive — satisfies spec §3.3/§7.1 item 2 for `kbd_sensor` itself without depending on the
@@ -149,7 +171,21 @@ All of the above has been run live end-to-end (not just read through) — see
 
 - `kb-control-plane` (Go) sender for `KB_WIRE_MSG_CPM_PROTECTED_EXEC` + a `kbctl protect
   --path` admin command (spec §7.4) — cross-subsystem, Go-side work.
-- Sibling-subsystem binary paths (`kbd`, `kb-checker`, `kbctl`) in the compiled-in floor —
-  needs their actual install paths, undocumented in this repo today.
+- `kbctl`'s install path in the compiled-in floor — undocumented in this repo today (it's a
+  one-shot CLI with no systemd unit, unlike `kbd`/`kb-checker`).
+- Actually building `/usr/local/bin/kbagents` and `/usr/local/bin/kbopd` —
+  `kbagents.service`/`kbopd.service` unit files are now written
+  (`docs/architecture/boot_sequence_spec.md`) and both paths are in CPM's floor, but neither
+  kb-aads (`kb-aads/main.py`, runs as `python3 main.py`) nor `kb-op/kb-dashboard` (runs via
+  `npm run dev`) has a compiled-binary build/install step producing these paths anywhere in
+  this repo yet. Needs wrapper scripts or packaging steps (PyInstaller-or-similar for
+  kb-aads, a Node bundler + wrapper for kb-dashboard) before either unit file/floor entry
+  becomes load-bearing rather than documentation-only.
+- Installing `kb-tui`'s already-built binary at `/usr/local/bin/kbopt` — `kbopt.service` is
+  now written, and unlike `kbagents`/`kbopd` the compiled-binary build step already exists
+  (`go build -o kb-tui cmd/main.go`); what's left is packaging it to that install path and
+  actually deploying the unit, not writing new build tooling.
+  (`kb-checker`'s and `kbd`'s paths, `/usr/local/bin/kb-checker` and `/usr/local/bin/kbd`,
+  are real today and already load-bearing — see above.)
 - `requesting_component` audit field and full telemetry-pipeline forwarding of CPM rejection
   events — needs a new locked `event_type` and Go-side dispatch handling.

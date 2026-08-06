@@ -75,7 +75,7 @@ Because CPM sits directly in the containment decision path, its checks must be O
 
 ## 3.3 Sensor Components
 
-**Examples:** `kb-sensor`, `kb-agent`, `kbctl`, `policy-engine`, `dashboard`
+**Examples:** `kb-sensor`, `kb-agent`, `kbctl`, `policy-engine`, `dashboard`, `kb-checker`
 
 **Rationale:** These are the security platform's own components. If compromised behavior anywhere on the host could cause the platform to contain its own processes, an attacker (or a false positive) could blind the platform at the exact moment visibility matters most. Self-protection is therefore treated as a first-class security requirement, not an operational nicety.
 
@@ -166,8 +166,12 @@ Maintained outside the kernel as a userspace configuration structure, since path
 /usr/bin/dbus-daemon
 /usr/bin/NetworkManager
 /usr/bin/kb-sensor
-/usr/bin/kb-agent
+/usr/local/bin/kbagents
 /usr/sbin/kbctl
+/usr/local/bin/kb-checker
+/usr/local/bin/kbd
+/usr/local/bin/kbopd
+/usr/local/bin/kbopt
 ```
 
 * Loaded at KBS startup from a signed, administrator-editable configuration file.
@@ -284,7 +288,7 @@ Each decision branch is independently unit-testable, and each carries a distinct
 When KBS starts:
 
 1. The Protected Executable Registry is loaded from configuration.
-2. KBS enumerates its own running components (`kb-sensor`, `kb-agent`, `kbctl`, `policy-engine`, `dashboard`) and inserts their current PIDs into `protected_pids_map` immediately, before any detection or containment logic becomes active.
+2. KBS enumerates its own running components (`kb-sensor`, `kb-agent`, `kbctl`, `policy-engine`, `dashboard`, `kb-checker`) and inserts their current PIDs into `protected_pids_map` immediately, before any detection or containment logic becomes active.
 3. Critical OS processes already running at KBS startup are scanned (via `/proc`) and their PIDs are pre-registered if their executable path matches the registry, so protection is not delayed until their next restart.
 
 ## 7.2 Runtime Registration
