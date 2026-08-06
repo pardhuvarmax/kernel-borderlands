@@ -24,7 +24,7 @@ OAN's role is **not to replace** `kb-checker`, but to become the **external trus
 
 But `kb-checker` itself still runs as a userspace process on the same physical machine, communicating over local UDS sockets (`kba.sock`, `kbc.sock`). A sufficiently privileged kernel-level attacker controls the same kernel that arbitrates those sockets, the same scheduler that runs (or starves) the `kb-checker` process, and the same power/reset state of the box. Software-only isolation on a single host has a ceiling: the watchdog and the thing it watches ultimately share one root of trust (the CPU + kernel).
 
-This is the same class of problem CPM solves for containment authorization (see [`CPM.md`](CPM.md) §1.2) — "the security platform's own components must be immune to the failure modes they're meant to prevent" — but at the hardware/trust-boundary layer instead of the containment-authorization layer.
+This is the same class of problem CPM solves for containment authorization (see [`CPM.md`](../CPM.md) §1.2) — "the security platform's own components must be immune to the failure modes they're meant to prevent" — but at the hardware/trust-boundary layer instead of the containment-authorization layer.
 
 ## 1.3 Design Goal
 
@@ -61,7 +61,7 @@ Four principles, deliberately mirroring `kb-checker`'s own KISS pillars at the h
 graph LR
     subgraph HOST["KB Host — existing"]
         CORE["kb-core<br/>eBPF sensors, Ring 0"]
-        CP["kb-control-plane<br/>(kbd)"]
+      CP[ "kb-control-plane<br/>(kbd)"]
         KBC["kb-checker<br/>existing, software"]
         CORE --> CP
         CP -. "UDS: kba.sock/kbc.sock" .-> KBC
@@ -77,7 +77,7 @@ graph LR
         SBC --- ESP32
         SBC --- TPM
         SBC --- DISP
-    end
+  end
 
     KBC <-->|"OOB Trust Plane:<br/>serial or dedicated Ethernet<br/>never the host's primary network"| SBC
     ESP32 <-.->|"Fabric Management Plane:<br/>dedicated VLAN/NIC, signed summaries only"| FMSNODES["Other Fabric nodes — see oan-fms.md"]
@@ -551,21 +551,27 @@ This framing needs validation against prior work (industry HSM/BMC-based watchdo
 
 # 14. Open Questions / Not Yet Designed
 
-This is a proposal, not a spec. The following are explicitly unresolved and should be worked out (and this doc updated, or a follow-up implementation doc written, per [`CPM.md`](CPM.md)/[`cpm-implementation.md`](cpm-implementation.md)'s pattern) before any implementation begins:
+This is a proposal, not a spec. The following track what's worked out and what still needs to be, per [`CPM.md`](../CPM.md)/[`cpm-implementation.md`](../cpm-implementation.md)'s pattern, before any implementation begins.
+
+### Resolved
+
+2. ~~**Failure semantics.** What OAN does if the link itself drops (fail-open vs. fail-closed on the relay) needs an explicit decision, mirroring CPM's "fail closed toward protection" principle (§2.2 of `CPM.md`).~~ **Resolved as a per-deployment policy switch, defaulting to fail-closed.** The relay's behavior on a dropped link, or an attestation that's missing or fails verification past the configured timeout, is a configured decision, not a single hardwired reflex — defaults to fail-closed (fence), mirroring CPM's own "fail closed toward protection" principle (§2.2 of `CPM.md`), with fail-open available as an explicit opt-in for availability-critical hosts where an unattended, unverified fencing event would itself be an unacceptable outage. Full attacker-cost reasoning for why fail-closed is the right default: `latex/oan/main.tex` §8.
+3. ~~**Relationship to existing `kb-checker` quarantine flow.** Whether hardware fencing sits strictly below the existing `systemctl` → `SIGKILL` → `iptables` chain (per the tentative table in §8), can be triggered independently of it, or the 5-stage hierarchy in §8 should replace that framing entirely.~~ **Resolved: OAN is strictly Stage 5 of 5, below `kb-checker`'s existing software chain, never in parallel with it.** Stage 1 (JIT signature audit/BPF map self-heal) → Stage 2 (`systemctl stop` → `SIGKILL`) → Stage 3 (CPM containment policy actions) → Stage 4 (`iptables` network drop) → Stage 5 (OAN relay cutoff, requires OAN). A healthy host never reaches Stage 5 — the four software stages above it are expected to resolve the overwhelming majority of real incidents on their own. Confirms §8's tentative table as the actual design, not just a first guess.
+4. ~~**TPM integration point.** Whether sealing happens against OAN's own SBC/STM32 state, against `kb-checker`'s state on the host, against `kb-core`'s eBPF bytecode signatures it already audits, or some combination.~~ **Resolved: two separate TPMs, two separate jobs, neither substitutable for the other.** OAN's own TPM (§4.4) is unchanged from this doc's original framing — it seals OAN's own SBC/STM32 integrity state and verifies what `kb-checker` reports against sealed reference measurements. A second, independent trust anchor is the *host's own* TPM 2.0 (discrete or firmware — Intel PTT/AMD fTPM, already present on essentially any real deployment target, zero new hardware): `kb-checker`'s own OOB signing key lives there instead of in process RAM, with its usage sealed to the host's own measured-boot chain (`TPM2_PolicyPCR` against PCRs extended by firmware → bootloader → kernel/initrd → IMA's runtime module-load measurements) — a rootkit loading a new kernel module invalidates that seal permanently, until reboot. The split is load-bearing, not a style choice: a TPM can only make a hardware-backed statement about the machine it is physically part of, so OAN's own TPM structurally cannot attest to the host's measured-boot chain from across the OOB link. Full mechanism, attacker-cost analysis, honestly-scoped residual gaps (memory-corruption-only exploits that never load a module, physical TPM bus sniffing, `kexec`/`/dev/mem` as bypasses of the measured-boot assumption unless signature-gated), and a runnable `tpm2-tools` demo walkthrough: [`oan-rootkit-resistance.md`](oan-rootkit-resistance.md) and `latex/oan/main.tex` §21.
+
+### Still open
 
 1. **Repository placement and exact naming.** §1.4 decided OAN is a standalone subsystem, not a `kb-checker` extension, but the working name `kb-hw/` is a placeholder — needs an actual decision (`kb-hw/`, `kb-oan/`, other) and, once created, an entry in the repository layout table in [`CLAUDE.md`](../../CLAUDE.md) and its own `README.md` following the pattern of the other five subsystems.
-2. **Failure semantics.** What OAN does if the link itself drops (fail-open vs. fail-closed on the relay) needs an explicit decision, mirroring CPM's "fail closed toward protection" principle (§2.2 of `CPM.md`).
-3. **Relationship to existing `kb-checker` quarantine flow.** Whether hardware fencing sits strictly below the existing `systemctl` → `SIGKILL` → `iptables` chain (per the tentative table in §8), can be triggered independently of it, or the 5-stage hierarchy in §8 should replace that framing entirely.
-4. **TPM integration point.** Whether sealing happens against OAN's own SBC/STM32 state, against `kb-checker`'s state on the host, against `kb-core`'s eBPF bytecode signatures it already audits (see `kb-checker/src/integrity/`), or some combination.
 5. **Wire/protocol over the out-of-band link.** What the SBC and `kb-checker` actually exchange (attestation format, heartbeat cadence, fencing trigger conditions). No contract exists yet; do not assume one.
 6. **Internal SBC↔STM32↔ESP32 protocol.** New in v0.2 — how the three onboard processors talk to each other (bus choice, message format, and critically, how the SBC's attestation verdict reaches the STM32 in a way the STM32 can trust without itself re-implementing crypto verification).
 7. **Cluster protocol (§9).** Design direction now written up in [`oan-fms.md`](oan-fms.md) (Fabric Management Service), but entirely undesigned at the protocol/schema level and flagged as future work, not prototype scope — see that doc's own Open Questions.
 8. **Research contribution claims (§13).** Need a literature comparison (HSM/BMC-based watchdogs, academic OOB attestation work) before being asserted as novel in any paper draft.
 9. **Model B's isolated-Ethernet BOM is approximate, not itemized.** §9.2/§9.3 cost Model B's per-host link using the same $32–$47 line items as Model A's serial cable (STM32 + relay + link hardware + wiring), but the transport was revised to a dedicated isolated-Ethernet dongle/NIC per host plus a shared 5–8 port unmanaged switch per chassis — neither the per-host dongle nor the shared switch has its own priced BOM line yet. Likely similar order of magnitude (a small Ethernet module is roughly serial-cable cost; a small unmanaged switch is ~$15–$25 one-time per chassis) but not confirmed.
 10. **§9.2's 5-host cap and isolated-Ethernet transport are decided as design principles, not as a built/tested reference design.** Neither Model A nor Model B has been chosen as *the* prototype target — §10's BOM stays Model A only because that's what the single-host bench prototype needs; a Model B chassis (with its custom breakout PCB/enclosure, once beyond loose dev boards) is unbuilt and unbudgeted beyond the approximate figures in §9.3.
+11. **PCR-sealing's own wire-level details (new, from item 4's resolution).** Which PCR banks the host-side seal binds to, the TPM2 policy-session mechanics (`tpm2-tools`/`tpm2-tss`, `TPM2_StartAuthSession` + `TPM2_PolicyPCR`), and where the re-sealing process lives operationally (every legitimate kernel update or intentionally-added module needs the key re-sealed against a new expected PCR digest, or it locks itself out for no security reason) — flagged in `oan-rootkit-resistance.md`, not yet a protocol spec.
 
 ---
 
 # 15. Relationship to Existing Documentation
 
-This proposal does not modify or conflict with any existing spec. It continues the "external, structurally-independent watchdog" principle `kb-checker` already embodies ([`kb-checker/README.md`](../../kb-checker/README.md)) and that CPM applies at the authorization layer ([`CPM.md`](CPM.md)), but — as of v0.2 — as its own future subsystem rather than a `kb-checker` extension (§1.4). No changes to wire contracts ([`docs/architecture/kbd-contracts.md`](../architecture/kbd-contracts.md)), socket topology ([`docs/architecture/boot_sequence_spec.md`](../architecture/boot_sequence_spec.md)), or `kb-checker`'s KISS constraints are proposed here — those constraints should carry over to `kb-checker`'s side of the OAN link (attestation reporting) even though OAN itself, as a separate subsystem, is not bound by them.
+This proposal does not modify or conflict with any existing spec. It continues the "external, structurally-independent watchdog" principle `kb-checker` already embodies ([`kb-checker/README.md`](../../kb-checker/README.md)) and that CPM applies at the authorization layer ([`CPM.md`](../CPM.md)), but — as of v0.2 — as its own future subsystem rather than a `kb-checker` extension (§1.4). No changes to wire contracts ([`docs/architecture/kbd-contracts.md`](../architecture/kbd-contracts.md)), socket topology ([`docs/architecture/boot_sequence_spec.md`](../architecture/boot_sequence_spec.md)), or `kb-checker`'s KISS constraints are proposed here — those constraints should carry over to `kb-checker`'s side of the OAN link (attestation reporting) even though OAN itself, as a separate subsystem, is not bound by them.
