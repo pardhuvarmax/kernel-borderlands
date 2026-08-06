@@ -22,7 +22,18 @@ INCLUDES := \
     -Iinclude \
     -I$(BRIDGE) \
     -I../libbpf/include/uapi
-CFLAGS     := -g -Wall $(INCLUDES)
+# Userspace binary hardening (BPF_CFLAGS below is a separate flag set —
+# these are userspace-only mitigations; most are meaningless/rejected by
+# `clang -target bpf`). _FORTIFY_SOURCE requires -O1+ to take effect.
+HARDEN_CFLAGS := -O2 \
+                  -D_FORTIFY_SOURCE=3 \
+                  -fstack-protector-strong \
+                  -fstack-clash-protection \
+                  -fPIE
+HARDEN_LDFLAGS := -pie -Wl,-z,relro,-z,now
+
+CFLAGS     := -g -Wall $(INCLUDES) $(HARDEN_CFLAGS)
+LDFLAGS    := $(HARDEN_LDFLAGS)
 BPF_CFLAGS := -g -O2 -target bpf \
               -D__TARGET_ARCH_$(ARCH) $(INCLUDES)
 
@@ -63,22 +74,22 @@ $(BUILD):
 # ────────────────────────────────────────────────────────────
 
 $(BUILD)/kb_process: $(COLLECTORS)/kb_process.c $(OUTPUT)/kb_process.skel.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
+	$(CLANG) $(CFLAGS) $(LDFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
 $(BUILD)/kb_syscall: $(COLLECTORS)/kb_syscall.c $(OUTPUT)/kb_syscall.skel.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -lm -o $@
+	$(CLANG) $(CFLAGS) $(LDFLAGS) $< $(LIBBPF) -lelf -lz -lm -o $@
 
 $(BUILD)/kb_privilege: $(COLLECTORS)/kb_privilege.c $(OUTPUT)/kb_privilege.skel.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
+	$(CLANG) $(CFLAGS) $(LDFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
 $(BUILD)/kb_file: $(COLLECTORS)/kb_file.c $(OUTPUT)/kb_file.skel.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
+	$(CLANG) $(CFLAGS) $(LDFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
 $(BUILD)/kb_network: $(COLLECTORS)/kb_network.c $(OUTPUT)/kb_network.skel.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
+	$(CLANG) $(CFLAGS) $(LDFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
 $(BUILD)/kb_memory: $(COLLECTORS)/kb_memory.c $(OUTPUT)/kb_memory.skel.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $< $(LIBBPF) -lelf -lz -o $@
+	$(CLANG) $(CFLAGS) $(LDFLAGS) $< $(LIBBPF) -lelf -lz -o $@
 
 # ────────────────────────────────────────────────────────────
 # Unified Sensor
@@ -94,7 +105,7 @@ SENSOR_SRCS := \
     $(BRIDGE)/kb_bridge.c
 
 $(BUILD)/kbd_sensor: $(SENSOR_SRCS) $(OUTPUT)/kbd_sensor.skel.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $(SENSOR_SRCS) \
+	$(CLANG) $(CFLAGS) $(LDFLAGS) $(SENSOR_SRCS) \
 	    $(LIBBPF) -lelf -lz -lm -o $@
 
 # ────────────────────────────────────────────────────────────

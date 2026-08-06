@@ -121,11 +121,17 @@ struct {
     __type(value, __u32);
 } kb_sensitive_paths SEC(".maps");
 
+// BPF_F_RDONLY_PROG: no in-kernel BPF program ever writes this map — only
+// handle_incoming_containment_cmd() (userspace, over the syscall boundary)
+// does, continuously, per containment verdicts pushed from kb-control-plane.
+// The flag restricts write access to userspace/syscalls only; it has no
+// effect on that existing write path.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
     __type(key,   __u32);   // PID
     __type(value, __u32);   // Containment Level
+    __uint(map_flags, BPF_F_RDONLY_PROG);
 } contained_pids_map SEC(".maps");
 
 // ── CPM (Critical Process Module) — see docs/features/CPM.md ──
@@ -148,11 +154,17 @@ struct {
 // with room for an operator-pushed overlay via
 // KB_WIRE_MSG_CPM_PROTECTED_EXEC (not yet sent by kb-control-plane; see
 // kb-core/README follow-up note).
+// BPF_F_RDONLY_PROG: kb_handle_exec only ever bpf_map_lookup_elem()s this
+// map — it's written by userspace only, both at startup
+// (populate_protected_exec_paths()) and at runtime
+// (read_cpm_protected_exec_from_bridge(), per operator-pushed overlay
+// pushes). Same rationale as contained_pids_map above.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 64);
     __type(key, char[64]);
     __type(value, __u8);
+    __uint(map_flags, BPF_F_RDONLY_PROG);
 } protected_exec_paths_map SEC(".maps");
 
 // ── CWP (Critical Workload Protection) — see docs/features/CWP.md ──

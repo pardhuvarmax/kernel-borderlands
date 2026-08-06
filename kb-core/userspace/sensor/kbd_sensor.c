@@ -1941,6 +1941,19 @@ int main(void)
         make_fd_nonblocking(bridge_fd);
     }
 
+    // Freeze kb_sensitive_paths against further *writes* now that both the
+    // compiled-in floor (populate_sensitive_paths, above) and the one-shot
+    // startup merge from kbd (read_sensitive_paths_from_bridge, just above)
+    // are done — nothing else in this codebase ever writes it again (it is
+    // NOT touched in the poll loop, unlike protected_exec_paths_map/
+    // protected_workload_paths_map, which stay writable for live operator
+    // pushes and are deliberately NOT frozen here). Freezing early would
+    // have rejected the read_sensitive_paths_from_bridge() write above;
+    // this is a best-effort hardening step, not fatal if it fails.
+    if (bpf_map_freeze(bpf_map__fd(skel->maps.kb_sensitive_paths)) != 0) {
+        fprintf(stderr, "kbd_sensor: warning: failed to freeze kb_sensitive_paths (continuing unfrozen)\n");
+    }
+
     err = kbd_sensor_bpf__attach(skel);
     if (err) {
         fprintf(stderr, "Failed to attach BPF programs: %d\n", err);

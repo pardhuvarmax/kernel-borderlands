@@ -141,6 +141,15 @@ RestartSec=3
 RuntimeDirectory=kb
 RuntimeDirectoryMode=0775
 
+# Conservative hardening only (no CapabilityBoundingSet=/ProtectSystem=strict
+# — see kb-checker.service below for why): kbd is the Go control plane, no
+# BPF/LSM loading, no capability-dropping code exists in it today, so this
+# stays limited to directives that are universally safe regardless.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+MemoryDenyWriteExecute=true
+
 [Install]
 WantedBy=multi-user.target
 ```
@@ -159,6 +168,22 @@ ExecStart=/usr/local/bin/kb-checker monitor --all --grpc-socket /run/kb/kbc.sock
 Restart=always
 RestartSec=5
 PIDFile=/run/kb/kb-checker.pid
+
+# Conservative hardening only — deliberately NO CapabilityBoundingSet= and
+# NO ProtectSystem=strict here. kb-checker's Tampering Containment Protocol
+# (Scenario A, §4) shells out to `pkill -9`, `rm -rf /sys/fs/bpf/*`, and
+# `iptables -P ... DROP` as a last-resort lockdown when tampering is
+# actually detected — that needs root/CAP_KILL/CAP_NET_ADMIN/bpffs-delete
+# rights, none of which are dropped anywhere in kb-checker's own code today.
+# That path is only ever exercised during a real attack, not by routine
+# tests, so getting a capability enumeration wrong here would fail exactly
+# when it matters most and go unnoticed until then. Revisit only alongside
+# actual privilege-dropping code changes in kb-checker itself, not as a
+# systemd-only change.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+MemoryDenyWriteExecute=true
 
 [Install]
 WantedBy=multi-user.target
@@ -188,6 +213,20 @@ ExecStart=/usr/local/bin/kbagents --config /etc/kb/config.yaml --grpc-socket /ru
 Restart=always
 RestartSec=5
 
+# Full hardening — safe here (unlike kbd/kb-checker above) since this unit
+# isn't deployed anywhere yet and its actual runtime need is a UDS client
+# connection to kba.sock, nothing privileged. CapabilityBoundingSet= empty
+# drops every capability; adjust only if the real kbagents build (once it
+# exists — see note above) turns out to need something specific (e.g. a
+# Ray-internal requirement not visible from this repo's Python source).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+MemoryDenyWriteExecute=true
+ProtectSystem=strict
+ReadWritePaths=/run/kb
+CapabilityBoundingSet=
+
 [Install]
 WantedBy=multi-user.target
 ```
@@ -214,6 +253,17 @@ ExecStart=/usr/local/bin/kbopd --config /etc/kb/config.yaml
 Restart=always
 RestartSec=5
 
+# Full hardening — safe here, same reasoning as kbagents above: not deployed
+# yet, and a web dashboard's actual runtime need is a network listener plus
+# a UDS/gRPC client connection to kbd, nothing privileged.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+MemoryDenyWriteExecute=true
+ProtectSystem=strict
+ReadWritePaths=/run/kb
+CapabilityBoundingSet=
+
 [Install]
 WantedBy=multi-user.target
 ```
@@ -239,6 +289,18 @@ Type=simple
 ExecStart=/usr/local/bin/kbopt --config /etc/kb/config.yaml
 Restart=always
 RestartSec=5
+
+# Full hardening — safe here for the same reason as kbagents/kbopd: not
+# deployed yet, and port 2222 is unprivileged (>1024), so kbopt's own SSH
+# server doesn't need CAP_NET_BIND_SERVICE or anything else special beyond
+# a UDS/gRPC client connection to kbd.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+MemoryDenyWriteExecute=true
+ProtectSystem=strict
+ReadWritePaths=/run/kb
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target
