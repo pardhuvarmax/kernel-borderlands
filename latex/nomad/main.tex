@@ -2406,6 +2406,229 @@ the re-sealing process lives operationally.
 \end{notebox}
 
 % =====================================================================
+\section{Reprogramming Resistance: Protecting NOMAD's Own Hardware}
+\label{sec:reprogram}
+
+\S\ref{sec:properties} already states one of NOMAD's honest limits
+plainly: it does not protect against physical access to itself. That
+line has stood as a scope boundary, not a design. This section narrows
+it as far as it currently goes: if an attacker can reach NOMAD's own
+SBC, STM32, or ESP32 directly, what -- if anything -- stops them from
+simply reprogramming it?
+
+\begin{notebox}[Status]
+Nothing in this section is built or decided. It is a design direction,
+offered at the same level of maturity as \S\ref{sec:whatif}'s own open
+items, and it deliberately does not resolve NOMAD's own internal
+SBC$\leftrightarrow$STM32$\leftrightarrow$ESP32 protocol, which remains
+its own separate, undesigned question.
+\end{notebox}
+
+\subsection{The Question, Stated Precisely}
+
+Everything in \S\ref{sec:three-chips}--\S\ref{sec:tpm-relay} assumes
+each chip is running the firmware it was built with. Nothing described
+so far actually enforces that assumption against an attacker who can
+reach the hardware directly -- pull the SBC's storage, attach a
+debugger to the STM32's SWD pins, or push new firmware onto the ESP32.
+None of that requires defeating NOMAD's attestation logic at all; it
+just replaces the logic.
+
+\begin{plainbox}
+A locked door is only as good as the frame it's mounted in. Everything
+this document has described so far assumes NOMAD's own three chips are
+running the firmware they were built with. This section is about the
+frame: what stops someone from simply replacing that firmware if they
+can get their hands on the board.
+\end{plainbox}
+
+\subsection{A Lockdown Mechanism for Each Chip}
+\label{sec:reprogram-mechanisms}
+
+Each of NOMAD's three processors (\S\ref{sec:three-chips}) already has
+a standard, vendor-supported way to close this, at zero new hardware
+cost -- the same ``already-shipping, zero-new-hardware'' property every
+mitigation in \S\ref{sec:whatif} insists on.
+
+\subsubsection{STM32 --- Readout Protection Level 2}
+
+STM32 parts expose Readout Protection (RDP) as a hardware option
+byte~\cite{stm32rdp}. RDP Level 1 blocks debug read access to flash but
+still permits a mass-erase-and-reflash; RDP Level 2 permanently and
+irreversibly disables the SWD/JTAG debug interface -- no external
+access to the chip at all, ever again. Lines with TrustZone-M
+(STM32L5/U5/H5) ship a reference Secure Boot/Secure Firmware Update
+stack: with RDP2 set, the only way to load new firmware afterward is
+through a bootloader that checks a signature against a key burned in
+at provisioning time.
+
+\begin{notebox}[One-Way Door]
+RDP Level 2 is irreversible by design. The signed-update bootloader
+path has to be built and tested \emph{before} RDP2 is set on a
+production unit, or a bricked STM32 is unrecoverable -- which is also,
+from a security standpoint, the entire point.
+\end{notebox}
+
+\subsubsection{ESP32 --- Secure Boot and Flash Encryption}
+
+The ESP32 (\S\ref{sec:three-chips}) supports Secure Boot V2 and Flash
+Encryption~\cite{esp32secboot}, both gated by one-time-programmable
+eFuses: only firmware signed against a key digest burned into those
+eFuses will boot, and the same eFuses can permanently disable the
+chip's JTAG interface. Because the ESP32 already carries the Fabric
+Management Plane (\S\ref{sec:planes}) -- ordinary Ethernet, the one
+channel with any real network exposure -- this is the chip where
+reprogramming lockdown matters most against a \emph{remote} attacker,
+not only a physical one.
+
+\subsubsection{SBC --- Signed Boot and a Read-Only Root Filesystem}
+
+Both of \S\ref{sec:sbc}'s named SBC candidates support this. A
+Raspberry Pi 4/5 can burn a public-key hash into its SoC's
+one-time-programmable region~\cite{rpisecboot}, after which only a
+correspondingly-signed bootloader/OS image boots at all. An Intel N100
+already ships UEFI Secure Boot and Intel Boot Guard~\cite{intelbootguard}
+as standard platform features -- no fuse-burning step required. Either
+can be paired with a read-only root filesystem (\texttt{dm-verity}) for
+the running OS, so even a live compromise cannot persist a
+modification to disk.
+
+\subsubsection{Tying It to NOMAD's Own TPM}
+
+\S\ref{sec:tpm-relay} already establishes that NOMAD's own TPM seals
+measured boot on the SBC and STM32. The natural extension is to make
+that seal do real work here: gate a firmware-\emph{update}
+authorization key behind the same \texttt{TPM2\_PolicyPCR} mechanism
+\S\ref{sec:pcr-seal} already uses for the host's key, so an update can
+only proceed while NOMAD's own measured state matches its
+last-known-good value -- not just ``is this image correctly signed,''
+but ``is this device currently in the state it should be in before I
+let it change.'' That is a stronger, self-terminating property than a
+plain signed-bootloader check on its own, using a chip already in the
+design.
+
+\subsection{How Much of the Reprogramming Threat This Actually Closes}
+\label{sec:reprogram-analysis}
+
+\begin{center}
+\renewcommand{\arraystretch}{1.5}
+\small
+\begin{tabular}{@{}p{2.6cm}p{6.7cm}p{4.3cm}@{}}
+\toprule
+\textbf{Chip} & \textbf{Physical reprogramming (open the case)} & \textbf{Remote reprogramming} \\
+\midrule
+STM32 & Closed by RDP2 -- no debug access, no path without the signing
+key. & Already near-zero: the STM32 has no network stack of its own
+(\S\ref{sec:stm32}). \\
+ESP32 & Closed by eFuse-locked JTAG + Secure Boot. & Narrowed, not
+closed: a live RCE against its Ethernet/FMS stack (\S\ref{sec:planes})
+cannot \emph{persist} past a reboot, but is not prevented while power
+stays on. \\
+SBC & Closed by OTP-signed boot (Pi) or UEFI Secure Boot + Boot Guard
+(N100) -- a stock SD-card swap no longer works. & Narrowed: the SBC's
+only external link is the point-to-point OOB Trust Plane
+(\S\ref{sec:planes}), already a small surface; signed boot mainly
+denies persistence to whatever does get through it. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{notebox}[What This Does Not Close]
+\begin{itemize}
+  \item \textbf{Live, non-persistent compromise.} None of the three
+    mechanisms above stop an exploit that never tries to write new,
+    unsigned code to persistent storage -- the same class of gap
+    \S\ref{sec:memcorr-narrowing} already names for the host, present
+    here too. \S\ref{sec:reprogram-memcorr} below narrows it, using the
+    same playbook, but does not close it.
+  \item \textbf{The still-open inter-chip trust question.} Proving the
+    SBC's \emph{own} firmware is unmodified says nothing about whether
+    the verdict it hands the STM32 is being interpreted correctly. That
+    is a distinct, still-undesigned protocol question -- reprogramming
+    lockdown and inter-chip trust are two separate problems, and
+    closing the first does not get the second for free.
+  \item \textbf{Fault-injection-class physical attacks.} RDP-style
+    protections are not absolute -- published research has defeated
+    microcontroller readout protection, including STM32 parts, via
+    voltage/clock glitching during the check itself~\cite{obermaier2021}.
+    This raises the bar from a low-cost debugger to dedicated
+    fault-injection equipment; it does not raise it to zero.
+  \item \textbf{Supply-chain integrity.} If a signing key is
+    compromised, or a malicious image is signed before a unit ever
+    ships, every mechanism above enforces exactly the wrong thing -- it
+    protects the backdoor as if it were legitimate. A genuinely
+    separate concern from the reprogramming threat this section
+    addresses, and not covered here.
+\end{itemize}
+\end{notebox}
+
+\subsection{Narrowing the Same Gap on NOMAD's Own Chips}
+\label{sec:reprogram-memcorr}
+
+\S\ref{sec:memcorr-narrowing} lays out a full narrowing playbook for
+memory-corruption exploitation on the \emph{host}. The same gap exists
+on NOMAD's own three processors, and the same principle applies --
+though not always the same mechanism, since an SBC running Linux and a
+bare-metal STM32 firmware image are not the same kind of system.
+
+\begin{center}
+\renewcommand{\arraystretch}{1.5}
+\small
+\begin{tabular}{@{}p{2.6cm}p{11.0cm}@{}}
+\toprule
+\textbf{Chip} & \textbf{What applies, and why} \\
+\midrule
+SBC & Direct reuse, no adaptation: it is a real Linux system, so
+\S\ref{sec:memcorr-narrowing}'s entire host playbook -- ASLR/KASLR +
+KPTI, \texttt{STRICT\_KERNEL\_RWX}, stack canaries,
+\texttt{kexec}/\texttt{devmem} lockdown, LKRG in report-only mode --
+applies to NOMAD's own SBC image exactly as written, with the same
+residual sliver: a ROP/JOP or data-only exploit against already-loaded
+code. \\
+STM32 & The principle transfers, the mechanism does not: there is no
+dynamic loader and no meaningful address space to randomize, so
+classic ASLR buys little. What does apply: stack canaries
+(\texttt{-fstack-protector}, standard on embedded GCC), and RAM marked
+execute-never in the Cortex-M's MPU -- the direct MCU analog of
+\texttt{STRICT\_KERNEL\_RWX}, forcing any successful corruption into
+ROP against a firmware image small enough that gadget availability is
+itself limited. \\
+ESP32 & A middle case: ESP-IDF ships stack-smashing and
+heap-corruption protection by default, and the RISC-V variants (S3/C3)
+have PMP (Physical Memory Protection) capable of the same
+execute-never trick STM32's MPU provides. This chip carries the most
+complex, most attackable stack of the three (Ethernet handling for the
+Fabric Management Plane), so it is also where this narrowing matters
+most. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{plainbox}
+Nothing here claims the memory-corruption gap is closed on any of
+NOMAD's own three chips -- it isn't, on any of them, for the same
+reason it isn't closed on the host. What changes is that it stops
+being a flat, unaddressed line item and becomes the same kind of
+narrowed, specific residual \S\ref{sec:memcorr-narrowing} already
+accepts for the host: a control-flow-hijack-only exploit against code
+that is already loaded, with no new code ever written to persistent
+storage.
+\end{plainbox}
+
+\subsection{Where This Leaves \S\ref{sec:properties}'s Stated Limit}
+
+\S\ref{sec:properties} states, plainly, that NOMAD does not protect
+against physical access to itself. This section does not overturn that
+-- physical access to an opened chassis, given enough specialized
+equipment, still is not fully ruled out by any mechanism above. What it
+does is turn a blanket limitation into a specific, per-chip one: a
+stock ST-Link and a screwdriver -- the realistic threat for most
+deployments -- no longer works against any of the three chips; a
+fault-injection lab might, against the STM32 specifically. That is a
+narrower, more honestly-scoped version of the same stated limit, not a
+claim that the limit has been removed.
+
+% =====================================================================
 \section{How NOMAD Compares to Existing Approaches}
 \label{sec:comparison}
 
@@ -3020,6 +3243,16 @@ Host 1--5 & The protected machines themselves, each wired to its own STM32 chann
 \bibitem{swtpm} Stefan Berger et al., \emph{swtpm --- TPM Emulator for QEMU/libvirt}. \url{https://github.com/stefanberger/swtpm}.
 
 \bibitem{tcgpcr} Trusted Computing Group, \emph{TCG PC Client Platform TPM Profile (PTP) Specification} --- PCR index assignment (including the reserved/resettable ``debug'' PCRs used in \S\ref{sec:demo-env}).
+
+\bibitem{stm32rdp} STMicroelectronics, \emph{STM32 Microcontroller Readout Protection (RDP) and Option Bytes}, reference manual documentation, used in \S\ref{sec:reprogram-mechanisms}.
+
+\bibitem{esp32secboot} Espressif Systems, \emph{Secure Boot V2 and Flash Encryption}, ESP-IDF Programming Guide. \url{https://docs.espressif.com}.
+
+\bibitem{rpisecboot} Raspberry Pi Trading Ltd., \emph{Bootloader Configuration --- Secure Boot}, Raspberry Pi Documentation. \url{https://www.raspberrypi.com/documentation/}.
+
+\bibitem{intelbootguard} Intel Corporation, \emph{Intel Trusted Execution Technology and Boot Guard}, platform security documentation.
+
+\bibitem{obermaier2021} J.~Obermaier, M.~Schink, and K.~Moczek, ``One Bit to Rule Them All: Bypassing Microcontroller Readout Protection through Fault Injection,'' in \emph{Proc.\ IEEE European Symposium on Security and Privacy Workshops (EuroS\&PW)}, 2021.
 
 \end{thebibliography}
 
