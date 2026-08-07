@@ -1,0 +1,101 @@
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage[strings]{underscore}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\usepackage{tikz}
+\usetikzlibrary{calc}
+\usepackage{eso-pic}
+
+\AddToShipoutPictureBG{%
+  \begin{tikzpicture}[remember picture,overlay]
+    \draw[line width=0.8pt]
+      ($(current page.north west)+(0.5in,-0.5in)$) rectangle
+      ($(current page.south east)+(-0.5in,0.5in)$);
+  \end{tikzpicture}%
+}
+
+\hypersetup{
+  pdftitle={NOMAD: Node Out-of-Band Module for Attestation \& Defense -- Abstract},
+  pdfauthor={Kernel Borderlands Team},
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue
+}
+
+\titleformat{\section}{\normalfont\bfseries}{\thesection}{0.5em}{}
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0pt}
+\renewcommand{\arraystretch}{1.05}
+
+\title{\textbf{NOMAD: A Node Out-of-Band Module for Attestation and Defense}}
+
+\author{Pardhu Sri Rushi Varma K \\ \small 2311CS040089}
+\date{}
+
+\begin{document}
+\pagestyle{empty}
+
+% \author is kept above for record-keeping but intentionally not rendered:
+% title is typeset manually so the author line never appears in the PDF.
+\makeatletter
+\begin{center}
+{\LARGE\bfseries \@title \par}
+\end{center}
+\makeatother
+\vspace{-1em}
+
+\begin{center}
+\small Department of Cybersecurity, ECE \& IoT, Malla Reddy University, Hyderabad
+\end{center}
+
+\vspace{0.5em}
+
+\section*{Abstract}
+
+Kernel-level runtime defenses face an inherent limit: any detector that runs
+as software on the host it protects can be blinded or disabled by an
+attacker who gains sufficient privilege on that same host. Once kernel
+telemetry, logging, and enforcement all depend on the honesty of the kernel
+being monitored, a full kernel compromise removes the very evidence needed
+to detect it. We present NOMAD (Node Out-of-Band Module for Attestation and
+Defense), a hardware-based attestation and containment module for the
+Kernel Borderlands runtime defense framework. It runs on a physically
+separate, minimal computing complex attached to the host, and communicates
+with the host's software-based watchdog over a dedicated out-of-band link
+rather than through the monitored operating system. It periodically attests
+to the host's integrity and, when attestation fails or a containment
+decision is issued, can act through a hardware relay capable of cutting the
+host's power independent of the host's own software state. This places the
+last line of defense outside the failure domain it is meant to defend,
+so that a full kernel compromise -- including rootkits with Ring-0
+privilege -- does not also compromise the ability to detect and contain it.
+We describe the design rationale, the threat model it addresses,
+the two isolated communication planes it exposes, and its current status
+as an architectural design within the broader Kernel Borderlands project.
+
+\vspace{0.7em}
+\noindent\textbf{Keywords:} kernel security, out-of-band attestation, root
+of trust, hardware watchdog, runtime defense, rootkit resistance
+
+\vspace{0.7em}
+\noindent\textbf{Team Members:}
+
+\small
+\begin{center}
+\begin{tabular}{@{}ll@{\hspace{2em}}ll@{}}
+Md Vaseem & 2311CS040004 & Tejaswini K & 2311CS040077 \\
+Harshitha B & 2311CS040022 & Vamshi K & 2311CS040078 \\
+Sai Raghava D & 2311CS040041 & Karthik K & 2311CS040080 \\
+Ashwin Kumar D & 2311CS040047 & Rupa Yeshvitha K & 2311CS040082 \\
+Madhumitha J & 2311CS040067 & Rajesh K & 2311CS040084 \\
+Jeshwanth K & 2311CS040072 & Pardhu Sri Rushi Varma K & 2311CS040089 \\
+Agasthya K & 2311CS040075 & & \\
+\end{tabular}
+\end{center}
+
+\end{document}
