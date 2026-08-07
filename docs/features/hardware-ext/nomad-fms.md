@@ -1,26 +1,26 @@
 # Fabric Management Service (FMS)
 
 **Version:** 0.1 (proposal)
-**Component:** Sub-service of the [Out-of-Band Attestation Node (OAN)](oan-hardware-appliance.md) — expands OAN §9 "Cluster Support"
-**Status:** Proposed — not implemented. No code, no wire protocol, no schema exists yet. This document exists so the fleet-management design survives between sessions/reviews, per the same handoff discipline as [`oan-hardware-appliance.md`](oan-hardware-appliance.md).
+**Component:** Sub-service of the [Node Out-of-Band Module for Attestation & Defense (NOMAD)](nomad-hardware-appliance.md) — expands NOMAD §9 "Cluster Support"
+**Status:** Proposed — not implemented. No code, no wire protocol, no schema exists yet. This document exists so the fleet-management design survives between sessions/reviews, per the same handoff discipline as [`nomad-hardware-appliance.md`](nomad-hardware-appliance.md).
 
-> **Fabric Management Service (FMS)** is the distributed orchestration and management subsystem of OAN. It transforms multiple independent Kernel Borderlands deployments into a single coordinated **Kernel Borderlands Fabric**, providing centralized discovery, organization, policy management, monitoring, and recovery while preserving each node's independent runtime protection.
+> **Fabric Management Service (FMS)** is the distributed orchestration and management subsystem of NOMAD. It transforms multiple independent Kernel Borderlands deployments into a single coordinated **Kernel Borderlands Fabric**, providing centralized discovery, organization, policy management, monitoring, and recovery while preserving each node's independent runtime protection.
 
-This document is **entirely design-direction, not a spec**. OAN's own hardware/single-host design ([`oan-hardware-appliance.md`](oan-hardware-appliance.md)) is itself unimplemented; FMS is the next layer up from that and should not be built before a single-OAN, single-host prototype exists and works (see Open Questions, §14).
+This document is **entirely design-direction, not a spec**. NOMAD's own hardware/single-host design ([`nomad-hardware-appliance.md`](nomad-hardware-appliance.md)) is itself unimplemented; FMS is the next layer up from that and should not be built before a single-NOMAD, single-host prototype exists and works (see Open Questions, §14).
 
 ---
 
 # 1. Purpose
 
-Kernel Borderlands can protect a single Linux machine, and OAN (as scoped in its own doc) can attest and fence a single host.
+Kernel Borderlands can protect a single Linux machine, and NOMAD (as scoped in its own doc) can attest and fence a single host.
 
-FMS extends this by letting one OAN supervise and coordinate an entire fleet of protected systems — instead of viewing every KB instance independently, FMS organizes them into a structured fabric that can be monitored and managed centrally.
+FMS extends this by letting one NOMAD supervise and coordinate an entire fleet of protected systems — instead of viewing every KB instance independently, FMS organizes them into a structured fabric that can be monitored and managed centrally.
 
 ---
 
-# 2. Position Inside OAN
+# 2. Position Inside NOMAD
 
-FMS is one of several services proposed to run on OAN's SBC (see [`oan-hardware-appliance.md`](oan-hardware-appliance.md) §4.1):
+FMS is one of several services proposed to run on NOMAD's SBC (see [`nomad-hardware-appliance.md`](nomad-hardware-appliance.md) §4.1):
 
 - Attestation Service
 - Integrity Service
@@ -30,9 +30,9 @@ FMS is one of several services proposed to run on OAN's SBC (see [`oan-hardware-
 - Dashboard API
 - Local Database
 
-None of these other services are designed yet either — OAN's doc describes the SBC's responsibilities at the same level of generality. FMS is called out separately here because fleet coordination is a large enough concern to need its own document, not because it's more settled than its siblings.
+None of these other services are designed yet either — NOMAD's doc describes the SBC's responsibilities at the same level of generality. FMS is called out separately here because fleet coordination is a large enough concern to need its own document, not because it's more settled than its siblings.
 
-OAN provides the trusted hardware platform. FMS provides the distributed management layer on top of it.
+NOMAD provides the trusted hardware platform. FMS provides the distributed management layer on top of it.
 
 ---
 
@@ -48,7 +48,7 @@ FMS is intended to provide:
 - Automated recovery orchestration
 - Cluster lifecycle management
 
-**without weakening the independent trust guarantees OAN provides per host.** Decided (§3.1): this holds by construction, not by discipline, because of the Local Autonomy Principle below — FMS is classified as operationally important but not security-critical, and sits entirely on a separate communication plane from attestation/recovery (§11).
+**without weakening the independent trust guarantees NOMAD provides per host.** Decided (§3.1): this holds by construction, not by discipline, because of the Local Autonomy Principle below — FMS is classified as operationally important but not security-critical, and sits entirely on a separate communication plane from attestation/recovery (§11).
 
 ## 3.1 Local Autonomy Principle
 
@@ -56,7 +56,7 @@ FMS is intended to provide:
 
 FMS is never part of the runtime security path.
 
-**Without FMS**, every node still has: `kb-core`, `kb-control-plane`, `kb-checker`, local OAN attestation, local recovery, local containment, local fencing. Nothing changes.
+**Without FMS**, every node still has: `kb-core`, `kb-control-plane`, `kb-checker`, local NOMAD attestation, local recovery, local containment, local fencing. Nothing changes.
 
 **With FMS**, the fleet additionally gets: fleet visibility, policy synchronization, fabric-wide recovery, cluster inventory, event aggregation.
 
@@ -73,21 +73,21 @@ Service classification:
 | `kb-core` | Yes |
 | `kb-control-plane` | Yes |
 | `kb-checker` | Yes |
-| OAN (attestation/recovery services) | Yes |
+| NOMAD (attestation/recovery services) | Yes |
 | **FMS** | **No** — operationally important, not security-critical |
 
-### Future: multi-OAN scale
+### Future: multi-NOMAD scale
 
-Each Colony (`oan-hardware-appliance.md` doesn't yet define multi-OAN behavior — this is direction, not a decision) keeps its own OAN and its own FMS instance:
+Each Colony (`nomad-hardware-appliance.md` doesn't yet define multi-NOMAD behavior — this is direction, not a decision) keeps its own NOMAD and its own FMS instance:
 
 ```mermaid
 graph TD
-    A["OAN A / FMS A — Colony A"]
-    B["OAN B / FMS B — Colony B"]
-    C["OAN C / FMS C — Colony C"]
+    A["NOMAD A / FMS A — Colony A"]
+    B["NOMAD B / FMS B — Colony B"]
+    C["NOMAD C / FMS C — Colony C"]
 ```
 
-No global master. Each Colony remains autonomous even if OANs are later given some way to synchronize with each other — see Open Question 5 (§14), still unresolved: this principle says *what* the relationship should look like (no single top-level authority), not the *protocol* for it.
+No global master. Each Colony remains autonomous even if NOMADs are later given some way to synchronize with each other — see Open Question 5 (§14), still unresolved: this principle says *what* the relationship should look like (no single top-level authority), not the *protocol* for it.
 
 ---
 
@@ -110,7 +110,7 @@ graph TD
 
 # 5. Fabric Colonies
 
-A **Fabric Colony** represents a deployment boundary managed by a single OAN.
+A **Fabric Colony** represents a deployment boundary managed by a single NOMAD.
 
 Examples: a computer science laboratory, an AI research cluster, a data center, a department's infrastructure, an enterprise office.
 
@@ -118,7 +118,7 @@ A colony groups multiple related Families under one operational environment. Res
 
 - Administrative boundary
 - Shared infrastructure
-- Shared OAN
+- Shared NOMAD
 - Recovery coordination
 - Resource inventory
 
@@ -160,7 +160,7 @@ Maintains the inventory: node ID, hostname, platform, kernel version, KB version
 Handles: join Fabric, leave Fabric, node removal, family migration, colony reassignment.
 
 ## 8.4 Health Monitoring
-Continuously monitors: host availability, CPU, memory, storage, network, `kb-core`, `kb-checker`, OAN connectivity, heartbeat.
+Continuously monitors: host availability, CPU, memory, storage, network, `kb-core`, `kb-checker`, NOMAD connectivity, heartbeat.
 
 ## 8.5 Policy Management
 Lets administrators define security policy once and deploy it to the entire Fabric, a Colony, a Family, or an individual Node. Policies include detection rules, runtime restrictions, response thresholds, integrity settings.
@@ -218,12 +218,12 @@ graph TD
 
 # 11. Communication
 
-**Illustrative only** — no wire protocol exists yet (§14 Open Question 3), but the transport *principle* is decided (§3.1 of `oan-hardware-appliance.md`): FMS runs entirely on OAN's **Fabric Management Plane**, never the **Out-of-Band Trust Plane**. These are two different channels that never share transport, by design — not two names for the same link.
+**Illustrative only** — no wire protocol exists yet (§14 Open Question 3), but the transport *principle* is decided (§3.1 of `nomad-hardware-appliance.md`): FMS runs entirely on NOMAD's **Fabric Management Plane**, never the **Out-of-Band Trust Plane**. These are two different channels that never share transport, by design — not two names for the same link.
 
 ```mermaid
 graph TD
     subgraph TRUST["OOB Trust Plane — unchanged, per-host, never shared"]
-        HOST1KBC["Host's kb-checker"] -->|"serial/dedicated Ethernet"| SBC1["OAN SBC — attestation"]
+        HOST1KBC["Host's kb-checker"] -->|"serial/dedicated Ethernet"| SBC1["NOMAD SBC — attestation"]
     end
     subgraph FABRIC["Fabric Management Plane — dedicated VLAN/NIC, via ESP32"]
         FMS["FMS"] --> NODE1["Node 1"]
@@ -252,11 +252,11 @@ FMS does **not** receive: raw BPF maps, raw telemetry, privileged runtime state.
 
 The Fabric Management Plane should run on a dedicated VLAN, a dedicated management NIC, or a physically isolated switch — exactly the enterprise management-network pattern, not best-effort segmentation on the same network as production traffic.
 
-This resolves what was previously an open conflict with `oan-hardware-appliance.md` §3's "never the host's primary network" principle: that principle constrains the **OOB Trust Plane** only. The Fabric Management Plane was always going to need ordinary networking to reach multiple hosts — the fix isn't to avoid networking, it's to make sure that network can never reach the trust plane, and to minimize what crosses it (§11.1) even if it's compromised.
+This resolves what was previously an open conflict with `nomad-hardware-appliance.md` §3's "never the host's primary network" principle: that principle constrains the **OOB Trust Plane** only. The Fabric Management Plane was always going to need ordinary networking to reach multiple hosts — the fix isn't to avoid networking, it's to make sure that network can never reach the trust plane, and to minimize what crosses it (§11.1) even if it's compromised.
 
 ---
 
-# 12. Relationship with Other OAN Services
+# 12. Relationship with Other NOMAD Services
 
 | Service | Responsibility |
 |---|---|
@@ -287,7 +287,7 @@ graph TD
     COLC --> TEST["Testing"]
 ```
 
-The intent is for a single OAN to manage a small lab, while larger environments deploy multiple OANs, each supervising its own colony or set of colonies — keeping policy management, monitoring, recovery, and orchestration scalable without changing the underlying trust model OAN establishes. Whether the trust model actually holds unchanged at multi-OAN scale is unverified (§14).
+The intent is for a single NOMAD to manage a small lab, while larger environments deploy multiple NOMADs, each supervising its own colony or set of colonies — keeping policy management, monitoring, recovery, and orchestration scalable without changing the underlying trust model NOMAD establishes. Whether the trust model actually holds unchanged at multi-NOMAD scale is unverified (§14).
 
 ---
 
@@ -295,19 +295,19 @@ The intent is for a single OAN to manage a small lab, while larger environments 
 
 ### Resolved
 
-1. ~~Does centralizing fleet management reintroduce the single-point-of-failure problem OAN exists to avoid per-host?~~ **Resolved by the Local Autonomy Principle (§3.1)**: FMS is classified non-security-critical and never sits in the runtime security path — an FMS outage or compromise costs fleet visibility/coordination, not per-host protection, by construction (every node keeps full local `kb-core`/`kb-control-plane`/`kb-checker`/OAN protection independent of FMS).
-2. ~~Network exposure of the fleet-reporting channel conflicts with OAN's "never the host's primary network" principle.~~ **Resolved by the Two Communication Planes principle (§3.1 of `oan-hardware-appliance.md`, §11 here)**: that principle constrains only the OOB Trust Plane. FMS runs on a separate Fabric Management Plane (dedicated VLAN/NIC/isolated switch, carried on the ESP32), which structurally cannot reach the trust plane, and which only ever carries signed summaries, not raw telemetry (§11.1).
+1. ~~Does centralizing fleet management reintroduce the single-point-of-failure problem NOMAD exists to avoid per-host?~~ **Resolved by the Local Autonomy Principle (§3.1)**: FMS is classified non-security-critical and never sits in the runtime security path — an FMS outage or compromise costs fleet visibility/coordination, not per-host protection, by construction (every node keeps full local `kb-core`/`kb-control-plane`/`kb-checker`/NOMAD protection independent of FMS).
+2. ~~Network exposure of the fleet-reporting channel conflicts with NOMAD's "never the host's primary network" principle.~~ **Resolved by the Two Communication Planes principle (§3.1 of `nomad-hardware-appliance.md`, §11 here)**: that principle constrains only the OOB Trust Plane. FMS runs on a separate Fabric Management Plane (dedicated VLAN/NIC/isolated switch, carried on the ESP32), which structurally cannot reach the trust plane, and which only ever carries signed summaries, not raw telemetry (§11.1).
 
 ### Still open
 
 3. **Cross-Host Correlation (§8.8) is undesigned and may not belong in FMS at all.** Lateral-movement/coordinated-attack detection is a detection-engineering problem, not a fleet-management one — needs a decision on whether this is FMS's job, a `kb-aads`-adjacent job, or out of scope entirely.
-4. **Wire protocol for OAN↔FMS↔Node communication** (§11) — format, transport, auth, cadence: none defined. The plane is decided; the protocol on it is not.
-5. **Multi-OAN trust model at scale** (§3.1) — "no global master, each Colony autonomous" is now a stated principle, but the actual protocol/trust relationship for OANs that later synchronize with each other is undefined.
-6. **Prerequisite ordering** — this entire document assumes OAN's single-host hardware design is built and working first. No FMS work should start before that (status line at top).
-7. **Signed-summary format and signing key provenance** (§11.1) — new from this pass: what "signed" means concretely (whose key, sealed via which TPM operation, verified by FMS how) is unspecified — likely ties into `oan-hardware-appliance.md`'s own unresolved TPM integration point (its §14 Open Question 4).
+4. **Wire protocol for NOMAD↔FMS↔Node communication** (§11) — format, transport, auth, cadence: none defined. The plane is decided; the protocol on it is not.
+5. **Multi-NOMAD trust model at scale** (§3.1) — "no global master, each Colony autonomous" is now a stated principle, but the actual protocol/trust relationship for NOMADs that later synchronize with each other is undefined.
+6. **Prerequisite ordering** — this entire document assumes NOMAD's single-host hardware design is built and working first. No FMS work should start before that (status line at top).
+7. **Signed-summary format and signing key provenance** (§11.1) — new from this pass: what "signed" means concretely (whose key, sealed via which TPM operation, verified by FMS how) is unspecified — likely ties into `nomad-hardware-appliance.md`'s own unresolved TPM integration point (its §14 Open Question 4).
 
 ---
 
 # 15. Relationship to Existing Documentation
 
-This document expands `oan-hardware-appliance.md` §9 ("Cluster Support — Future Work"), which it should be read as detailing, not superseding — the parent doc's framing of cluster support as **explicitly out of prototype scope** still applies here in full. It does not modify any implemented KB behavior, wire contract, or socket topology. The Two Communication Planes principle (`oan-hardware-appliance.md` §3.1) is the load-bearing resolution this document builds on: FMS's entire communication design (§11) depends on staying on the Fabric Management Plane and never touching the OOB Trust Plane.
+This document expands `nomad-hardware-appliance.md` §9 ("Cluster Support — Future Work"), which it should be read as detailing, not superseding — the parent doc's framing of cluster support as **explicitly out of prototype scope** still applies here in full. It does not modify any implemented KB behavior, wire contract, or socket topology. The Two Communication Planes principle (`nomad-hardware-appliance.md` §3.1) is the load-bearing resolution this document builds on: FMS's entire communication design (§11) depends on staying on the Fabric Management Plane and never touching the OOB Trust Plane.

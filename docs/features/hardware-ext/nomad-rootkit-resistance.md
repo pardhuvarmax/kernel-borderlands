@@ -1,10 +1,10 @@
-# OAN — Rootkit & Boot-Time Compromise Resistance (`oan-rootkit-resistance.md`)
+# NOMAD — Rootkit & Boot-Time Compromise Resistance (`nomad-rootkit-resistance.md`)
 
 **Version:** 0.1 (proposal)
-**Component:** Addendum to the [Out-of-Band Attestation Node](oan-hardware-appliance.md) — expands and resolves its §14 Open Question 4 ("TPM integration point")
-**Status:** Proposed — not implemented. Design direction only: no wire protocol, no TPM policy-session code, nothing built. Exists so this design survives between sessions, per the same handoff discipline as `oan-hardware-appliance.md`. A worked-through, runnable demo of the core mechanism (§10) exists and has been exercised on real hardware, but that is a standalone proof-of-concept of the TPM mechanics, not an implementation of OAN itself.
+**Component:** Addendum to the [Node Out-of-Band Module for Attestation & Defense](nomad-hardware-appliance.md) — expands and resolves its §14 Open Question 4 ("TPM integration point")
+**Status:** Proposed — not implemented. Design direction only: no wire protocol, no TPM policy-session code, nothing built. Exists so this design survives between sessions, per the same handoff discipline as `nomad-hardware-appliance.md`. A worked-through, runnable demo of the core mechanism (§10) exists and has been exercised on real hardware, but that is a standalone proof-of-concept of the TPM mechanics, not an implementation of NOMAD itself.
 
-> This document answers one question precisely: every guarantee in `oan-hardware-appliance.md` rests on one witness, `kb-checker`. If `kb-checker` itself is compromised — not killed, not silent, but alive and lying — what, if anything, can OAN still do about it?
+> This document answers one question precisely: every guarantee in `nomad-hardware-appliance.md` rests on one witness, `kb-checker`. If `kb-checker` itself is compromised — not killed, not silent, but alive and lying — what, if anything, can NOMAD still do about it?
 
 ---
 
@@ -17,15 +17,15 @@ graph TD
     KBC["kb-checker under full kernel compromise"]
     KBC --> SILENT["Silent — killed, frozen, or CPU-starved"]
     KBC --> LYING["Alive, but fed lies — syscalls intercepted, kernel structures forged"]
-    SILENT --> S2["What OAN sees: no heartbeat arrives.<br/>Timer expires, fail-closed policy fires.<br/>Well covered by the existing heartbeat design."]
-    LYING --> L2["What OAN sees, without this doc's mechanisms:<br/>a clean, on-time, validly-signed attestation.<br/>Not covered by the heartbeat alone."]
+    SILENT --> S2["What NOMAD sees: no heartbeat arrives.<br/>Timer expires, fail-closed policy fires.<br/>Well covered by the existing heartbeat design."]
+    LYING --> L2["What NOMAD sees, without this doc's mechanisms:<br/>a clean, on-time, validly-signed attestation.<br/>Not covered by the heartbeat alone."]
 ```
 
 **Silence** is already solved, structurally, by the existing OOB heartbeat: the STM32's liveness timer never took input from the host to begin with, so it doesn't need to know *why* the heartbeat stopped, only that it did.
 
 **Lying** is harder, because a compromised kernel can feed `kb-checker` forged answers to the exact syscalls it uses to check on `kb-core` and itself, and `kb-checker` — running its real, unmodified code — will faithfully sign and send an attestation that is, from its own vantage point, completely honest. This is a **confused-deputy problem**: `kb-checker`'s *code integrity* can be real while its *inputs* are poisoned below the layer it can see. (The term comes from the classic computer-security literature on a trusted-but-manipulable intermediary tricked into misusing its own authority on an attacker's behalf — the shape of the problem here is the same one, one layer down.)
 
-**The limit that doesn't move:** nothing below makes `kb-checker` trustworthy again once the kernel beneath it is compromised — that is not achievable in software, full stop. What follows narrows the set of attacks that can succeed *without leaving a detectable trace*, using components already in OAN's design, at zero additional hardware cost. The goal shifts from "prevent the lie" to "make the lie expensive, and turn a failure into evidence."
+**The limit that doesn't move:** nothing below makes `kb-checker` trustworthy again once the kernel beneath it is compromised — that is not achievable in software, full stop. What follows narrows the set of attacks that can succeed *without leaving a detectable trace*, using components already in NOMAD's design, at zero additional hardware cost. The goal shifts from "prevent the lie" to "make the lie expensive, and turn a failure into evidence."
 
 ---
 
@@ -56,7 +56,7 @@ graph TD
     end
 ```
 
-**Which TPM.** Every mechanism in this and the next section uses the **host's own** TPM 2.0 — physically on the protected machine, not OAN's. A TPM can only make a hardware-backed statement about the machine it is part of; OAN's own TPM ([`oan-hardware-appliance.md`](oan-hardware-appliance.md) §4.4) can seal OAN's own integrity and verify what `kb-checker` reports, but it cannot attest to the host's measured-boot chain from across the OOB link — there is no hardware path between them. Essentially every modern server or workstation already ships with one, discrete or firmware (Intel PTT, AMD fTPM), for Secure Boot or disk encryption. Zero new hardware, and no tension with [`oan-cheap.md`](oan-cheap.md) §3.7's rejection of fTPM: that argument is specifically about not substituting the host's fTPM for *OAN's own* independent trust anchor. Using the host's already-present TPM for a host-local job is a different question, and this is precisely the case where a firmware TPM is exactly what `oan-cheap.md` itself calls "genuinely free."
+**Which TPM.** Every mechanism in this and the next section uses the **host's own** TPM 2.0 — physically on the protected machine, not NOMAD's. A TPM can only make a hardware-backed statement about the machine it is part of; NOMAD's own TPM ([`nomad-hardware-appliance.md`](nomad-hardware-appliance.md) §4.4) can seal NOMAD's own integrity and verify what `kb-checker` reports, but it cannot attest to the host's measured-boot chain from across the OOB link — there is no hardware path between them. Essentially every modern server or workstation already ships with one, discrete or firmware (Intel PTT, AMD fTPM), for Secure Boot or disk encryption. Zero new hardware, and no tension with [`nomad-cheap.md`](nomad-cheap.md) §3.7's rejection of fTPM: that argument is specifically about not substituting the host's fTPM for *NOMAD's own* independent trust anchor. Using the host's already-present TPM for a host-local job is a different question, and this is precisely the case where a firmware TPM is exactly what `nomad-cheap.md` itself calls "genuinely free."
 
 This is a protocol decision, not a bill-of-materials change — the host's own TPM is already there on essentially any real deployment target. `kb-checker` asks it to sign; the private key never exists in host RAM at all. But a root-level attacker can still simply place the *same request* `kb-checker` would have made — the TPM, by itself, doesn't know or care who is asking, it only knows what key was asked for. Key-in-TPM stops **theft**. It does not, on its own, stop **impersonation**. That requires one more piece.
 
@@ -112,8 +112,8 @@ This is also what turns a bare fencing event into a specific claim (§8): if the
 
 - **Memory-corruption-only exploits.** An attack path that reaches Ring 0 purely through in-place patching of already-loaded, already-measured code — no new module, ever — extends no PCR and trips nothing. Narrower than "any rootkit," not zero — narrower still once §5's mitigations are stacked on top.
 - **Physical TPM bus sniffing.** A discrete TPM communicating over an unencrypted LPC/SPI bus is a documented attack class (the same category demonstrated against BitLocker on some hardware). Requires physical board access, not a remote exploit — TPM 2.0 parameter-encryption sessions mitigate it, at zero new hardware cost.
-- **Upstream compromise of the measurement chain itself** (firmware, bootloader, Secure Boot bypass) is a different, higher-effort threat class this doesn't address — and isn't really OAN's problem to solve; it's the layer OAN's own trust starts from.
-- **Real operational cost.** Every legitimate kernel update or intentionally-added module requires re-sealing the key against a new expected PCR digest. That is a key-management process that has to actually exist and be exercised correctly — skip it once and a routine patch locks the key out for no security reason; build a habit of re-sealing without checking *why* the PCR changed, and the whole mechanism is quietly defeated. (Open Question 11, `oan-hardware-appliance.md` §14.)
+- **Upstream compromise of the measurement chain itself** (firmware, bootloader, Secure Boot bypass) is a different, higher-effort threat class this doesn't address — and isn't really NOMAD's problem to solve; it's the layer NOMAD's own trust starts from.
+- **Real operational cost.** Every legitimate kernel update or intentionally-added module requires re-sealing the key against a new expected PCR digest. That is a key-management process that has to actually exist and be exercised correctly — skip it once and a routine patch locks the key out for no security reason; build a habit of re-sealing without checking *why* the PCR changed, and the whole mechanism is quietly defeated. (Open Question 11, `nomad-hardware-appliance.md` §14.)
 
 ---
 
@@ -134,7 +134,7 @@ graph TD
 - **Stack canaries** (`-fstack-protector-strong` and family) place a random value next to the return address; a stack overflow overwrites the canary before it reaches anything that matters. Scope-limited: stack overflows only, not heap corruption, use-after-free, or type confusion. Intel CET's hardware shadow stack (`SHSTK`) is a stronger version, needing a CET-capable CPU — a software-only shadow stack exists too and is weaker; the two shouldn't be conflated.
 - **`CONFIG_STRICT_KERNEL_RWX`** enforces W^X (write XOR execute) on kernel memory — blocks the classic "corrupt memory, inject shellcode, jump to it" technique directly, but is silent on return-oriented/jump-oriented programming (ROP/JOP) and data-only attacks, which inject no new code at all. This is the sharpest technique that survives every mitigation stacked at once, and what the bottom box above is built from. Caveat: can break legacy/out-of-tree kernel modules that self-modify code at runtime — a one-time compatibility check, not an ongoing risk.
 - **`kexec`/`/dev/mem` lockdown.** §4's entire guarantee assumes new code only enters the kernel through a path IMA measures. `kexec_load` boots a completely different kernel image without a hardware reset and without going back through firmware/bootloader measurement — the PCR values would simply never reflect it. Linux's `kernel_lockdown` LSM already gates `kexec_load` and permits `kexec_file_load` only for signed images — the same signature-enforcement principle §4 already leans on for modules, applied to the other path that can introduce an unmeasured kernel. `CONFIG_STRICT_DEVMEM` closes the more direct version of the same problem.
-- **LKRG (Linux Kernel Runtime Guard), report-only.** For the residual sliver that survives everything above — a ROP/JOP or data-only exploit against already-measured code — an active kernel-resident integrity monitor can still add value, with one condition: LKRG runs at the *same* privilege level as the exploit it's trying to catch, so it is explicitly **not** a hardware-anchored mechanism the way §4's PCR-sealing is; it is a same-privilege-level race, and its more aggressive response modes (killing the process, panicking the box) are a real, documented production-availability risk. Run it in logging/alert-only mode, and feed its findings into §8's classification as one more signal, never as an autonomous enforcement action — the only place that gets to take a disruptive action should stay OAN's own deliberately-chosen relay policy (§8 of `oan-hardware-appliance.md`), not a second, uncoordinated kill switch racing the attacker inside the kernel. Deployed this way, LKRG must also be part of the measured baseline itself, loaded early enough that its own presence is expected, not an unmeasured surprise.
+- **LKRG (Linux Kernel Runtime Guard), report-only.** For the residual sliver that survives everything above — a ROP/JOP or data-only exploit against already-measured code — an active kernel-resident integrity monitor can still add value, with one condition: LKRG runs at the *same* privilege level as the exploit it's trying to catch, so it is explicitly **not** a hardware-anchored mechanism the way §4's PCR-sealing is; it is a same-privilege-level race, and its more aggressive response modes (killing the process, panicking the box) are a real, documented production-availability risk. Run it in logging/alert-only mode, and feed its findings into §8's classification as one more signal, never as an autonomous enforcement action — the only place that gets to take a disruptive action should stay NOMAD's own deliberately-chosen relay policy (§8 of `nomad-hardware-appliance.md`), not a second, uncoordinated kill switch racing the attacker inside the kernel. Deployed this way, LKRG must also be part of the measured baseline itself, loaded early enough that its own presence is expected, not an unmeasured surprise.
 
 | Layer | Removes | Cost / caveat |
 |---|---|---|
@@ -153,7 +153,7 @@ PCR-sealing narrows the field; it doesn't cover the memory-corruption gap above.
 ```mermaid
 graph TD
     subgraph Cross["Cross-vantage check"]
-        CORE["kb-core — eBPF view, kernel-side"] --> CMP1["Compare — kbd or OAN's SBC"]
+        CORE["kb-core — eBPF view, kernel-side"] --> CMP1["Compare — kbd or NOMAD's SBC"]
         KBC1["kb-checker — syscall//proc view"] --> CMP1
         CMP1 --> FLAG1["Divergence on the same fact<br/>(process list, loaded modules, sockets) — flagged"]
     end
@@ -166,7 +166,7 @@ graph TD
     end
 ```
 
-`kb-core` (eBPF, kernel-side) and `kb-checker` (syscall/`/proc`-side) already observe overlapping facts — process lists, loaded modules, open sockets — through different code paths. A rootkit that hooks the syscall table to lie to `kb-checker` isn't automatically clever enough to also hide from an eBPF hook watching the same fact from a different angle, and vice versa — maintaining two consistent lies across two independent code paths is strictly harder than maintaining one. Forwarding both views to a single comparison point (`kbd`, or OAN's SBC over the OOB link) costs nothing new to build; it's a comparison, not a component.
+`kb-core` (eBPF, kernel-side) and `kb-checker` (syscall/`/proc`-side) already observe overlapping facts — process lists, loaded modules, open sockets — through different code paths. A rootkit that hooks the syscall table to lie to `kb-checker` isn't automatically clever enough to also hide from an eBPF hook watching the same fact from a different angle, and vice versa — maintaining two consistent lies across two independent code paths is strictly harder than maintaining one. Forwarding both views to a single comparison point (`kbd`, or NOMAD's SBC over the OOB link) costs nothing new to build; it's a comparison, not a component.
 
 The canary variant sharpens this further: have `kb-checker` periodically write a signed, nonced value into a BPF map, then read it back two ways — once through the normal syscall path, once through direct BPF map iteration. A rootkit intercepting one path but not the other reveals itself the moment the two answers disagree.
 
@@ -174,15 +174,15 @@ The canary variant sharpens this further: have `kb-checker` periodically write a
 
 # 7. Timing and Clock Cross-Checks
 
-Interception adds latency even when the forged output looks perfect. Have `kb-checker` include its own attestation-generation time in the signed payload, and have OAN's SBC track the *distribution* of that latency over the heartbeat interval, not any single sample — a single slow heartbeat is noise, a sustained shift in the shape of the distribution is a side channel: evidence that something now sits between `kb-checker` and the kernel, independent of whether the reported content is plausible.
+Interception adds latency even when the forged output looks perfect. Have `kb-checker` include its own attestation-generation time in the signed payload, and have NOMAD's SBC track the *distribution* of that latency over the heartbeat interval, not any single sample — a single slow heartbeat is noise, a sustained shift in the shape of the distribution is a side channel: evidence that something now sits between `kb-checker` and the kernel, independent of whether the reported content is plausible.
 
-OAN's SBC also has its own independent wall clock by construction — it is a physically separate computer. Have `kb-checker`'s attestation carry a monotonic counter and an uptime figure, and have the SBC flag any inconsistency against the real elapsed time since the last good heartbeat. Catches stealth restarts, clock manipulation, or replay of an old, genuinely-valid attestation.
+NOMAD's SBC also has its own independent wall clock by construction — it is a physically separate computer. Have `kb-checker`'s attestation carry a monotonic counter and an uptime figure, and have the SBC flag any inconsistency against the real elapsed time since the last good heartbeat. Catches stealth restarts, clock manipulation, or replay of an old, genuinely-valid attestation.
 
 ---
 
 # 8. Classify the Failure, Don't Just Fence
 
-Fencing alone answers "do something." It doesn't answer "what happened," and a report that just says *OAN tripped* is barely more useful than silence itself. The mitigations above don't need to share one fencing trigger — they need to feed one classification, attached to the recovery event and surfaced through FMS.
+Fencing alone answers "do something." It doesn't answer "what happened," and a report that just says *NOMAD tripped* is barely more useful than silence itself. The mitigations above don't need to share one fencing trigger — they need to feed one classification, attached to the recovery event and surfaced through FMS.
 
 | Bucket | Trigger | What it means |
 |---|---|---|
@@ -190,7 +190,7 @@ Fencing alone answers "do something." It doesn't answer "what happened," and a r
 | Cryptographic failure | Heartbeat arrives, TPM signature or PCR-policy check fails (§4) | High-confidence: measured-boot state changed unexpectedly. The closest thing to a direct rootkit/bootkit signature this design can produce. |
 | Content implausibility | Signature valid, but canary, cross-vantage, or timing invariants fail (§6–§7) | `kb-checker` is alive and its key is intact, but something beneath it is lying to it — the confused-deputy case, specifically. |
 
-That classification is the difference between "OAN tripped" and "OAN tripped, category: cryptographic failure, consistent with an unauthorized kernel module load." The second is something an operator can actually act on.
+That classification is the difference between "NOMAD tripped" and "NOMAD tripped, category: cryptographic failure, consistent with an unauthorized kernel module load." The second is something an operator can actually act on.
 
 The same match-the-response-to-what's-actually-needed judgment applies one layer down, at deployment time rather than incident time: `kbd.service` and `kb-checker.service` run with only conservative systemd hardening, not the fuller capability-stripping and filesystem lockdown, because `kb-checker`'s own Tampering Containment Protocol genuinely needs root and `CAP_KILL`/`CAP_NET_ADMIN`/bpffs-delete rights for its last-resort lockdown — a capability set gotten wrong there would fail silently until the one moment it matters most. `kbagents`/`kbopd`/`kbopt` get the full lockdown, safe precisely because none of them have anything resembling that need (`docs/architecture/boot_sequence_spec.md`).
 
@@ -198,7 +198,7 @@ The same match-the-response-to-what's-actually-needed judgment applies one layer
 
 # 9. Fleet-Level Correlation
 
-None of §6–§7 needs to be a hard trip-wire on its own — a single near-miss on one host might be noise. But `kb-aads` and FMS's cross-host correlation ([`oan-fms.md`](oan-fms.md) §8.8, already a stated if underdesigned responsibility) can watch for the same *pattern* of near-misses showing up across multiple hosts around the same time — a much stronger signal of deliberate, coordinated compromise than any one host's isolated anomaly, at no cost beyond forwarding signals that already exist to a layer that already exists.
+None of §6–§7 needs to be a hard trip-wire on its own — a single near-miss on one host might be noise. But `kb-aads` and FMS's cross-host correlation ([`nomad-fms.md`](nomad-fms.md) §8.8, already a stated if underdesigned responsibility) can watch for the same *pattern* of near-misses showing up across multiple hosts around the same time — a much stronger signal of deliberate, coordinated compromise than any one host's isolated anomaly, at no cost beyond forwarding signals that already exist to a layer that already exists.
 
 ---
 
@@ -281,12 +281,12 @@ Step 6 is the demonstration: identical request, identical secret, identical key 
 1. **PCR bank selection and re-sealing ownership.** Which PCR banks the host-side seal binds to in practice (bootloader/kernel-image PCRs, IMA's runtime PCR, or both), and who/what owns the re-sealing process when a legitimate kernel update or intentionally-added module changes the expected digest. No operational process defined yet.
 2. **TPM2 policy-session wire mechanics.** The actual `tpm2-tools`/`tpm2-tss` integration inside `kb-checker` itself (`TPM2_StartAuthSession` + `TPM2_PolicyPCR`, session lifecycle, error handling on TPM refusal) — §10's walkthrough is a standalone proof of the mechanism, not `kb-checker` code.
 3. **LKRG deployment decision.** Whether LKRG is adopted at all is left to the deployer in this document (§5) — if yes, its exact policy configuration (report-only enforced how), packaging, and kernel-version compatibility tracking are undesigned.
-4. **Cross-vantage comparison point.** Whether the `kb-core`-vs-`kb-checker` divergence check (§6) lives in `kbd` or on OAN's SBC is unresolved — affects latency, trust placement, and whether it depends on the OOB link's bandwidth/cadence.
-5. **Fleet-correlation ownership for near-miss signals (§9).** Same open question already carried in [`oan-fms.md`](oan-fms.md) §14 item 3 (cross-host correlation generally) — this document adds specific signal types (timing drift, canary mismatches) to whatever eventually gets built there.
+4. **Cross-vantage comparison point.** Whether the `kb-core`-vs-`kb-checker` divergence check (§6) lives in `kbd` or on NOMAD's SBC is unresolved — affects latency, trust placement, and whether it depends on the OOB link's bandwidth/cadence.
+5. **Fleet-correlation ownership for near-miss signals (§9).** Same open question already carried in [`nomad-fms.md`](nomad-fms.md) §14 item 3 (cross-host correlation generally) — this document adds specific signal types (timing drift, canary mismatches) to whatever eventually gets built there.
 6. **Canary storage and rotation.** Where the signed, nonced canary value (§6) actually lives (which BPF map, how often rotated, collision/replay handling) is described only at the concept level.
 
 ---
 
 # 13. Relationship to Existing Documentation
 
-This document does not modify `oan-hardware-appliance.md`'s architecture — it resolves that document's own §14 Open Question 4 and expands on it. It assumes the OOB heartbeat, the two-communication-planes split, and the STM32/relay fencing design from that document unchanged. It also assumes and does not modify [`CPM.md`](../CPM.md)'s existing authorization-gate design (§2 here only documents that `kb-checker` is now in its protected floor, a change already made in that document). Where this document references the host's own TPM, that is explicitly *not* the TPM in `oan-hardware-appliance.md`'s own bill of materials (§4.4, §10 there) — see §3 above for why the two cannot substitute for each other.
+This document does not modify `nomad-hardware-appliance.md`'s architecture — it resolves that document's own §14 Open Question 4 and expands on it. It assumes the OOB heartbeat, the two-communication-planes split, and the STM32/relay fencing design from that document unchanged. It also assumes and does not modify [`CPM.md`](../CPM.md)'s existing authorization-gate design (§2 here only documents that `kb-checker` is now in its protected floor, a change already made in that document). Where this document references the host's own TPM, that is explicitly *not* the TPM in `nomad-hardware-appliance.md`'s own bill of materials (§4.4, §10 there) — see §3 above for why the two cannot substitute for each other.

@@ -1,8 +1,8 @@
-# OAN — Expense Breakdown (`oan-expense.md`)
+# NOMAD — Expense Breakdown (`nomad-expense.md`)
 
 **Version:** 0.1
-**Component:** Cost reference for the [Out-of-Band Attestation Node](oan-hardware-appliance.md), Model B (shared chassis, up to 5-host Pentagon cap)
-**Status:** Costing exercise only — not a build target, not a sourcing quote. Combines the Model B totals from `oan-hardware-appliance.md` §9 with the cost-reduced BOM from `oan-cheap.md` §4–5, and adds a per-person split for a 10- and 15-member team.
+**Component:** Cost reference for the [Node Out-of-Band Module for Attestation & Defense](nomad-hardware-appliance.md), Model B (shared chassis, up to 5-host Pentagon cap)
+**Status:** Costing exercise only — not a build target, not a sourcing quote. Combines the Model B totals from `nomad-hardware-appliance.md` §9 with the cost-reduced BOM from `nomad-cheap.md` §4–5, and adds a per-person split for a 10- and 15-member team.
 
 ---
 
@@ -80,4 +80,4 @@ Going from 10 to 15 members drops everyone's share by a third. Since Pentagon co
 
 ## 4. Relationship to Existing Documentation
 
-Figures here are derived directly from [`oan-hardware-appliance.md`](oan-hardware-appliance.md) §9–§10 (reference BOM, Model B) and [`oan-cheap.md`](oan-cheap.md) §4–§5 (cost-reduced BOM). This document adds no new architecture or design decisions — it only reorganizes existing cost figures into chassis/add-on and per-person views. INR figures use the same approximate ~₹87/USD flat conversion used in both source documents; treat as an upper bound, not a sourcing quote.
+Figures here are derived directly from [`nomad-hardware-appliance.md`](nomad-hardware-appliance.md) §9–§10 (reference BOM, Model B) and [`nomad-cheap.md`](nomad-cheap.md) §4–§5 (cost-reduced BOM). This document adds no new architecture or design decisions — it only reorganizes existing cost figures into chassis/add-on and per-person views. INR figures use the same approximate ~₹87/USD flat conversion used in both source documents; treat as an upper bound, not a sourcing quote.

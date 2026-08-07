@@ -56,7 +56,7 @@
   linkcolor=black,
   citecolor=black,
   urlcolor=black,
-  pdftitle={Out-of-Band Attestation Node (OAN) -- Kernel Borderlands},
+  pdftitle={Node Out-of-Band Module for Attestation \& Defense (NOMAD) -- Kernel Borderlands},
   pdfauthor={Kernel Borderlands Team}
 }
 
@@ -76,7 +76,7 @@
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\footrulewidth}{0pt}
 \fancyhead[L]{\small\scshape Kernel Borderlands}
-\fancyhead[R]{\small\scshape Out-of-Band Attestation Node}
+\fancyhead[R]{\small\scshape Node Out-of-Band Module for Attestation \& Defense}
 \fancyfoot[C]{\small\thepage}
 
 \fancypagestyle{plain}{%
@@ -129,7 +129,7 @@
   block/.style={draw=black, thick, rounded corners=2pt, align=center, fill=white,
     minimum height=0.85cm, inner sep=4pt, font=\footnotesize},
   hostblock/.style={block, fill=gray!8},
-  oanblock/.style={block, fill=gray!17},
+  nomadblock/.style={block, fill=gray!17},
   chip/.style={block, fill=gray!22, minimum width=2.6cm, minimum height=1.1cm},
   small/.style={block, minimum height=0.6cm, font=\scriptsize},
   arr/.style={-{Latex[length=2.2mm,width=1.6mm]}, thick},
@@ -154,11 +154,11 @@
 
 \vspace{1.6cm}
 
-{\fontsize{34}{40}\selectfont\bfseries Out-of-Band\\[0.15em] Attestation Node}
+{\fontsize{34}{40}\selectfont\bfseries NOMAD}
 
 \vspace{0.6em}
 
-{\Large\bfseries OAN}
+{\Large\bfseries Node Out-of-Band Module\\[0.15em] for Attestation \& Defense}
 
 \vspace{0.9em}
 
@@ -174,7 +174,7 @@
 \centering
 \small
 \textbf{What this document is} \\[0.3em]
-A complete, illustrated walkthrough of OAN: why Kernel Borderlands needs a
+A complete, illustrated walkthrough of NOMAD: why Kernel Borderlands needs a
 piece of hardware that lives outside the machine it protects, how that
 hardware is put together, how it talks to the host and to itself, how it
 scales from one desk to a lab, and what it costs to build. Written so a
@@ -199,8 +199,8 @@ diagram end to end.
 \clearpage
 
 % =====================================================================
-\section{What Is OAN?}
-\label{sec:what-is-oan}
+\section{What Is NOMAD?}
+\label{sec:what-is-nomad}
 
 Kernel Borderlands (KB)~\cite{repo} protects a Linux machine from the inside: an
 eBPF sensor watches the kernel at Ring 0, a Go control plane scores what
@@ -210,17 +210,17 @@ covers almost every attack. It does not cover one: what happens if the
 attacker gets \emph{all the way in} --- full control of the kernel
 itself, the same privilege level the sensor runs at.
 
-The \textbf{Out-of-Band Attestation Node (OAN)} is Kernel Borderlands'
+The \textbf{Node Out-of-Band Module for Attestation \& Defense (NOMAD)} is Kernel Borderlands'
 answer to that one remaining case. It is a small, physically separate
 computer --- its own processor, its own memory, its own power supply,
 its own wiring --- that sits next to the protected machine and asks it
 one question, over and over, many times a second: \emph{``are you still
-telling the truth?''} If the answer stops making sense, OAN can cut the
+telling the truth?''} If the answer stops making sense, NOMAD can cut the
 machine's power itself, without needing any cooperation from the
 machine it is cutting off.
 
 \begin{statusbox}
-\textbf{Where OAN stands today.} OAN is a design, not yet a shipped
+\textbf{Where NOMAD stands today.} NOMAD is a design, not yet a shipped
 product --- there is no code, no wire protocol, and no dedicated
 repository directory for it yet. This document is the architecture that
 KB intends to build: everything described below is the design target,
@@ -232,7 +232,7 @@ a range for exactly that reason.
 \begin{plainbox}
 Think of Kernel Borderlands today as a very well-guarded building, with
 guards standing \emph{inside} the building watching every door and
-hallway. OAN is a second guard station across the street, watching the
+hallway. NOMAD is a second guard station across the street, watching the
 building from outside, with its own phone line, its own lights, and its
 own switch for the building's power --- so that even if every guard
 inside the building is somehow tricked or overpowered, the guard across
@@ -240,7 +240,7 @@ the street still notices, and can still act.
 \end{plainbox}
 
 The rest of this document builds that picture up piece by piece: why
-the problem exists (\S\ref{sec:problem}), the four design rules OAN
+the problem exists (\S\ref{sec:problem}), the four design rules NOMAD
 follows (\S\ref{sec:philosophy}), how its hardware is laid out
 (\S\ref{sec:architecture}--\S\ref{sec:tpm-relay}), how it actually
 watches the host (\S\ref{sec:heartbeat}--\S\ref{sec:recovery}), how one
@@ -248,7 +248,7 @@ unit grows into a fleet (\S\ref{sec:scaling}--\S\ref{sec:fms}), and
 finally what it costs to build one (\S\ref{sec:bom}--\S\ref{sec:budget}).
 
 % =====================================================================
-\section{The Problem OAN Solves}
+\section{The Problem NOMAD Solves}
 \label{sec:problem}
 
 \subsection{Software Watchdogs Have a Ceiling}
@@ -287,18 +287,18 @@ Imagine a company's internal auditor, who reports to the same CEO as
 everyone they audit. Even a very honest, very independent-minded
 auditor is still, structurally, inside the same organization. If the
 CEO themselves is the problem, the auditor's independence has a limit
-built into the org chart. OAN is what happens when you hire an
+built into the org chart. NOMAD is what happens when you hire an
 \emph{external} auditor who reports to nobody inside the building at
 all.
 \end{analogybox}
 
 \subsection{Moving the Last Line of Defense Off the Host}
 
-OAN's design goal is simple to state: move the very last line of
+NOMAD's design goal is simple to state: move the very last line of
 defense \emph{off the host entirely}. A physically separate node, with
 its own compute and its own power domain, keeps attesting to the
 host's integrity and keeps the ability to fence it, without depending
-on that host's kernel being honest about anything. OAN does not
+on that host's kernel being honest about anything. NOMAD does not
 replace \texttt{kb-checker} --- it gives Kernel Borderlands an external
 anchor point for the one failure mode no same-host component can
 structurally cover alone: total kernel compromise.
@@ -307,7 +307,7 @@ This mirrors a decision Kernel Borderlands already made once, at a
 different layer. The Critical Process Module (CPM) exists because
 ``the security platform's own components must be immune to the failure
 modes they're meant to prevent'' at the \emph{authorization} layer ---
-OAN applies that same principle one layer further down, at the
+NOMAD applies that same principle one layer further down, at the
 \emph{hardware} layer.
 
 % =====================================================================
@@ -317,7 +317,7 @@ OAN applies that same principle one layer further down, at the
 Abstract descriptions of ``kernel compromise'' are easy to nod along to
 and hard to actually picture. This section walks through one concrete
 timeline, end to end, showing exactly where a software-only stack runs
-out of road, and exactly where OAN picks up.
+out of road, and exactly where NOMAD picks up.
 
 \subsection{The Scenario}
 
@@ -336,8 +336,8 @@ top of it.
   \node[block, minimum width=2.6cm] (t0) {T+0s\\\scriptsize exploit lands, Ring 0 gained};
   \node[block, right=of t0, minimum width=2.9cm] (t1) {T+0.1s\\\scriptsize sensor telemetry silently patched};
   \node[block, right=of t1, minimum width=2.9cm] (t2) {T+0.2s\\\scriptsize kb-checker's local view now unreliable};
-  \node[oanblock, right=of t2, minimum width=3.1cm] (t3) {next heartbeat\\\scriptsize OAN attestation fails to verify};
-  \node[oanblock, right=of t3, minimum width=2.6cm] (t4) {timeout\\\scriptsize STM32 fences the host};
+  \node[nomadblock, right=of t2, minimum width=3.1cm] (t3) {next heartbeat\\\scriptsize NOMAD attestation fails to verify};
+  \node[nomadblock, right=of t3, minimum width=2.6cm] (t4) {timeout\\\scriptsize STM32 fences the host};
 
   \draw[arr] (t0) -- (t1);
   \draw[arr] (t1) -- (t2);
@@ -345,7 +345,7 @@ top of it.
   \draw[arr] (t3) -- (t4);
 
   \node[groupbox, fit=(t0)(t1)(t2), inner sep=0.3cm, label={[font=\tiny\bfseries]below:everything left of here shares the compromised kernel}] (left) {};
-  \node[groupbox, fit=(t3)(t4), inner sep=0.3cm, label={[font=\tiny\bfseries]below:OAN's independent hardware}] (right) {};
+  \node[groupbox, fit=(t3)(t4), inner sep=0.3cm, label={[font=\tiny\bfseries]below:NOMAD's independent hardware}] (right) {};
 \end{tikzpicture}%
 }
 \figcap{The same timeline, seen from two different trust domains. The left three boxes all run on the compromised kernel; the right two never do.}
@@ -378,10 +378,10 @@ software that gets around this, because software questions all have to
 travel through the same compromised kernel to get an answer.
 \end{plainbox}
 
-\subsection{Where OAN Picks Up}
+\subsection{Where NOMAD Picks Up}
 
-None of the four bullets above touch OAN, for a simple structural
-reason: OAN never asked the kernel a question that the kernel could
+None of the four bullets above touch NOMAD, for a simple structural
+reason: NOMAD never asked the kernel a question that the kernel could
 answer on the attacker's behalf in the first place.
 
 \begin{enumerate}
@@ -403,13 +403,13 @@ answer on the attacker's behalf in the first place.
 The attacker's Ring 0 access, which was total with respect to the host,
 grants them precisely nothing with respect to the STM32's timer or the
 relay it drives --- those never took input from the host to begin with.
-That gap is the entire reason OAN exists.
+That gap is the entire reason NOMAD exists.
 
 % =====================================================================
 \section{Design Philosophy}
 \label{sec:philosophy}
 
-Everything about OAN follows from four rules. They deliberately mirror
+Everything about NOMAD follows from four rules. They deliberately mirror
 \texttt{kb-checker}'s own KISS pillars, moved from the software layer to
 the hardware layer.
 
@@ -419,16 +419,16 @@ the hardware layer.
 \toprule
 \textbf{Principle} & \textbf{What it means in practice} \\
 \midrule
-Out-of-Band & OAN never depends on the monitored operating system for
+Out-of-Band & NOMAD never depends on the monitored operating system for
 its own execution. It has its own boot chain, its own clock, its own
 storage. \\
 Independent & Own CPU, own memory, own storage, own power. No shared
 failure domain with the host --- if the host's power supply dies,
-loses network, or is compromised, none of that touches OAN. \\
+loses network, or is compromised, none of that touches NOMAD. \\
 Hardware-Rooted & Trust originates from a physical chip (a TPM 2.0
 module), not from a software claim that could itself be forged by a
 compromised kernel. \\
-Fail-Safe (configurable) & OAN can take protective action even when
+Fail-Safe (configurable) & NOMAD can take protective action even when
 the host cannot cooperate. The exact failure behavior --- fence
 immediately, or leave the host running and only alert --- is a
 deployment-level policy switch, described in \S\ref{sec:heartbeat},
@@ -438,16 +438,16 @@ defaulting to the safer of the two. \\
 \end{center}
 
 Read together, these four rules answer the same question from four
-different angles: \emph{``what happens to OAN's trustworthiness if the
+different angles: \emph{``what happens to NOMAD's trustworthiness if the
 host is fully owned by an attacker?''} The answer, by design, is
-nothing --- OAN keeps working exactly as before, because nothing about
+nothing --- NOMAD keeps working exactly as before, because nothing about
 its own operation ever routed through the host in the first place.
 
 % =====================================================================
 \section{High-Level Architecture}
 \label{sec:architecture}
 
-At the top level, OAN sits beside the existing Kernel Borderlands host
+At the top level, NOMAD sits beside the existing Kernel Borderlands host
 and talks to exactly one of its five subsystems directly:
 \texttt{kb-checker}. It never talks to \texttt{kb-core} or
 \texttt{kb-control-plane} directly, because \texttt{kb-checker} is
@@ -470,22 +470,22 @@ verification --- it is the natural point of contact on the host side.
   \node[groupbox, fit=(core)(cp)(kbc), inner sep=0.35cm] (hostbox) {};
   \node[font=\small\bfseries] at ($(hostbox.north)+(0,0.3)$) {HOST -- existing};
 
-  % OAN row 1: STM32 - SBC - ESP32
-  \node[oanblock, below=3.0cm of cp, minimum width=2.4cm] (sbc) {SBC\\\scriptsize attestation engine};
-  \node[oanblock, left=1.0cm of sbc, minimum width=1.9cm] (stm) {STM32\\\scriptsize safety controller};
-  \node[oanblock, right=1.0cm of sbc, minimum width=1.9cm] (esp) {ESP32\\\scriptsize comms processor};
+  % NOMAD row 1: STM32 - SBC - ESP32
+  \node[nomadblock, below=3.0cm of cp, minimum width=2.4cm] (sbc) {SBC\\\scriptsize attestation engine};
+  \node[nomadblock, left=1.0cm of sbc, minimum width=1.9cm] (stm) {STM32\\\scriptsize safety controller};
+  \node[nomadblock, right=1.0cm of sbc, minimum width=1.9cm] (esp) {ESP32\\\scriptsize comms processor};
 
-  % OAN row 2: TPM - Display, below row 1
-  \node[oanblock, below=0.9cm of stm, minimum width=1.9cm] (tpm) {TPM 2.0\\\scriptsize root of trust};
-  \node[oanblock, right=0.6cm of tpm, minimum width=1.9cm] (disp) {Display};
+  % NOMAD row 2: TPM - Display, below row 1
+  \node[nomadblock, below=0.9cm of stm, minimum width=1.9cm] (tpm) {TPM 2.0\\\scriptsize root of trust};
+  \node[nomadblock, right=0.6cm of tpm, minimum width=1.9cm] (disp) {Display};
 
   \draw[arr] (sbc) -- (stm);
   \draw[arr] (sbc) -- (esp);
   \draw[arr] (sbc.south) -- ++(0,-0.25) -| (tpm.north);
   \draw[arr] (sbc.south) -- ++(0,-0.25) -| (disp.north);
 
-  \node[groupbox, fit=(stm)(sbc)(esp)(tpm)(disp), inner sep=0.35cm] (oanbox) {};
-  \node[font=\small\bfseries] at ($(oanbox.north)+(0,0.3)$) {OAN -- Out-of-Band Attestation Node};
+  \node[groupbox, fit=(stm)(sbc)(esp)(tpm)(disp), inner sep=0.35cm] (nomadbox) {};
+  \node[font=\small\bfseries] at ($(nomadbox.north)+(0,0.3)$) {NOMAD -- Node Out-of-Band Module for Attestation \& Defense};
 
   % OOB Trust Plane: kb-checker straight down to SBC's row height, then left into SBC
   \draw[arr] (kbc.south) -- ++(0,-1.4) -| (sbc.north);
@@ -510,7 +510,7 @@ verification --- it is the natural point of contact on the host side.
 
 \end{tikzpicture}%
 }
-\figcap{OAN sits beside the host, talking only to \texttt{kb-checker} over a dedicated out-of-band link. The relay gives OAN a physical, software-independent way to cut the host's power.}
+\figcap{NOMAD sits beside the host, talking only to \texttt{kb-checker} over a dedicated out-of-band link. The relay gives NOMAD a physical, software-independent way to cut the host's power.}
 \label{fig:architecture}
 \end{figure}
 
@@ -522,7 +522,7 @@ Three things in Figure~\ref{fig:architecture} carry the whole design:
     touches the host's normal network stack, so a compromised host
     cannot reach it the way it could reach a regular NIC.
   \item \textbf{The relay is driven by the STM32, not the SBC.} Fencing
-    survives a full Linux crash on OAN's own SBC, because the chip that
+    survives a full Linux crash on NOMAD's own SBC, because the chip that
     controls the relay never runs Linux at all (\S\ref{sec:stm32}).
   \item \textbf{Fleet traffic is a separate, dashed line.} Anything
     that talks to other chassis goes out through the ESP32 on a
@@ -533,8 +533,8 @@ Three things in Figure~\ref{fig:architecture} carry the whole design:
 \section{Two Communication Planes}
 \label{sec:planes}
 
-OAN exposes two communication channels that never share a wire, a
-switch, or a protocol stack. Keeping them apart is what lets OAN scale
+NOMAD exposes two communication channels that never share a wire, a
+switch, or a protocol stack. Keeping them apart is what lets NOMAD scale
 to a fleet (\S\ref{sec:scaling}) without ever weakening the one link
 that actually matters for trust.
 
@@ -542,7 +542,7 @@ that actually matters for trust.
 \centering
 \begin{tikzpicture}[font=\footnotesize, node distance=1.1cm]
   \node[actor, minimum width=3.4cm] (kbc) {kb-checker\\\scriptsize (host)};
-  \node[actor, right=3.4cm of kbc, minimum width=3.4cm] (sbc) {OAN SBC};
+  \node[actor, right=3.4cm of kbc, minimum width=3.4cm] (sbc) {NOMAD SBC};
   \draw[arr] (kbc) -- node[above, font=\scriptsize]{Out-of-Band Trust Plane} node[below, font=\tiny]{serial or dedicated Ethernet} (sbc);
 
   \node[below=1.4cm of kbc, actor, minimum width=3.4cm] (esp) {ESP32};
@@ -573,7 +573,7 @@ Required for basic protection? & Yes --- this \emph{is} the trust boundary & No 
 \begin{plainbox}
 The Fabric Management Plane is allowed to be ``just Ethernet'' precisely
 because it never carries anything security-critical. It only ever sees
-signed summaries that OAN's own trust plane has already vouched for
+signed summaries that NOMAD's own trust plane has already vouched for
 (\S\ref{sec:fms}) --- so even a fully compromised management network
 can't forge a clean bill of health for a host that is actually
 compromised.
@@ -583,7 +583,7 @@ compromised.
 \section{Meet the Three Processors}
 \label{sec:three-chips}
 
-OAN's brain is deliberately split across three separate chips, each
+NOMAD's brain is deliberately split across three separate chips, each
 with exactly one job. The split looks like extra hardware at first
 glance, but it is the single most important decision in the whole
 design: it means no one chip is ever both ``the thing that makes the
@@ -625,7 +625,7 @@ carries:
   \item logging.
 \end{itemize}
 
-This is the only chip in OAN complex enough to run a full Linux
+This is the only chip in NOMAD complex enough to run a full Linux
 userspace, and therefore the only one complex enough to have bugs, hang,
 or crash. Everything downstream of it is built assuming exactly that
 will eventually happen.
@@ -661,7 +661,7 @@ Two questions come up immediately, and both have concrete answers.
 fencing depends on Linux being alive and scheduled promptly. If the SBC
 hangs, panics, or is simply busy at the wrong moment, the fencing
 decision hangs with it --- recreating, one level down, the exact
-same-failure-domain problem OAN exists to solve for the host in the
+same-failure-domain problem NOMAD exists to solve for the host in the
 first place.
 
 \textbf{Why not use the ESP32, since it is already on the board?}
@@ -699,11 +699,11 @@ the SBC/STM32/TPM side of the board.
 A Trusted Platform Module (TPM) is a small, dedicated security chip
 built for exactly one purpose: storing cryptographic keys and integrity
 measurements in a way that even the computer it is attached to cannot
-tamper with from software alone. OAN's TPM does double duty:
+tamper with from software alone. NOMAD's TPM does double duty:
 
 \begin{itemize}
-  \item \textbf{Seals OAN's own integrity state.} Measured boot on the
-    SBC and STM32 firmware is sealed against the TPM, so OAN can prove
+  \item \textbf{Seals NOMAD's own integrity state.} Measured boot on the
+    SBC and STM32 firmware is sealed against the TPM, so NOMAD can prove
     its own software has not been tampered with --- the same property
     it is asking the host to prove about itself.
   \item \textbf{Verifies \texttt{kb-checker}'s reported state.} Each
@@ -714,9 +714,9 @@ tamper with from software alone. OAN's TPM does double duty:
 
 \begin{plainbox}
 Sealing \emph{both} sides against the same physical chip closes a gap
-that would otherwise exist: it is not enough for OAN to trust the host
---- OAN's own word has to be worth something too. A TPM that only
-checked the host, sitting inside an OAN whose own integrity nobody
+that would otherwise exist: it is not enough for NOMAD to trust the host
+--- NOMAD's own word has to be worth something too. A TPM that only
+checked the host, sitting inside a NOMAD whose own integrity nobody
 verified, would just move the same trust problem one hop over rather
 than solving it.
 \end{plainbox}
@@ -759,12 +759,12 @@ integrity state, threat level, heartbeat, cluster health, TPM status,
 relay status, and a rolling event log. It is a read-only reflection of
 state the SBC and STM32 already hold --- useful for a technician
 standing in front of the chassis, but never an input to any decision
-OAN makes.
+NOMAD makes.
 
 % =====================================================================
-\section{What OAN Does, Continuously}
+\section{What NOMAD Does, Continuously}
 
-Once running, OAN's loop never stops:
+Once running, NOMAD's loop never stops:
 
 \begin{itemize}
   \item Verifies host integrity against sealed TPM measurements.
@@ -796,8 +796,8 @@ stop, or start failing verification, the STM32's own clock takes over.
   \def\yBot{-6.9}
 
   \node[actor] (kbc) at (0,\yTop) {kb-checker\\\scriptsize (host)};
-  \node[actor] (tpm) at (3.2,\yTop) {TPM 2.0\\\scriptsize (OAN)};
-  \node[actor] (sbc) at (6.4,\yTop) {OAN SBC};
+  \node[actor] (tpm) at (3.2,\yTop) {TPM 2.0\\\scriptsize (NOMAD)};
+  \node[actor] (sbc) at (6.4,\yTop) {NOMAD SBC};
   \node[actor] (stm) at (9.6,\yTop) {STM32};
   \node[actor] (rel) at (12.8,\yTop) {Relay};
 
@@ -835,9 +835,9 @@ of that is noticing silence.
 \end{plainbox}
 
 % =====================================================================
-\section{Where OAN Sits in the Trust Boundary}
+\section{Where NOMAD Sits in the Trust Boundary}
 
-Zooming out, OAN's place in the overall Kernel Borderlands data flow is
+Zooming out, NOMAD's place in the overall Kernel Borderlands data flow is
 a single, sharp line:
 
 \begin{figure}[h!]
@@ -852,14 +852,14 @@ a single, sharp line:
   \node[draw=black, thick, dashed, minimum height=2.0cm, right=1.3cm of kbc] (boundary) {};
   \node[above=0.05cm of boundary, font=\scriptsize\bfseries] {Trust Boundary};
 
-  \node[oanblock, right=1.3cm of boundary] (oan) {OAN};
+  \node[nomadblock, right=1.3cm of boundary] (nomad) {NOMAD};
   \draw[darr] (kbc) -- (boundary.west);
-  \draw[darr] (boundary.east) -- (oan);
+  \draw[darr] (boundary.east) -- (nomad);
 
   \node[below=0.55cm of core, font=\tiny, align=center, text width=6.6cm] {everything left of the boundary\\may fail under a full kernel compromise};
-  \node[below=0.55cm of oan, font=\tiny, align=center, text width=3.0cm] {remains\\independent};
+  \node[below=0.55cm of nomad, font=\tiny, align=center, text width=3.0cm] {remains\\independent};
 \end{tikzpicture}
-\figcap{Everything to the left of the trust boundary shares one kernel, and so shares one failure mode. OAN is the only component structurally guaranteed to still be telling the truth on the right.}
+\figcap{Everything to the left of the trust boundary shares one kernel, and so shares one failure mode. NOMAD is the only component structurally guaranteed to still be telling the truth on the right.}
 \label{fig:boundary}
 \end{figure}
 
@@ -871,7 +871,7 @@ Hardware fencing is the \emph{last} resort, not the first. It sits at
 the bottom of a five-stage recovery ladder, built on top of
 \texttt{kb-checker}'s existing three-stage software chain
 (\texttt{systemctl stop} $\to$ \texttt{SIGKILL} $\to$ \texttt{iptables}
-drop). OAN owns only the final stage.
+drop). NOMAD owns only the final stage.
 
 \begin{figure}[h!]
 \centering
@@ -880,27 +880,27 @@ drop). OAN owns only the final stage.
   \node[block, below=of s1, minimum width=8.4cm] (s2) {Stage 2 -- Process restart\\\scriptsize \texttt{systemctl stop} \(\to\) \texttt{SIGKILL}};
   \node[block, below=of s2, minimum width=8.4cm] (s3) {Stage 3 -- Policy isolation\\\scriptsize CPM containment policy actions};
   \node[block, below=of s3, minimum width=8.4cm] (s4) {Stage 4 -- Network fencing\\\scriptsize \texttt{iptables} drop};
-  \node[oanblock, below=of s4, minimum width=8.4cm, very thick] (s5) {Stage 5 -- Hardware fencing (requires OAN)\\\scriptsize relay cutoff -- power or reset};
+  \node[nomadblock, below=of s4, minimum width=8.4cm, very thick] (s5) {Stage 5 -- Hardware fencing (requires NOMAD)\\\scriptsize relay cutoff -- power or reset};
 
   \draw[arr] (s1) -- (s2);
   \draw[arr] (s2) -- (s3);
   \draw[arr] (s3) -- (s4);
   \draw[arr] (s4) -- (s5);
 \end{tikzpicture}
-\figcap{The recovery ladder. Stages 1--4 are entirely within \texttt{kb-checker}'s existing software authority; only Stage 5 needs OAN, and only after every stage above it has already failed.}
+\figcap{The recovery ladder. Stages 1--4 are entirely within \texttt{kb-checker}'s existing software authority; only Stage 5 needs NOMAD, and only after every stage above it has already failed.}
 \label{fig:ladder}
 \end{figure}
 
 Because Stage 5 sits strictly below the existing chain, a healthy host
-never reaches OAN's relay at all --- the four software stages above it
+never reaches NOMAD's relay at all --- the four software stages above it
 already resolve the overwhelming majority of incidents on their own.
 
 % =====================================================================
 \section{Scaling to a Fleet: the Shared Chassis Design}
 \label{sec:scaling}
 
-A single OAN unit protects a single host. Most real deployments protect
-more than one machine, so OAN's reference architecture is a
+A single NOMAD unit protects a single host. Most real deployments protect
+more than one machine, so NOMAD's reference architecture is a
 \textbf{shared chassis}: one physical box that supervises up to
 \textbf{five hosts} at once, capped deliberately rather than grown
 further.
@@ -909,10 +909,10 @@ further.
 \centering
 \begin{tikzpicture}[font=\scriptsize, node distance=0.5cm and 0.6cm]
 
-  \node[oanblock, minimum width=2.0cm] (sbc) {SBC\\shared};
-  \node[oanblock, right=of sbc, minimum width=2.0cm] (esp) {ESP32\\shared};
-  \node[oanblock, right=of esp, minimum width=2.0cm] (tpm) {TPM\\shared};
-  \node[oanblock, right=of tpm, minimum width=2.0cm] (disp) {Display\\shared};
+  \node[nomadblock, minimum width=2.0cm] (sbc) {SBC\\shared};
+  \node[nomadblock, right=of sbc, minimum width=2.0cm] (esp) {ESP32\\shared};
+  \node[nomadblock, right=of esp, minimum width=2.0cm] (tpm) {TPM\\shared};
+  \node[nomadblock, right=of tpm, minimum width=2.0cm] (disp) {Display\\shared};
 
   \node[block, below=1.0cm of sbc, minimum width=1.7cm] (c1) {STM32\\ch. 1};
   \node[block, right=0.35cm of c1, minimum width=1.7cm] (c2) {STM32\\ch. 2};
@@ -923,7 +923,7 @@ further.
   \draw[arr] (sbc.south) -- ++(0,-0.22) -| (c2.north);
   \draw[arr] (sbc.south) -- ++(0,-0.22) -| (c5.north);
 
-  \node[groupbox, fit=(sbc)(esp)(tpm)(disp)(c1)(c2)(c3)(c5), inner sep=0.35cm, label={[font=\small\bfseries]above:Shared OAN chassis -- max 5 hosts}] (chassis) {};
+  \node[groupbox, fit=(sbc)(esp)(tpm)(disp)(c1)(c2)(c3)(c5), inner sep=0.35cm, label={[font=\small\bfseries]above:Shared NOMAD chassis -- max 5 hosts}] (chassis) {};
 
   \node[hostblock, below=1.9cm of c1] (h1) {Host 1};
   \node[hostblock, below=1.9cm of c2] (h2) {Host 2};
@@ -1052,7 +1052,7 @@ Every KB node remains fully capable of protecting itself without FMS.
 
 FMS is never part of the runtime security path. Without it, every node
 still has \texttt{kb-core}, \texttt{kb-control-plane}, \texttt{kb-checker},
-local OAN attestation, local recovery, and local fencing --- nothing
+local NOMAD attestation, local recovery, and local fencing --- nothing
 about single-host protection changes. With FMS, the fleet additionally
 gains visibility, policy synchronization, fleet-wide recovery
 coordination, and a single inventory. Losing FMS costs coordination,
@@ -1062,7 +1062,7 @@ never protection:
 \begin{tikzpicture}[font=\footnotesize, node distance=0.5cm]
   \node[block, minimum width=5.4cm] (f) {FMS failure or unavailability};
   \node[block, below=of f, minimum width=6.6cm] (c) {Loss of cluster management\\\scriptsize (visibility, policy sync, fleet recovery)};
-  \node[oanblock, below=of c, minimum width=7.6cm] (n) {NO loss of local, per-host protection};
+  \node[nomadblock, below=of c, minimum width=7.6cm] (n) {NO loss of local, per-host protection};
   \draw[arr] (f) -- (c);
   \draw[arr] (c) -- (n);
 \end{tikzpicture}
@@ -1085,8 +1085,8 @@ integrity status, and nothing more:
   \node[hostblock] (core) {kb-core};
   \node[hostblock, right=of core] (cp) {kb-control-plane};
   \node[hostblock, right=of cp] (kbc) {kb-checker};
-  \node[oanblock, right=of kbc] (sum) {Signed summary};
-  \node[oanblock, right=of sum] (fms) {FMS};
+  \node[nomadblock, right=of kbc] (sum) {Signed summary};
+  \node[nomadblock, right=of sum] (fms) {FMS};
   \draw[arr] (core) -- (cp);
   \draw[arr] (cp) -- (kbc);
   \draw[arr] (kbc) -- (sum);
@@ -1095,7 +1095,7 @@ integrity status, and nothing more:
 \end{center}
 
 Because that summary is signed against the same TPM that already seals
-both OAN's own state and the host's attestation (\S\ref{sec:tpm-relay}),
+both NOMAD's own state and the host's attestation (\S\ref{sec:tpm-relay}),
 FMS can trust what it receives without ever needing raw access to
 anything privileged --- and a compromised Fabric Management Plane still
 cannot forge a clean report for a host that is actually compromised.
@@ -1111,7 +1111,7 @@ cannot forge a clean report for a host that is actually compromised.
 Fabric Discovery & Finds new KB deployments automatically: registration, hardware fingerprinting, platform and version detection. \\
 Node Registry & Keeps the inventory --- node ID, hostname, platform, kernel version, family, colony, health, trust status, last heartbeat. \\
 Membership Management & Join/leave Fabric, node removal, family migration, colony reassignment. \\
-Health Monitoring & Host availability, resource usage, \texttt{kb-core}/\texttt{kb-checker}/OAN connectivity, heartbeat. \\
+Health Monitoring & Host availability, resource usage, \texttt{kb-core}/\texttt{kb-checker}/NOMAD connectivity, heartbeat. \\
 Policy Management & Define a security policy once; deploy it to a Fabric, a Colony, a Family, or a single Node. \\
 Event Aggregation & Unified timeline across every node --- search, indexing, historical record. \\
 Cross-Host Correlation & Surfaces shared indicators and simultaneous anomalies across the fleet, in cooperation with \texttt{kb-aads}. \\
@@ -1131,7 +1131,7 @@ can always override a broader default:
   \node[block, minimum width=4.0cm] (g) {Global Policy -- Fabric};
   \node[block, below=of g, minimum width=4.0cm] (c) {Colony Policy};
   \node[block, below=of c, minimum width=4.0cm] (f) {Family Policy};
-  \node[oanblock, below=of f, minimum width=4.6cm] (n) {Node Policy -- can override inherited defaults};
+  \node[nomadblock, below=of f, minimum width=4.6cm] (n) {Node Policy -- can override inherited defaults};
   \draw[arr] (g) -- (c);
   \draw[arr] (c) -- (f);
   \draw[arr] (f) -- (n);
@@ -1139,9 +1139,9 @@ can always override a broader default:
 \end{center}
 
 Multiple Colonies never share a single point of failure at the trust
-layer: each Colony keeps its own OAN chassis and its own FMS instance,
+layer: each Colony keeps its own NOMAD chassis and its own FMS instance,
 with no global master coordinating between them. A Colony stays
-autonomous even if OANs are later given a way to synchronize with each
+autonomous even if NOMADs are later given a way to synchronize with each
 other for visibility --- autonomy is a property of the trust layer, not
 a limitation on convenience features built above it.
 
@@ -1278,7 +1278,7 @@ dollar by filling a chassis than by building single, standalone units.
 The parts list above uses reasonable retail defaults, not the cheapest
 possible build. A budget-constrained team can bring the shared-chassis
 cost down substantially by swapping specific parts --- without touching
-OAN's architecture or its guarantees.
+NOMAD's architecture or its guarantees.
 
 \begin{center}
 \renewcommand{\arraystretch}{1.3}
@@ -1332,9 +1332,9 @@ Two line items are never on the table, at any budget:
 \begin{itemize}
   \item \textbf{The discrete TPM.} It is the one component whose entire
     job is being the thing a compromised host cannot fake. A software
-    firmware-TPM would put OAN's own root of trust on the same silicon
-    as its general-purpose SBC --- reintroducing, inside OAN itself,
-    the exact same-failure-domain problem OAN exists to solve for the
+    firmware-TPM would put NOMAD's own root of trust on the same silicon
+    as its general-purpose SBC --- reintroducing, inside NOMAD itself,
+    the exact same-failure-domain problem NOMAD exists to solve for the
     host.
   \item \textbf{The STM32 split.} Folding the watchdog and relay logic
     back onto the SBC to save a few dollars would recreate the ``the
@@ -1347,7 +1347,7 @@ Two line items are never on the table, at any budget:
 \section{The Production Appliance}
 \label{sec:appliance-final}
 
-Beyond the bench-buildable chassis, OAN's production form factor is a
+Beyond the bench-buildable chassis, NOMAD's production form factor is a
 single enclosed appliance:
 
 \begin{figure}[h!]
@@ -1395,7 +1395,7 @@ rack or a desk rather than loose dev boards on a breadboard.
 % =====================================================================
 \section{Why This Architecture Works}
 
-Every component in OAN has exactly one job, and no component both makes
+Every component in NOMAD has exactly one job, and no component both makes
 the security decision and runs the general-purpose networked operating
 system:
 
@@ -1408,14 +1408,14 @@ system:
 SBC & Decision-making, attestation, fleet management \\
 STM32 & Deterministic safety, watchdog, relay control \\
 ESP32 & Management communication and provisioning \\
-TPM & Hardware trust anchor for both OAN and the host \\
+TPM & Hardware trust anchor for both NOMAD and the host \\
 Relay & Physical host fencing \\
 Display & Local, read-only operational interface \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-That separation is what lets OAN make a claim no purely-software
+That separation is what lets NOMAD make a claim no purely-software
 watchdog can: even if the SBC crashes, even if the ESP32 is fully
 compromised over the network, and even if the host's own kernel is
 lying about everything it reports, the STM32 still keeps its clock, the
@@ -1426,10 +1426,10 @@ TPM still keeps its keys, and the relay still works.
 \label{sec:properties}
 
 A design is only as trustworthy as its stated boundaries. This section
-makes both halves explicit: what OAN guarantees, and what it
+makes both halves explicit: what NOMAD guarantees, and what it
 deliberately leaves to other parts of Kernel Borderlands.
 
-\subsection{What OAN Guarantees}
+\subsection{What NOMAD Guarantees}
 
 \begin{center}
 \renewcommand{\arraystretch}{1.35}
@@ -1440,13 +1440,13 @@ deliberately leaves to other parts of Kernel Borderlands.
 \midrule
 Detection of a fully compromised host kernel & The heartbeat
 (\S\ref{sec:heartbeat}) never routes through the host's kernel to
-reach OAN -- there is no code path for a compromised kernel to
+reach NOMAD -- there is no code path for a compromised kernel to
 intercept. \\
 Fencing that does not require host cooperation & The relay is wired to
 the STM32, which never runs code the host can influence
 (\S\ref{sec:stm32}). \\
-Tamper-evidence of OAN's own state & Sealed against the TPM, covering
-both OAN's own boot state and the host's reported measurements
+Tamper-evidence of NOMAD's own state & Sealed against the TPM, covering
+both NOMAD's own boot state and the host's reported measurements
 (\S\ref{sec:tpm-relay}). \\
 Fleet coordination that cannot weaken any single host & The Local
 Autonomy Principle (\S\ref{sec:autonomy}) makes this true by
@@ -1455,29 +1455,29 @@ construction, not by discipline. \\
 \end{tabular}
 \end{center}
 
-\subsection{What OAN Does Not Do}
+\subsection{What NOMAD Does Not Do}
 
 \begin{itemize}
   \item \textbf{It does not detect intrusions.} That is
     \texttt{kb-core}, \texttt{kb-control-plane}, and \texttt{kb-aads}'s
-    job. OAN only verifies that the components doing that job are
+    job. NOMAD only verifies that the components doing that job are
     themselves still honest -- it has no opinion on process behavior,
     network traffic, or file activity.
   \item \textbf{It does not protect against physical access to itself.}
     A chassis that an attacker can physically open, rewire, or replace
     is a different threat model (physical security of the room),
-    outside OAN's own scope.
+    outside NOMAD's own scope.
   \item \textbf{It does not eliminate the need for the four software
-    recovery stages.} OAN is Stage 5 of five (\S\ref{sec:recovery}) --
+    recovery stages.} NOMAD is Stage 5 of five (\S\ref{sec:recovery}) --
     the overwhelming majority of real incidents are expected to resolve
-    at Stages 1--4, long before OAN's relay is ever involved.
+    at Stages 1--4, long before NOMAD's relay is ever involved.
   \item \textbf{It does not make the Fabric Management Plane
     trust-critical.} FMS coordinates; it never authorizes
     (\S\ref{sec:fms}).
 \end{itemize}
 
 \begin{plainbox}
-A useful one-line summary: OAN answers exactly one question --
+A useful one-line summary: NOMAD answers exactly one question --
 ``can I still trust what this host is telling me?'' -- and answers it
 in a way a fully compromised host cannot fake. It intentionally does
 not try to answer any other question.
@@ -1498,7 +1498,7 @@ compromised, and still talking.
 \begin{analogybox}
 A courtroom only works if the witness is telling the truth. A locked
 door on the witness stand doesn't help if someone has already gotten
-to the witness before they walked in. OAN's heartbeat
+to the witness before they walked in. NOMAD's heartbeat
 (\S\ref{sec:heartbeat}) is that witness stand -- and up to this point,
 every guarantee this document has made assumes the witness is honest.
 This section is about what happens the moment that assumption breaks.
@@ -1526,10 +1526,10 @@ of them well.
 
   \node[draw=black!60, dashed, rounded corners=2pt, fill=gray!3, below=0.6cm of silent,
     font=\tiny, align=left, text width=4.2cm, inner sep=4pt] (silentnote)
-    {\textbf{What OAN sees:} no heartbeat arrives. Timer expires, fail-closed policy fires -- \S\ref{sec:heartbeat}. \textbf{Well covered.}};
+    {\textbf{What NOMAD sees:} no heartbeat arrives. Timer expires, fail-closed policy fires -- \S\ref{sec:heartbeat}. \textbf{Well covered.}};
   \node[draw=black!60, dashed, rounded corners=2pt, fill=gray!3, below=0.6cm of lying,
     font=\tiny, align=left, text width=4.2cm, inner sep=4pt] (lyingnote)
-    {\textbf{What OAN sees, today:} a clean, on-time, validly-signed attestation. \textbf{Not covered yet.}};
+    {\textbf{What NOMAD sees, today:} a clean, on-time, validly-signed attestation. \textbf{Not covered yet.}};
 
   \draw[arr] (silent.south) -- (silentnote.north);
   \draw[arr] (lying.south) -- (lyingnote.north);
@@ -1643,20 +1643,20 @@ impersonate it from then on, forever, with no watchdog left to notice.
 
 \begin{notebox}[Which TPM]
 Every mechanism in this and the next subsection uses the \emph{host's
-own} TPM 2.0 -- physically on the protected machine, not OAN's. A TPM
+own} TPM 2.0 -- physically on the protected machine, not NOMAD's. A TPM
 can only make a hardware-backed statement about the machine it is
-part of; OAN's own TPM (\S\ref{sec:tpm-relay}) can seal OAN's own
+part of; NOMAD's own TPM (\S\ref{sec:tpm-relay}) can seal NOMAD's own
 integrity and verify what \texttt{kb-checker} reports, but it cannot
 attest to the host's measured-boot chain from across the OOB link --
 there is no hardware path between them. Essentially every modern
 server or workstation already ships with one, discrete or firmware
 (Intel PTT~\cite{intelptt}, AMD fTPM~\cite{amdftpm}), for Secure Boot or disk encryption. Zero new
-hardware, and no tension with \texttt{oan-cheap.md} \S3.7's rejection
+hardware, and no tension with \texttt{nomad-cheap.md} \S3.7's rejection
 of fTPM: that argument is specifically about not substituting the
-host's fTPM for \emph{OAN's own} independent trust anchor. Using the
+host's fTPM for \emph{NOMAD's own} independent trust anchor. Using the
 host's already-present TPM for a host-local job is a different
 question, and this is precisely the case where a firmware TPM is
-exactly what \texttt{oan-cheap.md} itself calls ``genuinely free.''
+exactly what \texttt{nomad-cheap.md} itself calls ``genuinely free.''
 \end{notebox}
 
 \begin{figure}[h!]
@@ -1672,7 +1672,7 @@ exactly what \texttt{oan-cheap.md} itself calls ``genuinely free.''
 
   \node[font=\bfseries\small, right=2.4cm of t1] (t2) {Key Inside the Host's TPM};
   \node[hostblock, below=0.5cm of t2, minimum width=3.2cm] (kbc2) {\texttt{kb-checker}\\\scriptsize holds no key material};
-  \node[oanblock, below=0.7cm of kbc2, minimum width=3.2cm] (tpm2) {TPM 2.0 (host)\\\scriptsize signs on request only};
+  \node[nomadblock, below=0.7cm of kbc2, minimum width=3.2cm] (tpm2) {TPM 2.0 (host)\\\scriptsize signs on request only};
   \node[block, below=0.7cm of tpm2, fill=gray!25, minimum width=3.0cm] (att2) {Ring-0 attacker};
   \draw[arr] (kbc2.south) -- (tpm2.north) node[midway, right, font=\tiny]{request sign};
   \draw[arr] (att2.north) -- (tpm2.south) node[midway, right, font=\tiny, align=left]{ask TPM\\to sign};
@@ -1734,7 +1734,7 @@ new hardware -- extends a PCR every time a kernel module loads.
 
   \node[groupbox, fit=(fw)(bl)(kern)(ima), inner sep=0.3cm] (chain) {};
 
-  \node[oanblock, below=1.6cm of chain, minimum width=5.4cm] (sealed) {Key sealed at boot: usable only if\\PCR digest = this known-clean value};
+  \node[nomadblock, below=1.6cm of chain, minimum width=5.4cm] (sealed) {Key sealed at boot: usable only if\\PCR digest = this known-clean value};
   \draw[darr] (chain.south) -- (sealed.north);
 
   \node[hostblock, below=1.5cm of sealed, xshift=-2.9cm, minimum width=4.0cm] (clean) {No new module loads\\\scriptsize PCR digest still matches};
@@ -1937,8 +1937,8 @@ installed version usually resolves it in one look.
     zero new hardware cost, same as everything else in this section.
   \item \textbf{Upstream compromise of the measurement chain itself}
     (firmware, bootloader, Secure Boot bypass) is a different, higher-effort
-    threat class this doesn't address -- and isn't really OAN's problem
-    to solve; it's the layer OAN's own trust starts from.
+    threat class this doesn't address -- and isn't really NOMAD's problem
+    to solve; it's the layer NOMAD's own trust starts from.
   \item \textbf{Real operational cost.} Every legitimate kernel update
     or intentionally-added module requires re-sealing the key against a
     new expected PCR digest. That is a key-management process that has
@@ -1969,7 +1969,7 @@ narrower thing than ``any memory-corruption bug.''
   \node[block, below=of b1, minimum width=7.6cm, minimum height=0.9cm] (b2) {Needs a working info leak, or doesn't need reliable addressing at all};
   \node[block, below=of b2, minimum width=7.6cm, minimum height=0.9cm] (b3) {Reuses existing code (ROP/JOP) or corrupts data only -- no new code};
   \node[block, below=of b3, minimum width=7.6cm, minimum height=0.9cm] (b4) {Heap corruption, use-after-free, type confusion, or non-stack data-only};
-  \node[oanblock, below=of b4, minimum width=7.6cm, minimum height=1.1cm] (b5) {Memory-corruption-only, already-measured code, no info leak, evades \S\ref{sec:cross-consistency}--\S\ref{sec:clock-crosscheck}};
+  \node[nomadblock, below=of b4, minimum width=7.6cm, minimum height=1.1cm] (b5) {Memory-corruption-only, already-measured code, no info leak, evades \S\ref{sec:cross-consistency}--\S\ref{sec:clock-crosscheck}};
 
   \draw[arr] (b1) -- (b2) node[midway, right, font=\tiny, align=left, text width=4.4cm]{ASLR/KASLR + KPTI\\removes reliable exploitation without an info leak};
   \draw[arr] (b2) -- (b3) node[midway, right, font=\tiny, align=left, text width=4.4cm]{\texttt{STRICT\_KERNEL\_RWX}\\removes code injection};
@@ -2119,7 +2119,7 @@ logging/alert-only mode, and treat its findings the same way this
 document treats every other same-privilege-level signal -- as one more
 contributor to the \emph{content implausibility} bucket in
 \S\ref{sec:classify}, not as an autonomous enforcement action. The one
-place that gets to take a disruptive action stays OAN's own
+place that gets to take a disruptive action stays NOMAD's own
 deliberately-chosen fail-open/fail-closed relay policy
 (\S\ref{sec:tpm-relay}) -- not a second, uncoordinated kill switch
 racing the attacker inside the kernel on its own terms. Deployed this
@@ -2167,7 +2167,7 @@ trusted individually.
 \begin{tikzpicture}[node distance=0.5cm and 0.9cm, font=\footnotesize]
   \node[hostblock, minimum width=3.2cm] (core) {\texttt{kb-core}\\\scriptsize eBPF view, kernel-side};
   \node[hostblock, right=1.8cm of core, minimum width=3.2cm] (kbc) {\texttt{kb-checker}\\\scriptsize syscall/\texttt{/proc} view};
-  \node[oanblock, below=1.0cm of core, xshift=1.8cm, minimum width=3.6cm] (cmp) {Compare -- \texttt{kbd} or OAN's SBC};
+  \node[nomadblock, below=1.0cm of core, xshift=1.8cm, minimum width=3.6cm] (cmp) {Compare -- \texttt{kbd} or NOMAD's SBC};
   \draw[arr] (core.south) -- ++(0,-0.3) -| (cmp.north);
   \draw[arr] (kbc.south) -- ++(0,-0.3) -| (cmp.north);
   \node[block, below=0.7cm of cmp, minimum width=4.4cm, fill=gray!22] (flag) {Divergence on the same fact\\\scriptsize (process list, loaded modules, sockets) -- flagged};
@@ -2178,7 +2178,7 @@ trusted individually.
   \node[hostblock, below=1.9cm of panel1.south, minimum width=3.0cm, xshift=-2.2cm] (write) {\texttt{kb-checker}\\\scriptsize writes signed, nonced canary};
   \node[block, below=1.0cm of write, minimum width=2.6cm] (syscall) {Read via syscall path};
   \node[block, right=0.5cm of syscall, minimum width=2.6cm] (bpfread) {Read via direct BPF map iteration};
-  \node[oanblock, below=0.8cm of syscall, xshift=1.55cm, minimum width=3.2cm] (cmp2) {Compare};
+  \node[nomadblock, below=0.8cm of syscall, xshift=1.55cm, minimum width=3.2cm] (cmp2) {Compare};
   \draw[arr] (write.south) -- ++(0,-0.3) -| (syscall.north);
   \draw[arr] (write.south) -- ++(0,-0.3) -| (bpfread.north);
   \draw[arr] (syscall.south) -- ++(0,-0.2) -| (cmp2.north);
@@ -2197,7 +2197,7 @@ isn't automatically clever enough to also hide from an eBPF hook
 watching the same fact from a different angle, and vice versa --
 maintaining two consistent lies across two independent code paths is
 strictly harder than maintaining one. Forwarding both views to a
-single comparison point (\texttt{kbd}, or OAN's SBC over the OOB link)
+single comparison point (\texttt{kbd}, or NOMAD's SBC over the OOB link)
 costs nothing new to build; it's a comparison, not a component.
 
 The canary variant sharpens this further: have \texttt{kb-checker}
@@ -2213,7 +2213,7 @@ Interception adds latency even when the forged output looks perfect --
 intercepting a syscall, computing a plausible lie, and returning it
 takes measurably longer than the kernel simply answering honestly.
 Have \texttt{kb-checker} include its own attestation-generation time
-in the signed payload, and have OAN's SBC track the \emph{distribution}
+in the signed payload, and have NOMAD's SBC track the \emph{distribution}
 of that latency over the heartbeat interval, not any single sample.
 
 \begin{plainbox}
@@ -2227,7 +2227,7 @@ plausible at all.
 \subsection{Cross-Checking the Clock Itself}
 \label{sec:clock-crosscheck}
 
-OAN's SBC has its own independent wall clock by construction -- it is
+NOMAD's SBC has its own independent wall clock by construction -- it is
 a physically separate computer (\S\ref{sec:architecture}). Have
 \texttt{kb-checker}'s attestation carry a monotonic counter and an
 uptime figure, and have the SBC flag any inconsistency against the
@@ -2240,7 +2240,7 @@ built.
 \label{sec:classify}
 
 Fencing alone answers ``do something.'' It doesn't answer ``what
-happened,'' and a report that just says \emph{OAN tripped} is barely
+happened,'' and a report that just says \emph{NOMAD tripped} is barely
 more useful than silence itself. The mitigations above don't need to
 share one fencing trigger -- they need to feed one classification,
 attached to the recovery event and surfaced through FMS
@@ -2269,8 +2269,8 @@ beneath it is lying to it -- the confused-deputy case, specifically. \\
 \end{tabular}
 \end{center}
 
-That classification is the difference between ``OAN tripped'' and
-``OAN tripped, category: cryptographic failure, consistent with an
+That classification is the difference between ``NOMAD tripped'' and
+``NOMAD tripped, category: cryptographic failure, consistent with an
 unauthorized kernel module load.'' The second is something an operator
 can actually act on.
 
@@ -2406,10 +2406,10 @@ the re-sealing process lives operationally.
 \end{notebox}
 
 % =====================================================================
-\section{How OAN Compares to Existing Approaches}
+\section{How NOMAD Compares to Existing Approaches}
 \label{sec:comparison}
 
-OAN's shape -- an independent management processor, a hardware root of
+NOMAD's shape -- an independent management processor, a hardware root of
 trust, a physically separate network -- is not invented from nothing.
 It follows patterns already proven at scale in adjacent fields, adapted
 to Kernel Borderlands' specific job.
@@ -2419,27 +2419,27 @@ to Kernel Borderlands' specific job.
 \small
 \begin{tabular}{@{}p{3.4cm}p{5.2cm}p{5.0cm}@{}}
 \toprule
-\textbf{Approach} & \textbf{What it shares with OAN} & \textbf{Where OAN differs} \\
+\textbf{Approach} & \textbf{What it shares with NOMAD} & \textbf{Where NOMAD differs} \\
 \midrule
 Enterprise BMC / IPMI~\cite{dmtfipmi} & Independent management processor, dedicated
 network, works even if the main OS is down. & A BMC typically manages
-one server for remote administration; OAN's primary purpose is
+one server for remote administration; NOMAD's primary purpose is
 security attestation and fencing, with fleet management
 (\S\ref{sec:fms}) built on top, not the other way around. \\
 Hardware Security Module (HSM)~\cite{fips140} & Hardware-rooted key storage, tamper
-resistance. & An HSM protects keys for applications to use; OAN's TPM
+resistance. & An HSM protects keys for applications to use; NOMAD's TPM
 protects an attestation and fencing decision, not application
 cryptography. \\
 Academic out-of-band attestation research & Physically separate
 verifier, independent of the host's own trust chain. & Most published
-designs stop at detection; OAN adds a deterministic, host-independent
+designs stop at detection; NOMAD adds a deterministic, host-independent
 fencing action (\S\ref{sec:stm32}) as a first-class part of the
 design, not a follow-on. \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The honest framing is that OAN combines ideas each of these fields has
+The honest framing is that NOMAD combines ideas each of these fields has
 already validated individually, applied together to one job: keeping
 Kernel Borderlands' own trust anchor outside the reach of the exact
 compromise it exists to catch.
@@ -2450,7 +2450,7 @@ compromise it exists to catch.
 
 \begin{description}[leftmargin=1.2em, style=nextline, itemsep=0.7em]
 
-\item[Can an attacker just unplug OAN?] \hfill \\
+\item[Can an attacker just unplug NOMAD?] \hfill \\
 Physically, yes -- and that is a deliberate, visible action rather than
 a silent software bypass. Because \texttt{kb-checker} expects a
 heartbeat response on a fixed schedule (\S\ref{sec:heartbeat}), losing
@@ -2458,14 +2458,14 @@ the OOB link at all is itself the failure condition the fail-closed
 policy is built to catch: no response, past timeout, triggers fencing
 just as surely as an invalid response would.
 
-\item[What stops someone from swapping OAN's SBC for a fake one that
+\item[What stops someone from swapping NOMAD's SBC for a fake one that
 always reports ``healthy''?] \hfill \\
 The TPM. A forged SBC has no path to the sealed measurements the real
 SBC's measured boot produced, so it cannot produce a verification the
 TPM accepts (\S\ref{sec:tpm-relay}). This is exactly the property a
 software-only check could not offer.
 
-\item[Does OAN need to trust the network it runs on?] \hfill \\
+\item[Does NOMAD need to trust the network it runs on?] \hfill \\
 The OOB Trust Plane, no -- it is physically isolated from any
 production network by design (\S\ref{sec:planes}). The Fabric
 Management Plane runs on ordinary networking, but it never carries
@@ -2485,18 +2485,18 @@ only whether the STM32 is allowed to act on a missed one.
 all independently point at the same number -- see
 \S\ref{sec:scaling}'s ``Why Cap at Five Hosts'' for the full reasoning.
 
-\item[Is OAN required to use Kernel Borderlands at all?] \hfill \\
+\item[Is NOMAD required to use Kernel Borderlands at all?] \hfill \\
 No. Every host keeps full protection from \texttt{kb-core},
-\texttt{kb-control-plane}, and \texttt{kb-checker} with no OAN present
-at all. OAN adds a hardware trust anchor on top of an already-complete
+\texttt{kb-control-plane}, and \texttt{kb-checker} with no NOMAD present
+at all. NOMAD adds a hardware trust anchor on top of an already-complete
 software stack; it is a hardening layer, not a dependency.
 
 \end{description}
 
 % =====================================================================
-\section{Positioning: What OAN Adds to Kernel Borderlands}
+\section{Positioning: What NOMAD Adds to Kernel Borderlands}
 
-OAN extends Kernel Borderlands beyond a software-only runtime defense
+NOMAD extends Kernel Borderlands beyond a software-only runtime defense
 framework by introducing a genuinely independent, hardware-assisted
 trust layer. It gives the platform a verification domain that can
 monitor host integrity, validate runtime attestation, coordinate
@@ -2521,7 +2521,7 @@ hardware and guarantees the phase before it already established.
 \begin{tikzpicture}[font=\scriptsize, node distance=0.55cm and 0.7cm]
   \node[block, minimum width=4.3cm, minimum height=1.3cm] (p1)
     {\textbf{Phase 1 -- Bench Prototype}\\single host, loose dev boards\\\S\ref{sec:bom}};
-  \node[oanblock, right=of p1, minimum width=4.3cm, minimum height=1.3cm] (p2)
+  \node[nomadblock, right=of p1, minimum width=4.3cm, minimum height=1.3cm] (p2)
     {\textbf{Phase 2 -- Shared Chassis Pilot}\\up to five hosts, one chassis\\\S\ref{sec:scaling}, \S\ref{sec:walkthrough}};
   \node[block, right=of p2, minimum width=4.3cm, minimum height=1.3cm, fill=gray!22] (p3)
     {\textbf{Phase 3 -- Production Appliance}\\enclosed, rack or desk\\\S\ref{sec:properties}};
@@ -2581,7 +2581,7 @@ breadboard or Phase 3's appliance is bolted into a rack.
     proving ``I am in the state I claim to be in,'' backed by
     cryptography rather than trust alone.
   \item[BMC] Baseboard Management Controller -- the enterprise-server
-    equivalent of OAN's role: a small, independent management processor
+    equivalent of NOMAD's role: a small, independent management processor
     that keeps working even if the main OS is down~\cite{dmtfipmi}.
   \item[Confused Deputy] A program that is tricked into misusing its
     own legitimate authority on an attacker's behalf~\cite{hardy1988}
@@ -2712,7 +2712,7 @@ deployment walkthrough (\S\ref{sec:walkthrough}).
 \begin{itemize}[label=$\square$]
   \item Confirm the \emph{host's own} TPM 2.0 is present and enabled in
     firmware (Intel PTT / AMD fTPM, or discrete) -- this is separate
-    from OAN's own TPM and does the job described in
+    from NOMAD's own TPM and does the job described in
     \S\ref{sec:pcr-seal}, not the relay job in \S\ref{sec:tpm-relay}.
   \item Seal \texttt{kb-checker}'s OOB signing key to the host's own
     PCR values via \texttt{TPM2\_PolicyPCR}; verify the unseal succeeds
@@ -2754,14 +2754,14 @@ later, without re-reading the full document.
 \textbf{What} & \textbf{Answer} \\
 \midrule
 \endhead
-What OAN is & A physically separate hardware appliance that attests to
+What NOMAD is & A physically separate hardware appliance that attests to
 and can fence a Kernel Borderlands host, independent of that host's own
 kernel. \\
 What it talks to on the host & Only \texttt{kb-checker}, over a
 dedicated out-of-band link (\S\ref{sec:architecture}). \\
 Its three processors & SBC (brain), STM32 (spinal reflex), ESP32
 (mouth) -- \S\ref{sec:three-chips}. \\
-Its root of trust & A discrete TPM 2.0, sealing both OAN's own state
+Its root of trust & A discrete TPM 2.0, sealing both NOMAD's own state
 and the host's reported state (\S\ref{sec:tpm-relay}). \\
 Its failure policy & Configurable; defaults to fail-closed
 (\S\ref{sec:tpm-relay}). \\
@@ -2798,14 +2798,14 @@ documentation tree:
 \textbf{Section here} & \textbf{Source documentation} \\
 \midrule
 Problem, philosophy, architecture, hardware, heartbeat, recovery ladder &
-\path{docs/features/hardware-ext/} \newline \path{oan-hardware-appliance.md} \\[0.3em]
+\path{docs/features/hardware-ext/} \newline \path{nomad-hardware-appliance.md} \\[0.3em]
 Fleet scaling, Fabric $\to$ Colony $\to$ Family $\to$ Node, FMS
 responsibilities &
-\path{docs/features/hardware-ext/oan-fms.md} \\[0.3em]
+\path{docs/features/hardware-ext/nomad-fms.md} \\[0.3em]
 Budget build, cost-reduction levers &
-\path{docs/features/hardware-ext/oan-cheap.md} \\[0.3em]
+\path{docs/features/hardware-ext/nomad-cheap.md} \\[0.3em]
 Boot/rootkit compromise resistance, PCR-sealing, this section's markdown twin &
-\path{docs/features/hardware-ext/} \newline \path{oan-rootkit-resistance.md} \\[0.3em]
+\path{docs/features/hardware-ext/} \newline \path{nomad-rootkit-resistance.md} \\[0.3em]
 \texttt{kb-checker}'s existing software recovery chain &
 \path{kb-checker/README.md} \\[0.3em]
 Critical Process Module, ``fail closed toward protection'' &
@@ -2830,7 +2830,7 @@ down to a single host's own internal stack, stay at a readable size
 instead of being shrunk to fit a portrait column.
 
 The complete picture, top to bottom: the Fleet layer (FMS coordinating
-multiple Colonies), one Colony's shared OAN chassis, its per-host
+multiple Colonies), one Colony's shared NOMAD chassis, its per-host
 STM32/relay channels, the protected hosts themselves, and one host's
 own existing Kernel Borderlands software stack -- all five subsystems
 (\texttt{kb-core}, \texttt{kb-control-plane}, \texttt{kb-op},
@@ -2850,14 +2850,14 @@ Fabric \& FMS & Coordinates every Colony in the fleet (\S\ref{sec:fms}) -- non-s
 Other Colonies & The rest of the fleet -- each an independent, self-contained shared chassis exactly like the one drawn in full. \\
 SBC (shared) & The chassis's attestation/policy engine -- ``the brain'' (\S\ref{sec:three-chips}). Runs the software that talks TPM and drives the fleet link. \\
 ESP32 (shared) & ``The mouth'' -- management/comms only, kept out of the trust-critical path due to its larger, network-facing attack surface. \\
-TPM (shared) & OAN's own root of trust (\S\ref{sec:tpm-relay}) -- seals OAN's own integrity and verifies what \texttt{kb-checker} reports. Distinct from any host's own TPM (\S\ref{sec:pcr-seal}). \\
+TPM (shared) & NOMAD's own root of trust (\S\ref{sec:tpm-relay}) -- seals NOMAD's own integrity and verifies what \texttt{kb-checker} reports. Distinct from any host's own TPM (\S\ref{sec:pcr-seal}). \\
 Display (shared) & Optional, read-only reflection of SBC/STM32 state -- never a control surface. \\
 STM32 ch.~1--5 & ``The spinal reflex'' -- one deterministic safety-controller channel per host, each running the heartbeat/fencing logic independent of the SBC's own Linux failure domain. \\
 Relay & The physical fencing actuator each STM32 channel drives -- cuts a host's power or reset line on a fencing decision. \\
 Host 1--5 & The protected machines themselves, each wired to its own STM32 channel and carrying its own dedicated OOB link (Figure~3). \\
 \texttt{kb-core} & Ring-0 eBPF sensors on the host -- the deepest existing KB vantage point, and what the OOB Trust Plane ultimately corroborates. \\
 \texttt{kb-control-plane} (\texttt{kbd}) & Ingests \texttt{kb-core}'s telemetry over \texttt{kbd.sock}, scores it, and pushes containment/control back down over the separate \texttt{kbct.sock}. \\
-\texttt{kb-checker} & The existing software watchdog -- watches the rest of the stack independently, and is the one component that also feeds the OOB Trust Plane up to OAN's SBC (Figure~2). \\
+\texttt{kb-checker} & The existing software watchdog -- watches the rest of the stack independently, and is the one component that also feeds the OOB Trust Plane up to NOMAD's SBC (Figure~2). \\
 \texttt{kb-op} & Operator interfaces -- \texttt{kb-tui}, \texttt{kb-dashboard}, \texttt{kbctl}, \texttt{kb-mcp} -- talking to \texttt{kbd} over gRPC/WebSockets. \\
 \texttt{kb-aads} & The Python agent swarm, driven by the same \texttt{kbd} API as \texttt{kb-op}. \\
 \bottomrule
@@ -2870,10 +2870,10 @@ Host 1--5 & The protected machines themselves, each wired to its own STM32 chann
 \begin{tikzpicture}[font=\scriptsize, node distance=0.5cm and 0.6cm]
 
   % ---- Shared chassis row ----
-  \node[oanblock, minimum width=2.0cm] (sbc) {SBC\\shared};
-  \node[oanblock, right=of sbc, minimum width=2.0cm] (esp) {ESP32\\shared};
-  \node[oanblock, right=of esp, minimum width=2.0cm] (tpm) {TPM\\shared};
-  \node[oanblock, right=of tpm, minimum width=2.0cm] (disp) {Display\\shared};
+  \node[nomadblock, minimum width=2.0cm] (sbc) {SBC\\shared};
+  \node[nomadblock, right=of sbc, minimum width=2.0cm] (esp) {ESP32\\shared};
+  \node[nomadblock, right=of esp, minimum width=2.0cm] (tpm) {TPM\\shared};
+  \node[nomadblock, right=of tpm, minimum width=2.0cm] (disp) {Display\\shared};
 
   % ---- STM32 channel row ----
   \node[block, below=1.0cm of sbc, minimum width=1.7cm] (c1) {STM32\\ch. 1};
@@ -2886,11 +2886,11 @@ Host 1--5 & The protected machines themselves, each wired to its own STM32 chann
   \draw[arr] (sbc.south) -- ++(0,-0.22) -| (c5.north);
 
   \node[groupbox, fit=(sbc)(esp)(tpm)(disp)(c1)(c2)(c3)(c5), inner sep=0.35cm] (chassis) {};
-  \node[font=\small\bfseries] at ($(chassis.north)+(0,0.35)$) {One Colony -- shared OAN chassis, max 5 hosts (\S13)};
+  \node[font=\small\bfseries] at ($(chassis.north)+(0,0.35)$) {One Colony -- shared NOMAD chassis, max 5 hosts (\S13)};
 
   % ---- Fleet layer, as a compact side branch off the chassis (reads on
   % the side, not stacked above -- keeps the tight dimension short) ----
-  \node[oanblock, left=1.4cm of chassis, minimum width=2.8cm, yshift=0.9cm] (fabric)
+  \node[nomadblock, left=1.4cm of chassis, minimum width=2.8cm, yshift=0.9cm] (fabric)
     {Fabric \& FMS\\\scriptsize coordinates\\every Colony (\S14)};
   \draw[darr] (fabric.east) -- (chassis.west);
   \node[block, below=0.4cm of fabric, minimum width=2.8cm, font=\tiny, align=center] (othercol)
@@ -3036,7 +3036,7 @@ Host 1--5 & The protected machines themselves, each wired to its own STM32 chann
 
 \vspace{0.6em}
 
-{\normalsize for reading through the Out-of-Band Attestation Node design}
+{\normalsize for reading through the Node Out-of-Band Module for Attestation \& Defense design}
 
 \vspace{1.8cm}
 
