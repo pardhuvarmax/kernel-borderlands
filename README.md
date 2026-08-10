@@ -64,3 +64,11 @@ python main.py
 cd kb-op/kb-dashboard
 npm run dev
 ```
+
+### Team Kernel Borderlands :
+
+-    K. Pardhu 
+-    K. Tejaswini
+-    K. Karthik 
+-    K. Rupa Yeshvitha 
+
