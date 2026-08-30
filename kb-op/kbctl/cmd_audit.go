@@ -39,10 +39,9 @@ var auditVerifyCmd = &cobra.Command{
 
 		fmt.Printf("CHAIN BROKEN — %d entries verified before break\n", resp.EntriesVerified)
 		if resp.Error != "" {
-			fmt.Println(resp.Error)
+			return fmt.Errorf("%s", resp.Error)
 		}
-		os.Exit(1)
-		return nil
+		return fmt.Errorf("audit chain broken — %d entries verified before break", resp.EntriesVerified)
 	},
 }
 

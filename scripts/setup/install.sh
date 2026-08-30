@@ -37,14 +37,19 @@ if [[ "$missing" -ne 0 ]]; then
 fi
 
 # ── 2. libbpf (vendored, built in-tree at ./libbpf) ─────────────────────
+# Version pinned to v1.8.0 to match what's actually vendored in this repo
+# (libbpf/src/libbpf_version.h: LIBBPF_MAJOR_VERSION=1, MINOR=8) — this
+# used to say v1.4.0, which was stale relative to the real vendored copy.
 log "Checking libbpf build (libbpf/src/libbpf.a)"
 if [[ -f "libbpf/src/libbpf.a" ]]; then
     echo "libbpf already built — skipping."
-elif [[ -d "libbpf/src" ]]; then
+else
+    if [[ ! -d "libbpf" ]]; then
+        echo "Cloning libbpf v1.8.0..."
+        git clone --branch v1.8.0 --depth 1 https://github.com/libbpf/libbpf.git libbpf
+    fi
     echo "Building vendored libbpf..."
     make -C libbpf/src
-else
-    warn "libbpf/ directory not present. Clone it before running this script: git clone --branch v1.4.0 https://github.com/libbpf/libbpf.git libbpf"
 fi
 
 # ── 3. Python virtual environment + deps (kb-aads) ──────────────────────

@@ -9,7 +9,9 @@
 
 ## The gap
 
-`kb-aads` has no live path for KB control-plane telemetry (zone transitions, alerts) to reach any agent. This isn't a performance or robustness gap — it's a completeness gap: agents that are supposed to react to threat signals currently never receive any.
+`kb-aads` has no *production* path for KB control-plane telemetry (zone transitions, alerts) to reach the designed agent pipeline. This isn't a performance or robustness gap — it's a completeness gap: agents that are supposed to react to threat signals currently never receive any through `Patroller`/`Hunter`/`Judge`/`Jury`.
+
+**Correction, 2026-08-30**: `kb-aads/demo/live_containment_monitor.py` now exists — a demo driver that calls `stream_events()` and feeds each event straight into a single persistent `ContainmentAgent` via `receive_message.remote()`, bypassing this entire pipeline. Its own docstring is explicit that this is a deliberate demo shortcut, not the real thing: no Patroller/Hunter scoring, no Judge/Jury consensus, and `event_type` is hardcoded to 0 for every event because the shape-mismatch/taxonomy-mapping problem documented below is still unsolved. So "nothing calls `stream_events()`" (as this doc originally said) is no longer literally true, but everything below about `HunterAgent`/`PatrollerAgent` never receiving real messages, and the `KBEvent`→dict shape mismatch, remains accurate and unresolved — this correction narrows the claim, it doesn't close the gap.
 
 Both ends are fully built and working in isolation — the missing piece is entirely the middle:
 
@@ -29,7 +31,7 @@ flowchart LR
 
     subgraph AADS["kb-aads"]
         CPC["ControlPlaneClient<br/>.stream_events()/.stream_alerts()<br/>comms/grpc_client.py"]
-        RM["receive_message()<br/>base_agent.py — 0 live callers"]
+        RM["receive_message()<br/>base_agent.py — no caller in the designed<br/>pipeline (a demo script calls it directly,<br/>bypassing Hunter/Patroller/Judge/Jury)"]
         PM["process_messages()<br/>dispatch loop, already running"]
         Hunter["HunterAgent.handle_message()<br/>expects flat dict, not KBEvent shape"]
         Patroller["PatrollerAgent.handle_message()<br/>expects type:'KB_EVENT'"]
@@ -41,9 +43,9 @@ flowchart LR
     FanEvt --> SE
     FanAlert --> SA
 
-    SE -.->|"NOTHING CALLS THIS"| CPC
+    SE -.->|"only called by a demo bypass,<br/>not the designed pipeline"| CPC
     SA -.->|"NOTHING CALLS THIS"| CPC
-    CPC -.->|missing: shape translation +<br/>this call never happens| RM
+    CPC -.->|missing: shape translation +<br/>Patroller/Hunter never in the loop| RM
     RM --> PM
     PM --> Hunter
     PM --> Patroller
@@ -76,7 +78,7 @@ Green = built and live today. Red = built (the methods exist and work standalone
 
 2. **`base_agent.py`'s message-dispatch machinery is fully built and running**, just never fed: `start()` calls `process_messages()`, which pulls from an internal queue and dispatches to `handle_message()`. `patroller.py`, `healer.py`, `containment.py` all have their own `handle_message` too, same story.
 
-3. **`receive_message()`** — the only way to push something into that queue — is grep-confirmed to be **defined but never called anywhere** in `kb-aads`. The consumption side is complete and idle; nothing produces input for it.
+3. **`receive_message()`** — the only way to push something into that queue — is never called from within the designed agent pipeline (`Hunter`/`Patroller`/`Judge`/`Jury`/`Executor`, wired through `RaySwarmOrchestrator`). It does have one caller in the whole tree: `kb-aads/demo/live_containment_monitor.py`, a standalone demo script that calls it directly on a single `ContainmentAgent`, deliberately skipping the rest of the pipeline (see the correction note above). The consumption side inside the actual swarm is complete and idle; nothing in the designed pipeline produces input for it.
 
 4. **On the `kb-control-plane` side, the producer is already fully implemented and correct** — nothing needs to change there:
    - `StreamEvents`/`StreamAlerts` gRPC RPCs work (`internal/controlplane/grpc.go`).

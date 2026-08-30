@@ -22,7 +22,7 @@ Windows and macOS are **not** supported for kernel development. They may be used
 | ---------- | ------- |
 | Git        | Latest  |
 | Python     | 3.11+   |
-| Go         | 1.23+   |
+| Go         | 1.25+   |
 | Node.js    | 20+     |
 | Rust       | Stable  |
 | Clang/LLVM | 18+     |

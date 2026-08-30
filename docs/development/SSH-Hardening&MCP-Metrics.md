@@ -1,5 +1,16 @@
 # Implementation Plan - Task 4: SSH Hardening & MCP Metrics
 
+**Superseded, 2026-08-30.** The SSH design below (`internal/ssh/` inside `kbd`: `auth.go`,
+`hostkey.go`, `server.go`, `session.go`, `config.go`, using `charmbracelet/wish`) was
+actually built largely as planned here — then deleted entirely and replaced by a real,
+independently-managed `sshd` instance (`sshd@kb-operator.service`) with `ForceCommand`
+exec'ing `kb-tui` directly. `kbd` now has zero SSH code of any kind — see
+`docs/development/core-control/control-plane-catalog.md` §2.11 (the migration decision
+and rationale) and `docs/architecture/boot_sequence_spec.md` §3 (the actual current
+unit/config). Kept here as historical record of the design this plan replaced, not as
+current architecture. The MCP Metrics half of this doc (unaffected by the SSH migration)
+should still be checked against `kb-op/kb-mcp/` source if relied on.
+
 ## Goal Description
 Task 4 focuses on two areas:
 1. **Control Plane SSH Hardening**: Add a hardened SSH service to `kbd` (the Control Plane daemon) responsible for authenticating remote operators via persistent host key + authorized public keys, allocating a PTY, and launching the `kb-tui` interface. SSH no longer lives inside `kb-tui`.

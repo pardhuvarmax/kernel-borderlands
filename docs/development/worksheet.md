@@ -97,6 +97,12 @@ By intercepting `sched_process_exit` directly in Ring 0, we can immediately flus
 
 ## 5. Task 4: SSH Wish Hardening & MCP Metrics
 
+**Superseded, 2026-08-30**: the Wish-based SSH design this task hardened (`internal/ssh/`
+inside `kbd`) was later deleted entirely and replaced by a real, independently-managed
+`sshd` instance with `ForceCommand` — see `docs/development/core-control/
+control-plane-catalog.md` §2.11 and `docs/development/SSH-Hardening&MCP-Metrics.md`'s own
+superseded banner. Kept here as historical record.
+
 ### Context & Design Overview
 `kb-tui` uses Wish (an SSH library). By default, developer configurations regenerate host keys on startup. This causes client SSH clients to warn operators of a potential "Man-in-the-Middle" (MITM) attack on every console reload. To productize the workflow, we must load a persistent host key and validate authorized public keys.
 

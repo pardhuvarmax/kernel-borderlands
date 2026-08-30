@@ -3,10 +3,13 @@ package enforcement
 import (
 	"encoding/binary"
 	"net"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 )
 
 // newListenerWithConn builds an *ipc.Listener wired to a net.Pipe() server
@@ -61,7 +64,7 @@ func TestContain_ValidLevelsSendCmd(t *testing.T) {
 			l, clientConn, cleanup := newListenerWithConn(t)
 			defer cleanup()
 
-			e := NewEnforcer(l)
+			e := NewEnforcer(l, nil)
 
 			errCh := make(chan error, 1)
 			go func() {
@@ -124,7 +127,7 @@ func TestContain_NoneNotifiesSensor(t *testing.T) {
 	l, clientConn, cleanup := newListenerWithConn(t)
 	defer cleanup()
 
-	e := NewEnforcer(l)
+	e := NewEnforcer(l, nil)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -164,7 +167,7 @@ func TestContain_UnknownLevel(t *testing.T) {
 	l, clientConn, cleanup := newListenerWithConn(t)
 	defer cleanup()
 
-	e := NewEnforcer(l)
+	e := NewEnforcer(l, nil)
 
 	err := e.Contain(1, 999, "bogus level")
 	if err == nil {
@@ -188,7 +191,7 @@ func TestContain_NoClientsErrorPropagates(t *testing.T) {
 		t.Fatalf("ipc.NewTestListener: %v", err)
 	}
 
-	e := NewEnforcer(l)
+	e := NewEnforcer(l, nil)
 
 	err = e.Contain(1, ipc.ContainmentSeccomp, "no clients connected")
 	if err == nil {
@@ -199,5 +202,114 @@ func TestContain_NoClientsErrorPropagates(t *testing.T) {
 	err = e.Contain(1, ipc.ContainmentNone, "no clients connected")
 	if err == nil {
 		t.Fatal("expected error for ContainmentNone when no clients connected, got nil")
+	}
+}
+
+// --- BUG-011 regression: the Go control plane had zero exemption logic of
+// its own, forwarding any PID it was given (including PID 1 or itself)
+// straight to kb-core's downstream CPM gate with no independent backstop. ---
+
+func TestContain_RefusesPid1(t *testing.T) {
+	l, err := ipc.NewTestListener() // no conns — if the gate didn't fire, we'd see the "no clients" error instead
+	if err != nil {
+		t.Fatalf("ipc.NewTestListener: %v", err)
+	}
+	e := NewEnforcer(l, nil)
+
+	err = e.Contain(1, ipc.ContainmentTerminate, "test")
+	if err == nil {
+		t.Fatal("expected error containing pid 1, got nil")
+	}
+	if !strings.Contains(err.Error(), "pid 1") {
+		t.Errorf("got error %q, want it to mention pid 1 (not just a downstream wire failure)", err)
+	}
+}
+
+func TestContain_RefusesSelfPid(t *testing.T) {
+	l, err := ipc.NewTestListener()
+	if err != nil {
+		t.Fatalf("ipc.NewTestListener: %v", err)
+	}
+	e := NewEnforcer(l, nil)
+
+	err = e.Contain(uint32(os.Getpid()), ipc.ContainmentTerminate, "test")
+	if err == nil {
+		t.Fatal("expected error containing self pid, got nil")
+	}
+	if !strings.Contains(err.Error(), "self") {
+		t.Errorf("got error %q, want it to mention self", err)
+	}
+}
+
+func TestContain_RefusesProtectedComm(t *testing.T) {
+	t.Setenv("KB_PROTECTED_COMM", "systemd,kbd")
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(s.Close)
+	s.UpsertProcessState(&ipc.ProcessStateMsg{PID: 555, Comm: "kbd"})
+
+	l, err := ipc.NewTestListener()
+	if err != nil {
+		t.Fatalf("ipc.NewTestListener: %v", err)
+	}
+	e := NewEnforcer(l, s)
+
+	err = e.Contain(555, ipc.ContainmentTerminate, "test")
+	if err == nil {
+		t.Fatal("expected error containing protected comm, got nil")
+	}
+	if !strings.Contains(err.Error(), "protected") {
+		t.Errorf("got error %q, want it to mention protected", err)
+	}
+}
+
+func TestContain_UnprotectedCommNotBlockedByGate(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(s.Close)
+	s.UpsertProcessState(&ipc.ProcessStateMsg{PID: 777, Comm: "curl"})
+
+	l, err := ipc.NewTestListener() // no conns
+	if err != nil {
+		t.Fatalf("ipc.NewTestListener: %v", err)
+	}
+	e := NewEnforcer(l, s)
+
+	err = e.Contain(777, ipc.ContainmentTerminate, "test")
+	if err == nil || strings.Contains(err.Error(), "protected") || strings.Contains(err.Error(), "pid 1") || strings.Contains(err.Error(), "self") {
+		t.Fatalf("got error %v, want the downstream 'no clients' wire error (gate should not have fired for an unprotected comm)", err)
+	}
+}
+
+func TestContain_RestoreExemptFromProtectedPidGate(t *testing.T) {
+	l, clientConn, cleanup := newListenerWithConn(t)
+	defer cleanup()
+	e := NewEnforcer(l, nil)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- e.Contain(1, ipc.ContainmentNone, "restore pid 1 after a bad containment call")
+	}()
+
+	var length uint32
+	if err := binary.Read(clientConn, binary.LittleEndian, &length); err != nil {
+		t.Fatalf("reading length prefix: %v", err)
+	}
+	frame := make([]byte, length)
+	if _, err := readFull(clientConn, frame); err != nil {
+		t.Fatalf("reading frame: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Contain(pid=1, None) should be exempt from the gate, got error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Contain did not return in time")
 	}
 }

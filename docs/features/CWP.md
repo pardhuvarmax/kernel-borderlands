@@ -2,7 +2,10 @@
 
 **Version:** 2.0
 **Component:** Kernel Behaviour Sensor (KBS)
-**Status:** Design Specification (Expanded)
+**Status:** Kernel/sensor side implemented and verified live in `kb-core` (§2, §3, §5–§8, §14.1–§14.3 of this spec) — see `kb-core/tests/test_cwp.py` and `CHANGELOG.md`'s "CPM eBPF-side registration + CWP scaffolding" entry. This document remains the design source of truth for CWP's intended behavior; no separate implementation doc exists yet (unlike CPM's `cpm-implementation.md`) — worth writing one if/when the remaining gaps below close.
+**Update, 2026-08-30: the Go-side sender is now built**, closing the gap this note originally flagged. `kb-control-plane/internal/ipc/cwp.go` adds `LoadWorkloadsYAML` (parses `config/workloads.yaml`, §12.1's schema — computes SHA-256 locally for `identity_tier: hash` entries with no explicit `expected_hash`) and `SendCWPWorkloads` (the `KB_WIRE_MSG_CWP_WORKLOADS` wire encoder). Pushed to the sensor at connect time and, since the sensor polls for this continuously at runtime rather than just once at handshake, live via a new `ReloadWorkloads` gRPC RPC and `kbctl workload reload` — an operator can register a protected workload without restarting `kbd`. `cmd/kbd/main.go` gained `--workloads` (default `config/workloads.yaml`, empty file shipped by default since CWP is opt-in).
+
+**Still open**: §9's severity-escalated alerting (owner-team/justification metadata surfaced in alerts) is parsed from YAML and logged but not yet wired into an actual alert-escalation path. §4.3 (signed, cluster-wide policy synchronization) and §11.4's signature verification are unimplemented — the current mechanism is a single-host wire push (file → `kbd` → connected sensors), not a fleet-managed signed policy store.
 
 ---
 

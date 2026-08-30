@@ -21,11 +21,11 @@ Kernel Borderlands (KB) is a multi-tier, zero-overhead threat detection and acti
                                   |    (L1 sync.Map / L2 SQLite WAL)   |
                                   +------------------------------------+
                                     ^                                ^
-             (UDS Bridge /run/kb/kbd.sock)                              | (gRPC Port 50051)
+             (UDS Bridge /run/kb/kbd.sock)                              | (gRPC over UDS kba.sock)
                                     v                                v
 +---------------------------------------+                  +-------------------+
-|  kb-core: Native Userspace C Sensor   |                  |  kb-tui: Bubble   |
-|  (polls Ring Buffer & runs loader)    |                  |  tea SSH Console  |
+|  kb-core: Native Userspace C Sensor   |                  |  kb-tui: Rust      |
+|  (polls Ring Buffer & runs loader)    |                  |  ratatui Console  |
 +---------------------------------------+                  +-------------------+
          ^
          | (eBPF Maps & Ring Buffer)
@@ -45,10 +45,10 @@ The raw telemetry and local validation provider. It loads and compiles eBPF CO-R
 
 #### 2. `kb-control-plane` (Userland Management Daemon)
 The central control and orchestration daemon. It receives states over the Unix socket bridge, maintains an L1 thread-safe memory registry, serializes historical audits to an L2 SQLite WAL database, parses policy specifications, and implements a gRPC gateway.
-*   **Execution**: Written in Go (compiled statically), exposing endpoints on port 50051.
+*   **Execution**: Written in Go (compiled statically). The `KernelBorderlands` gRPC service is served over the Unix domain socket `/run/kb/kba.sock` — **not** a TCP port; there is no port 50051 anywhere in this codebase. `kbd` additionally serves a loopback-only-by-default HTTP/SSE API on `:8080` (`--http-addr`, `KB_HTTP_BIND`) for the web dashboard, and remote operator SSH access is handled entirely outside `kbd` by a separate, independently-managed `sshd` instance (§3 below).
 
-#### 3. `kb-tui` (SSH Terminal Console — `kb-op/kb-tui/`)
-The administrative terminal console. Built on Wish (an SSH host framework), Lipgloss, and Bubble Tea (a terminal UI framework), it serves an interactive process monitoring layout on SSH port 2222.
+#### 3. `kb-tui` (SSH-Accessible Terminal Console — `kb-op/kb-tui/`)
+The administrative terminal console. **Correction**: this was previously described as built on Wish (an SSH host framework), Lipgloss, and Bubble Tea — that never matched the actual implementation. `kb-tui` is a **Rust** binary built with `ratatui` (terminal rendering) and `tonic` (gRPC client), with **no SSH server code of any kind** — see `kb-op/kb-tui/Cargo.toml`. SSH access to it on port 2222 is provided by a dedicated, independently-managed `sshd` instance (`sshd@kb-operator.service`) with `ForceCommand` exec'ing `kb-tui` directly (`docs/architecture/boot_sequence_spec.md` §3, `docs/development/core-control/control-plane-catalog.md` §2.11). `kb-tui` itself only ever dials `kbd`'s gRPC service over `/run/kb/kba.sock`, identically whether launched over SSH or run locally — it has no awareness of how its own terminal got attached.
 *   **Features**: Includes live process color mapping, a terminal alert viewport, and command execution gates.
 
 #### 4. `kb-checker` (Rust Safety & Integrity Layer)
@@ -56,7 +56,7 @@ Rust-based safety and integrity enforcement layer for Kernel Borderlands. Operat
 *   **Analysis**: It validates the runtime state of eBPF programs, monitors the Control Plane, AADS subsystem, and native services, quarantines or isolates compromised components when necessary, and generates alerts for administrative review to ensure the KB infrastructure remains trusted, resilient, and operational.
 
 #### 5. `kb-dashboard` (Vite + React Web UI — `kb-op/kb-dashboard/`)
-A React dashboard using Tailwind CSS and Vite. It provides a visual dashboard for security operations teams to view threat zone transitions.
+A React + TypeScript dashboard built with Vite. **Correction**: previously described as using Tailwind CSS — `kb-op/kb-dashboard/package.json` has no Tailwind dependency; styling is plain CSS. It talks to `kbd`'s HTTP API via REST `fetch()` calls plus a Server-Sent Events stream (`/api/events`) for live updates — not WebSockets. It provides a visual dashboard for security operations teams to view threat zone transitions.
 
 #### 6. `kb-mcp` (Model Context Protocol Gateway — `kb-op/kb-mcp/`)
 A standardized Model Context Protocol (MCP) server integration, exposing tools, resources, and custom prompts to external AI assistants, swarms, and workspace clients.
@@ -138,16 +138,16 @@ kernel-borderlands/
 │       └── kb_ipc.proto                       # gRPC interface definitions for external agents
 │
 ├── kb-op/                                     # Operator Interfaces
-│   ├── kb-tui/                                # Go SSH Bubbletea Console
+│   ├── kb-tui/                                # Rust ratatui console (correction: not Go/Bubbletea — see §1.3)
 │   │   ├── README.md                          # TUI operations documentation
-│   │   ├── go.mod                             # Go TUI dependencies
-│   │   ├── cmd/
-│   │   │   └── main.go                        # Wish SSH server and TUI initiator
-│   │   ├── internal/
-│   │   │   ├── ui/                            # bubbletea views (process tables, alert streams)
-│   │   │   ├── client/                        # gRPC client for Control Plane
-│   │   │   └── styles/                        # lipgloss style definitions
-│   │   └── tests/                             # TUI mocks and tests
+│   │   ├── Cargo.toml                         # Rust crate dependencies (ratatui, tonic)
+│   │   ├── build.rs                           # tonic-build codegen from kb-control-plane/proto/kb.proto
+│   │   └── src/
+│   │       ├── main.rs                        # Entry point, terminal setup/teardown, async event loop
+│   │       ├── grpc.rs                        # UDS gRPC client + background streaming tasks
+│   │       ├── app.rs                         # Application state and input handling
+│   │       ├── ui.rs                          # ratatui rendering (tabs, table, alerts, console, modals)
+│   │       └── demo.rs                        # Synthetic data generator for offline/demo mode
 │   │
 │   ├── kb-dashboard/                          # React Web UI
 │   │   ├── README.md                          # Vite dev server documentation
@@ -717,20 +717,24 @@ If $S_t > H_{\text{threshold}}$, the CUSUM engine raises a threat transition due
 
 ---
 
-## 9. Go SSH Terminal User Interface (`kb-op/kb-tui/`)
+## 9. Rust Terminal User Interface (`kb-op/kb-tui/`)
 
-The terminal dashboard (`kb-tui`) provides a live monitoring and control terminal for operator access.
+**Correction**: this section previously described `kb-tui` as a Go application built on
+Bubble Tea/Lip Gloss/Wish, hosting its own SSH server. None of that matches the actual
+implementation. The terminal dashboard (`kb-tui`) provides a live monitoring and control
+terminal for operator access.
 
 ### A. Core Technologies
-*   **Bubble Tea**: The Elm-architecture TUI runtime framework, rendering separate model update loops for live process views and alerts.
-*   **Lip Gloss**: Native CSS-like layout styler, rendering process cards in terminal colors keyed to threat zones:
+*   **ratatui**: Rust terminal-UI rendering library — process tables, alert feed, telemetry header, interactive query console, and confirmation modals (`kb-op/kb-tui/src/ui.rs`), color-keyed to threat zones:
     -   `Safe` $\to$ Green
     -   `Suspicious` $\to$ Yellow
     -   `Borderlands` $\to$ Red
-*   **Wish**: Cryptographic SSH host engine. Enables authentication and serves the TUI app directly over standard SSH sessions:
+*   **tonic**: Rust gRPC client, dialing `kbd`'s `KernelBorderlands` service over the Unix domain socket `/run/kb/kba.sock` (`kb-op/kb-tui/src/grpc.rs`).
+*   **SSH access is not implemented by `kb-tui` itself** — no SSH library appears anywhere in `kb-op/kb-tui/Cargo.toml`. A dedicated, independently-managed `sshd` instance (`sshd@kb-operator.service`) owns port 2222 entirely, with `ForceCommand` exec'ing `kb-tui` directly once a session authenticates:
     ```bash
     ssh operator@kb-server -p 2222
     ```
+    See `docs/architecture/boot_sequence_spec.md` §3 for the actual unit/config, and `docs/development/core-control/control-plane-catalog.md` §2.11 for why this replaced an earlier design where the control plane hosted its own in-process SSH server.
 
 ## 10. Rust Safety & Integrity Engine (`kb-checker/`)
 
@@ -821,9 +825,9 @@ go build -o kbd cmd/kbd/main.go
 cd ../kb-checker
 cargo build --release
 
-# 4. Build Bubble Tea SSH TUI Console
+# 4. Build the ratatui TUI console (Rust, not Go — see §9)
 cd ../kb-op/kb-tui
-go build -o kb-tui cmd/main.go
+cargo build --release   # output: target/release/kb-tui
 ```
 
 ### B. Run the System
@@ -837,11 +841,11 @@ go build -o kb-tui cmd/main.go
     cd kb-core
     sudo ./build/kbd_sensor
     ```
-3.  **Run TUI SSH Terminal Console**:
+3.  **Run the TUI console**:
     ```bash
     cd kb-op/kb-tui
-    ./kb-tui
-    # Access TUI via SSH in a separate terminal:
+    cargo run   # local, dials kba.sock directly — no SSH hop needed for local dev
+    # Remote access goes through a dedicated sshd instance, NOT kbd:
     # ssh operator@localhost -p 2222
     ```
 4.  **Run Safety and Integrity Check Daemon**:
@@ -1091,21 +1095,20 @@ Commands:
 
 ## 20. Appendix: Complete API and Structural Reference for kb-tui (`kb-op/kb-tui/`)
 
-This appendix documents the structural definitions and layouts inside `kb-op/kb-tui/`.
+**Correction**: this appendix previously documented a fabricated Go/Bubble-Tea API
+(`internal/ui/`, a `tea.Model`-shaped `Model` struct, "port 50051") for a package that
+does not exist in this codebase at all. `kb-tui` is a Rust crate — see `kb-op/kb-tui/
+Cargo.toml` and `kb-op/kb-tui/README.md`'s Structure section for the real module map:
 
-### A. Package `ui` (`internal/ui/`)
-Bubble Tea Elm-architecture structs.
+### A. Actual module layout (`kb-op/kb-tui/src/`)
+*   `main.rs` — entry point, terminal setup/teardown, async event loop.
+*   `kb.rs` — generated proto module (from `build.rs`'s `tonic-build` codegen against `kb-control-plane/proto/kb.proto`).
+*   `grpc.rs` — UDS gRPC client (dials `/run/kb/kba.sock`) and background streaming tasks.
+*   `app.rs` — application state and input handling.
+*   `ui.rs` — `ratatui` rendering: tabs, process table, alert feed, interactive query console, confirmation modals.
+*   `demo.rs` — synthetic data generator for offline/demo mode when `kba.sock` is unreachable.
 
-#### 1. Models and Messages
-*   `type Model struct`
-    -   *Fields*:
-        -   `table table.Model`: Process table listing active PIDs and scoring.
-        -   `viewport viewport.Model`: Alerts scrolling viewport.
-        -   `state State`: Enums representing active view modes (`VIEW_TABLE`, `VIEW_ALERTS`).
-*   `func (m Model) Init() tea.Cmd`
-    -   *Description*: Starts concurrent event list listeners on port 50051.
-*   `func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd)`
-    -   *Description*: Dispatches actions based on keyboard inputs (e.g. key bindings to switch view states).
+No TCP port is involved anywhere in this crate — it dials the gRPC UDS socket directly, and has no listener of its own.
 
 ---
 

@@ -20,22 +20,24 @@ Communicates with `kbd_sensor` over **two** Unix sockets, split by direction —
     -   `ProcessState` $\to$ Exactly **128 bytes** (LE, Packed).
     -   `ZoneTransition` $\to$ Exactly **40 bytes** (LE, Packed).
     -   `kb_wire_attack_rule` $\to$ Exactly **220 bytes** (LE, Packed).
-*   **Dynamic Rules Handshake**: `internal/ipc/rules.go`'s `SendRulesPayload` implements this (compiles `rules.yaml`, transmits over the bridge) but is grep-confirmed to have zero production callers — not currently wired into the connection-start flow despite existing. The sensitive-paths push (a separate, simpler mechanism — `SendSensitivePaths`) *is* live on every connection start, over `kbct.sock`.
+*   **Dynamic Rules Handshake**: `internal/ipc/rules.go`'s `SendRulesPayload` (compiles `rules.yaml`, transmits over the bridge) is now wired into `ipc.Listener`'s connect-time push, same as the sensitive-paths push (`SendSensitivePaths`) — both fire from `pushConnectTimeFrames` on every new sensor connection over `kbct.sock`. **Send order is load-bearing, not incidental**: `kbd_sensor.c`'s handshake reads rules first, then sensitive paths — only the second read has a stash-based fallback for "the wrong frame arrived here," so rules must be sent first on the wire or the connection's later framing gets corrupted. Configured via `kbd --rules` (default `config/rules.yaml`; empty disables the push, sensor falls back to its compiled-in default rules).
 
-### 3. Hardened SSH Service
-A secure, network-facing SSH console service embedded in the `kbd` daemon:
-*   **Persistent Host Keys**: Uses Ed25519 host keys stored at `/etc/kb/ssh_host_ed25519_key` (persists to prevent MITM warnings on operator reconnection).
-*   **Public-Key Authentication**: Parses `/etc/kb/authorized_keys` to authenticate connections (no password fallback allowed).
-*   **PTY Allocation & Subprocess Spawning**: Allocates a PTY per session and attaches the stdin/stdout/stderr of the local `kb-tui` binary to the SSH session.
-*   **Secure Auditing**: Logs operator logins, source IPs, and key fingerprints.
-*   **Development Fallback**: Detects development or testing modes to fall back to workspace-local files with diagnostic warnings.
+### 3. SSH access to `kb-tui` — not hosted by `kbd`
+Remote operator access to `kb-tui` (port 2222) is **not** served by `kbd` — there is no
+SSH server in this daemon. A dedicated, independent `sshd` instance
+(`sshd@kb-operator.service`) owns that port entirely, with `ForceCommand /usr/local/bin/kb-tui`
+landing an authenticated operator directly in the console — real OpenSSH host keys,
+`authorized_keys` parsing, and PTY allocation, none of it Go code in this repo. This
+supersedes an earlier design where `kbd` hosted an in-process Go SSH server
+(`internal/ssh/`, since deleted) — see `docs/development/core-control/control-plane-catalog.md`
+§2.11 for why, and `docs/architecture/boot_sequence_spec.md` §3 for the actual unit/config
+files. `kbd` and this `sshd` instance have no runtime dependency on each other.
 
 ---
 
 ## Directory Structure
 *   **`cmd/kbd/`**: Daemon executable entrypoint.
 *   **`internal/controlplane/`**: Core daemon runtime and gRPC handlers.
-*   **`internal/ssh/`**: Hardened SSH server, public key auth validator, and PTY session lifecycle wrapper.
 *   **`internal/store/`**: L1/L2 hybrid database state store.
 *   **`internal/ipc/`**: UDS wire parsing, socket listeners, and rules serialization.
 *   **`internal/policy/`**: Threshold policies and auto-containment configuration.

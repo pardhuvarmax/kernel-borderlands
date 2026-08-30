@@ -31,10 +31,12 @@ func init() {
 		"path to kbd's gRPC Unix domain socket")
 
 	rootCmd.AddCommand(policyCmd)
+	rootCmd.AddCommand(workloadCmd)
 	rootCmd.AddCommand(zoneCmd)
 	rootCmd.AddCommand(processCmd)
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(statsCmd)
+	rootCmd.AddCommand(sshCmd)
 }
 
 // dial connects to kbd over its UDS gRPC socket. Every subcommand calls

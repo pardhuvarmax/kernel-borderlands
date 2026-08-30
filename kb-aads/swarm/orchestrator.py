@@ -48,13 +48,13 @@ class RaySwarmOrchestrator:
         self.agents[agent_id] = agent_actor
         return agent_actor
 
-    async def start_swarm(self, config: dict, grpc_socket: str = "/run/kb/kba.sock"):
+    async def start_swarm(self, config: dict, grpc_socket: str = "/run/kb/kba.sock", jury_pool_size: int = 5):
         # Executor and Judge are singletons — JJE consensus routes through
         # one gateway back to kb-control-plane. Jury actors are spawned
         # dynamically per round by JudgeAgent.coordinate_consensus (see
         # consensus/jje.py), not here.
         self.executor = ExecutorAgent.remote("executor-1", socket_path=grpc_socket)
-        self.judge = JudgeAgent.remote("judge-1", self.executor)
+        self.judge = JudgeAgent.remote("judge-1", self.executor, jury_pool_size=jury_pool_size)
         self.agents["executor-1"] = self.executor
         self.agents["judge-1"] = self.judge
 

@@ -21,9 +21,9 @@ This directory houses the authoritative technical specifications, design documen
 ### 4. [Operator Interfaces Spec](operator_interfaces_spec.md)
 * **Filename**: `operator_interfaces_spec.md`
 * **Purpose**: Outlines the design philosophy and workflows of the 4 operator surfaces:
-  - **`kb-dashboard`**: Web visual console showing live process lineages (D3 force graphs).
+  - **`kb-dashboard`**: Web visual console (React/Recharts, REST + Server-Sent Events) showing live process tables and alert feeds — correction: not WebSockets, not D3 force graphs, neither exists in this package.
   - **`kbctl`**: Go Cobra CLI for playbooks and CI pipelines.
-  - **`kb-tui`**: Secure Wish SSH console (port 2222) for headless environments.
+  - **`kb-tui`**: Rust/ratatui console reached over SSH (port 2222) — correction: not "Wish SSH console"; `kb-tui` has no SSH code at all, port 2222 is served by a dedicated external `sshd` instance with `ForceCommand` exec'ing `kb-tui`, not an in-process Go SSH server.
   - **`kb-mcp`**: JSON-RPC stdio protocol server for AI tool integration.
 
 ### 5. [Control Plane & Operators Collaboration Spec & Worksheet](../development/worksheet.md)

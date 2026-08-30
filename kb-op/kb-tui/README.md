@@ -1,6 +1,6 @@
 # KB TUI — Terminal User Interface
 
-Operator dashboard UI, launched by `kbd` over an authenticated SSH session and driven over stdin/stdout.
+Operator dashboard UI, launched over an authenticated SSH session and driven over stdin/stdout.
 Built with ratatui + tonic; talks to `kbd`'s `KernelBorderlands` gRPC service (`kb-control-plane/proto/kb.proto`)
 over the Unix domain socket at `/run/kb/kba.sock` — the same UDS gateway used by `kb-checker` and the Ray
 agent swarm.
@@ -33,11 +33,16 @@ kb-op/kb-tui/
 ```
 
 ## Access
-SSH, host key, and authorized_keys handling live in `kbd`, not here. Operators connect via:
+SSH, host key, and `authorized_keys` handling live in a dedicated, independently-managed
+`sshd` instance (`sshd@kb-operator.service`, port 2222) — **not** in `kbd`, which runs no
+SSH server code at all. Operators connect via:
 ```bash
-ssh kb@kb-server
+ssh operator@kb-server -p 2222
 ```
-`kbd` validates the connection, allocates a PTY, and spawns `kb-tui` attached to the session.
+`sshd` validates the connection, allocates a PTY, and `ForceCommand` execs `kb-tui`
+attached to the session directly. See `docs/architecture/boot_sequence_spec.md` §3 for
+the actual unit/config, and `docs/development/core-control/control-plane-catalog.md`
+§2.11 for why this replaced an earlier design where `kbd` hosted its own SSH server.
 
 ## Run Locally
 ```bash

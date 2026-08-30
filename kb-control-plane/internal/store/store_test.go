@@ -76,3 +76,49 @@ func TestSetZoneUntrackedPidReturnsFalse(t *testing.T) {
 		t.Error("SetZone on untracked pid should return false")
 	}
 }
+
+// BUG-002 regression: a routine telemetry-driven UpsertProcessState used to
+// build a brand-new CachedState literal with no Containment field, silently
+// resetting an actively-contained process back to NONE on the very next
+// ProcessState message from kb-core.
+func TestUpsertProcessStatePreservesContainment(t *testing.T) {
+	s := newTestStore(t)
+	s.UpsertProcessState(&ipc.ProcessStateMsg{PID: 11, Comm: "evil", Zone: ipc.ZoneBorderlands})
+	s.SetContainment(11, int32(3))
+
+	cs, ok := s.GetProcessState(11)
+	if !ok || cs.Containment != 3 {
+		t.Fatalf("setup: got containment=%v ok=%v, want 3/true", cs, ok)
+	}
+
+	// A routine telemetry update for the same pid must not clobber it.
+	if err := s.UpsertProcessState(&ipc.ProcessStateMsg{PID: 11, Comm: "evil", Zone: ipc.ZoneBorderlands, EventCount: 42}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	cs, ok = s.GetProcessState(11)
+	if !ok {
+		t.Fatal("expected L1 hit after second upsert")
+	}
+	if cs.Containment != 3 {
+		t.Errorf("got containment=%d after routine telemetry update, want 3 (preserved)", cs.Containment)
+	}
+	if cs.EventCount != 42 {
+		t.Errorf("got event_count=%d, want 42 (other fields must still update normally)", cs.EventCount)
+	}
+}
+
+// A never-before-seen PID has no prior Containment to preserve — should
+// default to NONE (0), not error or panic.
+func TestUpsertProcessStateNewPidDefaultsToNoContainment(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.UpsertProcessState(&ipc.ProcessStateMsg{PID: 99, Comm: "fresh"}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	cs, ok := s.GetProcessState(99)
+	if !ok {
+		t.Fatal("expected L1 hit after upsert")
+	}
+	if cs.Containment != 0 {
+		t.Errorf("got containment=%d for never-before-seen pid, want 0", cs.Containment)
+	}
+}

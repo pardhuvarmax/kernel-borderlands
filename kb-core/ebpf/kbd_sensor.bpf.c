@@ -77,8 +77,15 @@ struct {
     __type(value, __u64);
 } kb_syscall_totals SEC(".maps");
 
+// LRU_HASH, not HASH: this map is keyed by a composite (pid<<32|syscall_nr)
+// value, so kb_handle_exit cannot target a single process's entries for
+// deletion the way it can for kb_syscall_totals/kb_cred_prev (it doesn't
+// know which syscall numbers a given pid used without iterating). LRU
+// eviction means normal PID churn ages out old entries automatically
+// instead of the map filling permanently and silently rejecting new
+// inserts (BUG-008).
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, KB_MAX_PROCESSES * 64);
     __type(key,   __u64);
     __type(value, __u64);
@@ -363,6 +370,14 @@ int kb_handle_exit(struct trace_event_raw_sched_process_template *ctx)
 
     // CWP de-registration (§7.3/§14.1) — same PID-reuse-safety reasoning.
     bpf_map_delete_elem(&protected_workloads_map, &pid);
+
+    // kb_syscall_totals and kb_cred_prev are PID-keyed like the two maps
+    // above but were never cleaned up here — on a long-running host with
+    // normal PID churn they'd fill permanently, after which new-PID
+    // inserts silently fail and syscall-volume telemetry / privilege-
+    // escalation UID-diffing stop updating for any new process (BUG-008).
+    bpf_map_delete_elem(&kb_syscall_totals, &pid);
+    bpf_map_delete_elem(&kb_cred_prev, &pid);
     return 0;
 }
 
@@ -730,6 +745,16 @@ int BPF_PROG(kb_lsm_file_open, struct file *file, int mask)
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     __u32 *level = bpf_map_lookup_elem(&contained_pids_map, &pid);
 
+    // Full-quarantine block must not depend on path resolution succeeding:
+    // check level >= 3 before calling bpf_d_path() at all. bpf_d_path() can
+    // fail on certain special files/pseudo-filesystems or under kernel
+    // memory pressure — previously that failure returned "allow" before
+    // this check ever ran, silently bypassing the "block ALL file opens"
+    // guarantee for a level-3+ contained process.
+    if (level && *level >= 3) {
+        return -13; // Block ALL file open requests (full sandbox quarantine)
+    }
+
     char path_buf[64] = {};
     int len = bpf_d_path(&file->f_path, path_buf, sizeof(path_buf));
     if (len < 0) return 0;
@@ -760,14 +785,10 @@ int BPF_PROG(kb_lsm_file_open, struct file *file, int mask)
     // KB_EV_SHADOW_ACCESS/KB_EV_SUDOERS_ACCESS/KB_EV_PASSWD_ACCESS/
     // KB_EV_SSH_KEY_ACCESS evidence flags feeding behavioral scoring —
     // removing the hard block here does not remove that monitoring.
-    if (level) {
-        if (*level >= 3) {
-            return -13; // Block ALL file open requests (full sandbox quarantine)
-        }
-        if (*level == 2) {
-            if (is_sensitive_kernel_path(path_buf)) {
-                return -13; // Block sensitive paths first
-            }
+    // level >= 3 was already handled above, before path resolution.
+    if (level && *level == 2) {
+        if (is_sensitive_kernel_path(path_buf)) {
+            return -13; // Block sensitive paths first
         }
     }
 

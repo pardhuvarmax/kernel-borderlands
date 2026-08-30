@@ -12,7 +12,6 @@ import (
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/enforcement"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/policy"
-	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ssh"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 	"google.golang.org/grpc"
@@ -37,10 +36,16 @@ type ControlPlane struct {
 	healthServer *health.Server
 	audit        *audit.Logger
 	enforcer     *enforcement.Enforcer
-	policyMu     sync.RWMutex
-	policy       *policy.Engine
-	policyPath   string
-	grpc         *grpc.Server
+	policyMu      sync.RWMutex
+	policy        *policy.Engine
+	policyPath    string
+	workloadsPath string // docs/features/CWP.md — config/workloads.yaml by convention
+	grpc          *grpc.Server
+	// grpcSocketPath is set once in Start() (from --grpc-socket/KB_GRPC_SOCKET)
+	// and read by the HTTP API's /api/services health probe — a single
+	// source of truth so that flag and the dashboard's connectivity check
+	// can't drift apart (§2.7).
+	grpcSocketPath string
 	// telemetryListener (SocketIPC, kbd.sock) and controlListener
 	// (SocketControl, kbct.sock) are both created once in New() and
 	// started in Start(). Split so a telemetry-volume burst on the
@@ -49,7 +54,6 @@ type ControlPlane struct {
 	// internal/ipc/sockets.go for the failure mode this avoids.
 	telemetryListener *ipc.Listener
 	controlListener   *ipc.Listener
-	sshService        *ssh.Service
 
 	// comm cache — pid → comm (populated by ProcessState messages)
 	commCache sync.Map
@@ -71,9 +75,24 @@ type ControlPlane struct {
 	storeFailureMu    sync.Mutex
 	storeFailureCount int
 	storeUnhealthy    bool
+
+	// Per-agent-ID minimum-interval throttle for SubmitAgentDecision/
+	// SetContainment (BUG-012) — a buggy or compromised client looping on
+	// these RPCs previously had no backpressure at all.
+	rateLimitMu   sync.Mutex
+	lastDecision  map[string]time.Time
 }
 
-func New(dbPath, policyPath string) (*ControlPlane, error) {
+// rulesPath points at rules.yaml (docs/development/core-control/
+// dynamic-rules.md) — pass "" to disable the dynamic-rules push entirely
+// (sensor uses its compiled-in default rules, same as any push failure).
+// workloadsPath points at workloads.yaml (docs/features/CWP.md) — pass ""
+// to disable CWP entirely. Unlike policyPath, a missing or invalid
+// workloads file is never fatal to daemon startup (same posture as
+// policy.New's own missing-file handling) — it's logged and CWP simply
+// has nothing registered until a valid file exists and ReloadWorkloads
+// (or a restart) picks it up.
+func New(dbPath, policyPath, rulesPath, workloadsPath string) (*ControlPlane, error) {
 	s, err := store.New(dbPath)
 	if err != nil {
 		return nil, err
@@ -93,20 +112,16 @@ func New(dbPath, policyPath string) (*ControlPlane, error) {
 		return nil, err
 	}
 
-	sshSvc, err := ssh.NewService()
-	if err != nil {
-		return nil, fmt.Errorf("ssh service: %w", err)
-	}
-
 	// Build cp first (handler must exist before NewListener so it can be
 	// passed as the MessageHandler), then wire the enforcer to the listener.
 	cp := &ControlPlane{
-		store:        s,
-		audit:        audit.New(s.DB()),
-		policy:       p,
-		policyPath:   policyPath,
-		healthServer: health.NewServer(),
-		sshService:   sshSvc,
+		store:         s,
+		audit:         audit.New(s.DB()),
+		policy:        p,
+		policyPath:    policyPath,
+		workloadsPath: workloadsPath,
+		healthServer:  health.NewServer(),
+		lastDecision:  make(map[string]time.Time),
 	}
 
 	// NewListener records the socket path and stores cp as the MessageHandler.
@@ -134,18 +149,26 @@ func New(dbPath, policyPath string) (*ControlPlane, error) {
 	}
 	cp.controlListener = controlListener
 	controlListener.SetSensitivePaths(p.SensitivePaths())
+	controlListener.SetRulesPath(rulesPath)
+	controlListener.SetCWPWorkloads(loadWorkloadsOrEmpty(workloadsPath))
 
 	// Enforcer routes containment commands to the C sensor via the control listener.
-	cp.enforcer = enforcement.NewEnforcer(controlListener)
+	cp.enforcer = enforcement.NewEnforcer(controlListener, s)
 
 	return cp, nil
 }
 
-func (cp *ControlPlane) Start() error {
-	// Start SSH service
-	if err := cp.sshService.Start(); err != nil {
-		return fmt.Errorf("ssh service start: %w", err)
-	}
+// Start begins serving. httpAddr and grpcSocketPath come from cmd/kbd's
+// --http-addr/--grpc-socket cobra flags (§2.7) — callers that want the old
+// env-var-only behavior can still compute these from KB_HTTP_BIND/
+// KB_GRPC_SOCKET before calling Start, same as cmd/kbd's flag defaults do.
+func (cp *ControlPlane) Start(httpAddr, grpcSocketPath string) error {
+	// SSH is no longer served in-process (see docs/development/core-control/
+	// control-plane-catalog.md §2.11) — remote operator access to kb-tui now
+	// goes through a real, OS-managed sshd instance with ForceCommand
+	// exec'ing /usr/local/bin/kb-tui directly, entirely outside kbd's
+	// process tree. See deploy/systemd/sshd@kb-operator.service and
+	// deploy/ssh/sshd_config.d/kb-operator.conf.
 
 	// Use the listeners constructed in New() — do NOT call NewListener again.
 	go func() {
@@ -159,10 +182,10 @@ func (cp *ControlPlane) Start() error {
 		}
 	}()
 
-	grpcSocketPath := os.Getenv("KB_GRPC_SOCKET")
 	if grpcSocketPath == "" {
 		grpcSocketPath = ipc.SocketGRPC
 	}
+	cp.grpcSocketPath = grpcSocketPath
 	lis, err := listenUnix(grpcSocketPath)
 	if err != nil {
 		return fmt.Errorf("grpc uds listen: %w", err)
@@ -179,9 +202,14 @@ func (cp *ControlPlane) Start() error {
 		}
 	}()
 
-	// Start HTTP API & SSE server on :8080 for web dashboard
+	// Start HTTP API & SSE server for web dashboard. Loopback-only by
+	// default (BUG-001) — remote dashboard access requires explicitly
+	// opting in via --http-addr/KB_HTTP_BIND, e.g. "0.0.0.0:8080".
+	if httpAddr == "" {
+		httpAddr = "127.0.0.1:8080"
+	}
 	go func() {
-		if err := cp.StartHTTPServer(":8080"); err != nil {
+		if err := cp.StartHTTPServer(httpAddr); err != nil {
 			log.Printf("[KB] HTTP server failed: %v", err)
 		}
 	}()
@@ -225,20 +253,63 @@ func (cp *ControlPlane) reloadPolicyFromDisk() (bool, string, error) {
 	return true, msg, nil
 }
 
-func (cp *ControlPlane) Stop() {
+// loadWorkloadsOrEmpty reads workloadsPath (docs/features/CWP.md) and
+// returns its entries, or nil if the path is empty, the file doesn't
+// exist, or it fails to parse — CWP is opt-in and a missing/bad config
+// file is never fatal to daemon startup, same posture as policy.New's own
+// missing-file handling.
+func loadWorkloadsOrEmpty(workloadsPath string) []ipc.CWPWorkloadEntry {
+	if workloadsPath == "" {
+		return nil
+	}
+	entries, err := ipc.LoadWorkloadsYAML(workloadsPath)
+	if err != nil {
+		log.Printf("[KB] CWP: no workloads loaded from %s: %v", workloadsPath, err)
+		return nil
+	}
+	log.Printf("[KB] CWP: loaded %d protected workload(s) from %s", len(entries), workloadsPath)
+	return entries
+}
+
+// reloadWorkloadsFromDisk re-reads workloads.yaml and broadcasts the
+// result to every currently-connected sensor — see ipc.Listener's
+// BroadcastCWPWorkloads for why this is a genuinely live push, unlike
+// reloadPolicyFromDisk above. Called from the ReloadWorkloads gRPC
+// handler (grpc.go).
+func (cp *ControlPlane) reloadWorkloadsFromDisk() (int, string, error) {
+	if cp.workloadsPath == "" {
+		return 0, "", fmt.Errorf("no --workloads path configured")
+	}
+	entries, err := ipc.LoadWorkloadsYAML(cp.workloadsPath)
+	if err != nil {
+		return 0, "", fmt.Errorf("reload workloads: %w", err)
+	}
+	if cp.controlListener != nil {
+		cp.controlListener.SetCWPWorkloads(entries)
+		if err := cp.controlListener.BroadcastCWPWorkloads(); err != nil {
+			// Not fatal to the reload itself — the registry is updated
+			// for future connections either way (pushConnectTimeFrames);
+			// this only means no sensor is connected right now to push to
+			// live, or the push to at least one failed.
+			log.Printf("[KB] CWP: broadcast to connected sensors failed: %v", err)
+		}
+	}
+	msg := fmt.Sprintf("reloaded %d workload(s) from %s", len(entries), cp.workloadsPath)
+	log.Printf("[KB] %s", msg)
+	return len(entries), msg, nil
+}
+
+// Stop shuts down the daemon. grpcSocketPath must match whatever was passed
+// to Start (same §2.7 flag-threading as Start) so the stale-socket cleanup
+// below removes the right file.
+func (cp *ControlPlane) Stop(grpcSocketPath string) {
 	// Flip to NOT_SERVING *before* tearing anything else down, so any
 	// in-flight health probe from kb-checker gets an honest answer
 	// instead of a connection-refused/hang.
 	if cp.healthServer != nil {
 		cp.healthServer.SetServingStatus(ServiceName, healthpb.HealthCheckResponse_NOT_SERVING)
 	}
-	if cp.sshService != nil {
-		if err := cp.sshService.Stop(); err != nil {
-			log.Printf("[KB] Failed to stop SSH service: %v", err)
-		}
-	}
 	cp.grpc.GracefulStop()
-	grpcSocketPath := os.Getenv("KB_GRPC_SOCKET")
 	if grpcSocketPath == "" {
 		grpcSocketPath = ipc.SocketGRPC
 	}
@@ -343,13 +414,6 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 		log.Printf("[KB] store: %v", err)
 	}
 	cp.recordStoreResult(err)
-
-	// Remove on process exit — event_count won't increment after exit,
-	// so use the zone: if a process_exit event came through the C side
-	// it already called kb_scoring_remove(), but the last state message
-	// may not reflect that. Use EventCount==0 as proxy? No — just leave
-	// the store row; it'll get overwritten when/if the PID is reused.
-	// TODO: C side should send a dedicated process_exit wire message type.
 
 	cp.fanOutEvent(&pb.KBEvent{
 		Pid:        msg.PID,

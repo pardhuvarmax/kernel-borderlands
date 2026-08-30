@@ -1,0 +1,157 @@
+name: CI
+
+# Multi-subsystem build/test validation — closes the gap flagged in
+# docs/reports/repository-analysis-2026-08-27.md BR-001 ("No automated CI
+# test workflow... regressions can merge without automated validation").
+# Prior to this, .github/workflows/ only had the Pages-deploy retry job;
+# nothing here ran go/pytest/cargo/npm on any change.
+#
+# Scope note on kb-core: this only builds it (clang + bpftool + vendored
+# libbpf), matching what scripts/setup/install.sh's non-root prerequisites
+# support. kb-core/tests/test_all_hooks.sh is NOT run here — it's an
+# interactive, log-matching driver script that expects an already-running
+# `sudo ./build/kbd_sensor` with BPF LSM enabled (docs/architecture/
+# enabling-bpf-lsm.md), which stock GitHub-hosted runner kernels don't
+# reliably have (lsm=bpf boot parameter) — not something to gamble on in
+# shared CI infrastructure. A build-clean check is still real signal: it
+# catches eBPF verifier rejections and userspace compile breaks, which is
+# most of what changes to kb-core risk.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  kb-control-plane:
+    name: kb-control-plane (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kb-control-plane
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+
+  kb-core:
+    name: kb-core (eBPF + userspace loader — build only, see workflow header)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libelf-dev zlib1g-dev make \
+            linux-tools-common "linux-tools-$(uname -r)" || \
+            sudo apt-get install -y linux-tools-generic
+      - name: Clone and build libbpf
+        # libbpf/ is a third-party dependency deliberately excluded from
+        # git (see .gitignore) — a fresh checkout never has it, so it must
+        # be cloned here, not just conditionally built. Pinned to v1.8.0 to
+        # match this repo's actual vendored copy (libbpf/src/libbpf_version.h
+        # reports LIBBPF_MAJOR_VERSION=1, LIBBPF_MINOR_VERSION=8) — NOT the
+        # v1.4.0 that scripts/setup/install.sh's local-dev instructions
+        # reference, which was stale relative to what's actually vendored.
+        run: |
+          if [ ! -d libbpf ]; then
+            git clone --branch v1.8.0 --depth 1 https://github.com/libbpf/libbpf.git libbpf
+          fi
+          if [ ! -f libbpf/src/libbpf.a ]; then
+            make -C libbpf/src
+          fi
+      - name: make
+        working-directory: kb-core
+        run: make
+
+  kb-checker:
+    name: kb-checker (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kb-checker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native build prerequisites (BR-003)
+        run: sudo apt-get update && sudo apt-get install -y libelf-dev pkg-config zlib1g-dev protobuf-compiler
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kb-checker
+      - run: cargo build --release
+      - run: cargo test
+
+  kb-tui:
+    name: kb-tui (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kb-op/kb-tui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install protoc (BR-004 — build.rs uses tonic-build)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kb-op/kb-tui
+      - run: cargo build --release
+      # No test suite exists yet for kb-tui (confirmed: no #[test]/tests/
+      # files) — build-only until one is added.
+
+  kb-op-go:
+    name: kb-op Go tools (kbctl, kb-mcp)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [kbctl, kb-mcp]
+    defaults:
+      run:
+        working-directory: kb-op/${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+
+  kb-dashboard:
+    name: kb-dashboard (Vite + React)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kb-op/kb-dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: kb-op/kb-dashboard/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  kb-aads:
+    name: kb-aads (Python swarm)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kb-aads
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: kb-aads/requirements.txt
+      - name: Install dependencies (BR-002 — reproducible bootstrap)
+        run: pip install -r requirements.txt
+      - run: pytest

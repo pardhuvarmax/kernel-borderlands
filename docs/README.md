@@ -54,6 +54,14 @@ Documents the Linux kernel hook points instrumented by Kernel Borderlands, inclu
 
 Defines the event contract between `kb-core` and `kb-control-plane`, including event types, metadata conventions, payload expectations, and compatibility requirements.
 
+### `docs/architecture/kb-core_system_requirements.md`
+
+Documents `kb-core`'s system-level requirements — kernel version/feature baseline, hardware/OS constraints, and prerequisites beyond what `docs/getting-started/requirements.md` covers at the whole-project level.
+
+### `docs/architecture/resource_management_roadmap.md`
+
+Roadmap for CPU/memory/resource management across subsystems as the platform scales — direction and open questions, not yet-implemented behavior.
+
 ---
 
 # Features
@@ -72,6 +80,14 @@ Implementation documents describing individual Kernel Borderlands features.
 * Ray Integration
 
 These documents describe feature architecture, implementation details, workflows, runtime behavior, design rationale, and future enhancements.
+
+### `docs/features/hardware-ext/`
+
+Documentation-only proposals (not implemented) for NOMAD (Node Out-of-Band Module for
+Attestation & Defense) — a physically independent hardware appliance for host attestation
+and fencing outside the software trust boundary — plus its fleet-management service, a
+cost-reduced bill-of-materials variant, an expense breakdown, and rootkit-resistance design
+notes tied to it.
 
 ---
 
@@ -95,6 +111,14 @@ Documents integration between the Kernel Borderlands control plane and Agentic A
 
 Contains Architecture Decision Records (ADRs) documenting significant engineering and architectural decisions made throughout the project's development.
 
+### Other `docs/development/` references
+
+A few standalone files live directly under `docs/development/` rather than a
+subdirectory: `full-pipeline-run-guide.md` (end-to-end local run walkthrough across all
+subsystems), `worksheet.md` (working engineering notes), `git-authorship.md` (this
+repo's shared-working-copy commit-authorship convention, see also `CLAUDE.md`),
+`automated_signatures_deployment.md`, and `SSH-Hardening&MCP-Metrics.md`.
+
 ---
 
 # Specifications
@@ -117,6 +141,18 @@ These documents define subsystem requirements, interfaces, constraints, expected
 Historical engineering reports and milestone documentation.
 
 Reports are organized by subsystem and development timeline, documenting implementation progress, design iterations, completed work, and engineering milestones throughout the project's evolution.
+
+---
+
+# Emergency Backup
+
+`docs/emergency-backup/` is contingency planning, not day-to-day reference material —
+skip it unless you specifically need it. It holds standalone, self-contained
+per-subsystem documentation (`kb-cp.md`, `kb-core.md`, `kb-op.md`, `kb-aads.md`), each
+written as if that subsystem were its own complete, independent product rather than a
+piece of the larger platform. Purpose (per its own `README.md`): if the team/org
+splits, each contributor can walk away with a document that stands on its own, not a
+fragment that only makes sense alongside the others.
 
 ---
 

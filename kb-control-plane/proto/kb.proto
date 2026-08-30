@@ -118,6 +118,32 @@ message ReloadPolicyResponse {
     string message = 2;
 }
 
+// Re-reads workloads.yaml (docs/features/CWP.md's protected-workload
+// registry) and broadcasts it to every currently-connected sensor. Unlike
+// ReloadPolicy, this is a genuinely live push, not just a Go-side state
+// swap — the sensor polls for CWP workload updates continuously at
+// runtime (see kbd_sensor.c's read_cwp_workloads_from_bridge).
+message ReloadWorkloadsResponse {
+    bool   success = 1;
+    string message = 2;
+    uint32 workload_count = 3;
+}
+
+// Reported by the ForceCommand wrapper script (see
+// docs/architecture/boot_sequence_spec.md §3, sshd_config.d/kb-operator.conf)
+// on every SSH session into kb-tui — the audit-tie-in callback described in
+// docs/development/core-control/control-plane-catalog.md §2.12 step 5.
+// Deliberately narrow: this RPC only ever writes one of two fixed audit
+// actions (SSH_SESSION_START/SSH_SESSION_END), not an arbitrary-action
+// write endpoint — same "advisory, not cryptographically authoritative"
+// trust level as AgentDecision.AuthorizedBy elsewhere in this API.
+message SSHSessionEvent {
+    string principal   = 1; // local user landed as, e.g. "operator"
+    string remote_addr = 2; // $SSH_CONNECTION client address
+    string identity    = 3; // key fingerprint today; cert principal/serial once §2.12's CA lands
+    string event       = 4; // "session_start" | "session_end"
+}
+
 // KB Control Plane Service
 service KernelBorderlands {
     // Query process state
@@ -164,5 +190,13 @@ service KernelBorderlands {
     // the active policy.Engine and re-pushing sensitive_paths to the
     // sensor over kbct.sock.
     rpc ReloadPolicy(Empty) returns (ReloadPolicyResponse);
+
+    // Re-reads workloads.yaml and broadcasts the protected-workload
+    // registry to every connected sensor. See docs/features/CWP.md.
+    rpc ReloadWorkloads(Empty) returns (ReloadWorkloadsResponse);
+
+    // Records an SSH session start/end into the audit log — called by the
+    // ForceCommand wrapper script, not by kb-tui itself. See §2.12 step 5.
+    rpc RecordSSHSession(SSHSessionEvent) returns (Empty);
 }
 

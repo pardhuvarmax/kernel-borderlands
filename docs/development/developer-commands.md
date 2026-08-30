@@ -48,15 +48,22 @@ This document contains the most commonly used build, test, and runtime commands 
   ```
 
 ### D. `kb-tui` (SSH Terminal Dashboard)
+`kb-tui` is a Rust/Cargo binary (`ratatui`), not Go — the commands below were corrected
+from an earlier `go build`/`cmd/main.go` version that didn't match this crate's actual
+layout (no `cmd/` directory, no `main.go`; see `kb-op/kb-tui/Cargo.toml`).
 - **Build Console Binary**:
   ```bash
-  cd kb-op/kb-tui && go build -o kb-tui cmd/main.go
+  cd kb-op/kb-tui && cargo build --release   # output: target/release/kb-tui
   ```
 - **Run Console Locally**:
   ```bash
-  cd kb-op/kb-tui && go run cmd/main.go
+  cd kb-op/kb-tui && cargo run
   ```
-- **SSH into Console (Running on Port 2222)**:
+- **SSH into Console (Running on Port 2222)**: as of the OpenSSH migration
+  (`docs/development/core-control/control-plane-catalog.md` §2.11), port 2222 is served by a
+  real, OS-managed `sshd` instance with `ForceCommand /usr/local/bin/kb-tui` — `kbd` no longer
+  hosts an in-process SSH server. See `docs/architecture/boot_sequence_spec.md` §3 for the
+  `sshd_config.d` drop-in and `sshd@kb-operator.service` unit.
   ```bash
   ssh operator@localhost -p 2222
   ```

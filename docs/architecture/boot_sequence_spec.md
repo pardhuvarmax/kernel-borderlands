@@ -268,32 +268,100 @@ CapabilityBoundingSet=
 WantedBy=multi-user.target
 ```
 
-### `/etc/systemd/system/kbopt.service`
+### `/etc/systemd/system/sshd@kb-operator.service` + `/etc/ssh/sshd_config.d/kb-operator.conf`
 
-The SSH terminal console (`kb-op/kb-tui`), which hosts its own SSH server on port 2222 for
-operators to connect into — an actual persistent daemon, not a per-session interactive tool.
-Unlike `kbopd`/`kbagents`, `kb-tui` already has a real compiled-binary build step
-(`go build -o kb-tui cmd/main.go`, `docs/development/developer-commands.md`); what's missing
-is only the install path/unit file, not the packaging step itself. Depends on `kbd.service`
-for the same reason `kbopd` does.
+**Supersedes the earlier `kbopt.service` design** (a `kbd`-hosted, in-process Go SSH server on
+port 2222, `github.com/charmbracelet/wish`). That approach is retired per the decided migration
+in `docs/development/core-control/control-plane-catalog.md` §2.11 (STATUS: DONE) — port 2222 is
+now served by a second, independent instance of the system's real `sshd`, with `ForceCommand`
+exec'ing the `kb-tui` (`kb-op/kb-tui`, Rust/Cargo) binary directly. `kbd`
+(`kb-control-plane/internal/ssh/` — deleted) no longer owns any part of the SSH stack: no host
+keys, no `authorized_keys` parsing, no PTY allocation, no session code. That responsibility now
+belongs entirely to `sshd`, which is a fully independent unit — not a `kbd`-supervised child
+process (§2.11's "Decided" note explains why: nesting `sshd` under `kbd`'s process tree would
+re-couple the auth boundary to the containment daemon it's supposed to be independent of).
+
+`kbd.service` and this unit have **no dependency on each other** — this is the one place in the
+boot sequence that's intentionally decoupled: `sshd@kb-operator` only needs `kb-tui`'s binary to
+exist at `ForceCommand`'s path, and `kb-tui` itself only needs `/run/kb/kba.sock` to be reachable
+*at connection time*, not at `sshd` startup — a session opened before `kbd` is up simply gets a
+`kb-tui` that reports the gRPC socket as unreachable, same as running `kb-tui` locally before
+`kbd` starts.
+
+```ini
+# /etc/ssh/sshd_config.d/kb-operator.conf
+# Loaded by the dedicated `sshd@kb-operator` instance below, NOT the host's
+# normal admin sshd on port 22 — keeps operator access to kb-tui fully
+# isolated from general host admin access.
+Port 2222
+HostKey /etc/kb/ssh/ssh_host_ed25519_key
+
+Match User operator
+    ForceCommand /usr/local/bin/kb-tui-session-wrapper.sh
+    AuthorizedKeysFile /etc/kb/authorized_keys
+    X11Forwarding no
+    AllowTcpForwarding no
+    PermitTTY yes
+```
+
+`AuthorizedKeysFile` stays a flat file for now (same path `kbd`'s old dev-mode fallback used) —
+§2.12's CIS/`step-ca` certificate-based access (`TrustedUserCAKeys`/`AuthorizedPrincipalsFile`,
+replacing this line entirely) is still open, tracked separately, not part of this migration. Once
+that lands, `AuthorizedPrincipalsFile`/`AuthorizedPrincipalsCommand` output becomes available to
+the wrapper below as the `identity` reported to `kbctl ssh session-start` — today it's just the
+key fingerprint, which sshd does not expose to `ForceCommand` directly, so `--identity` is left
+unset (`kbctl` records `identity=""`) until that's wired up.
+The `operator` system user must exist on the host and be a member of the `kb` group so `kb-tui`
+can reach `/run/kb/kba.sock` (already `0660`) but nothing more — see §2.11's hardening checklist,
+item 5.
+
+`ForceCommand` targets `/usr/local/bin/kb-tui-session-wrapper.sh`, not `kb-tui` directly — the
+audit-tie-in callback from §2.12 step 5 (`kbctl ssh session-start`/`session-end`, calling `kbd`'s
+`RecordSSHSession` RPC) has to run around `kb-tui`, not replace it. Deliberately **not** `exec`'d
+straight into `kb-tui`: the wrapper needs to still be running after `kb-tui` exits so it can log
+session-end and propagate the real exit code back to the SSH client.
+
+```sh
+#!/bin/sh
+# /usr/local/bin/kb-tui-session-wrapper.sh
+# ForceCommand target for sshd@kb-operator — reports session start/end into
+# kbd's audit log (see control-plane-catalog.md §2.12 step 5), then runs
+# kb-tui. Audit logging is best-effort: kbctl's own session-start/session-end
+# subcommands never fail this script's exit status, so an audit-log outage
+# never blocks legitimate operator access (see kbctl ssh session-start's own
+# comment for the reasoning) — this script inherits that same principle by
+# not checking their exit codes.
+set -u
+
+/usr/local/bin/kbctl ssh session-start --remote-addr "${SSH_CONNECTION:-unknown}"
+
+/usr/local/bin/kb-tui
+status=$?
+
+/usr/local/bin/kbctl ssh session-end --remote-addr "${SSH_CONNECTION:-unknown}"
+
+exit "$status"
+```
 
 ```ini
 [Unit]
-Description=Kernel Borderlands SSH Terminal Console
-After=kbd.service
-Requires=kbd.service
+Description=Kernel Borderlands SSH Operator Console (dedicated sshd instance, port 2222)
+After=network.target
 DefaultDependencies=no
 
 [Service]
-Type=simple
-ExecStart=/usr/local/bin/kbopt --config /etc/kb/config.yaml
+Type=notify
+ExecStart=/usr/sbin/sshd -D -f /etc/ssh/sshd_config.d/kb-operator.conf
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
 
-# Full hardening — safe here for the same reason as kbagents/kbopd: not
-# deployed yet, and port 2222 is unprivileged (>1024), so kbopt's own SSH
-# server doesn't need CAP_NET_BIND_SERVICE or anything else special beyond
-# a UDS/gRPC client connection to kbd.
+# Full hardening — this is the system's real, battle-tested sshd binary,
+# not application code owned by this repo, so unlike kbd/kb-checker above
+# there's no risk of a wrong capability enumeration silently breaking a
+# tampering-response code path. Standard privilege-separation model:
+# sshd itself needs CAP_NET_BIND_SERVICE-equivalent only if Port <1024
+# (2222 is not), so this can be locked down fully.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
@@ -305,6 +373,10 @@ CapabilityBoundingSet=
 [Install]
 WantedBy=multi-user.target
 ```
+
+Item 2 of §2.11's hardening checklist (certificate-based auth via §2.12's CIS work) and item 3
+(this unit's own systemd sandboxing, shown above) are the two items not yet fully closed —
+tracked there, not here.
 
 ---
 

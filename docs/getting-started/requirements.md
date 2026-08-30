@@ -50,12 +50,11 @@ kprobe:mmap_region (memory mapping)
 
 **Control Plane (Go)**
 ```
-Go 1.21+
+Go 1.25+          (kb-control-plane/go.mod's `go` directive)
 gRPC + protobuf
-SQLite (process state store)
-PostgreSQL (audit logs)
+SQLite (process state AND audit logs — same L1/L2 store, see ADR-1; no PostgreSQL anywhere in this repo)
 Cobra CLI framework
-YAML parser (policy engine)
+YAML parser (policy/rules/workloads engines)
 SHA-256 (audit chain hashing)
 ```
 

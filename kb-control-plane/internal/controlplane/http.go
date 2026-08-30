@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,21 +10,32 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/checkerclient"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
+	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 )
 
 // HTTPServer handles HTTP and SSE requests from the dashboard
 type HTTPServer struct {
-	cp *ControlPlane
+	cp             *ControlPlane
+	apiToken       string
+	allowedOrigins []string
 }
 
 func (cp *ControlPlane) StartHTTPServer(addr string) error {
-	server := &HTTPServer{cp: cp}
+	server := &HTTPServer{
+		cp:             cp,
+		apiToken:       os.Getenv("KB_HTTP_API_TOKEN"),
+		allowedOrigins: corsOrigins(),
+	}
+	if server.apiToken == "" {
+		log.Printf("[KB] WARNING: KB_HTTP_API_TOKEN not set — /api/isolate and /api/restore will refuse all requests until it is configured")
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", server.handleIndex)
@@ -32,26 +44,65 @@ func (cp *ControlPlane) StartHTTPServer(addr string) error {
 	mux.HandleFunc("/api/logs", server.handleLogs)
 	mux.HandleFunc("/api/audit/verify", server.handleAuditVerify)
 	mux.HandleFunc("/api/services", server.handleServices)
-	mux.HandleFunc("/api/isolate", server.handleIsolate)
-	mux.HandleFunc("/api/restore", server.handleRestore)
+	mux.HandleFunc("/api/isolate", server.requireAPIToken(server.handleIsolate))
+	mux.HandleFunc("/api/restore", server.requireAPIToken(server.handleRestore))
 	mux.HandleFunc("/api/events", server.handleEvents)
 	mux.HandleFunc("/api/metrics", server.handleMetrics)
 
 	log.Printf("[KB] HTTP API and SSE server listening on %s", addr)
-	return http.ListenAndServe(addr, corsHandler(mux))
+	return http.ListenAndServe(addr, server.corsHandler(mux))
 }
 
-func corsHandler(h http.Handler) http.Handler {
+// corsOrigins returns the configured dashboard origin allowlist. Defaults to
+// the Vite dev server's default origins so local `npm run dev` keeps working
+// out of the box; production/remote deployments must set KB_HTTP_CORS_ORIGIN
+// explicitly (comma-separated). Replaces the previous unconditional
+// "Access-Control-Allow-Origin: *" (BUG-001).
+func corsOrigins() []string {
+	if v := os.Getenv("KB_HTTP_CORS_ORIGIN"); v != "" {
+		return strings.Split(v, ",")
+	}
+	return []string{"http://localhost:5173", "http://127.0.0.1:5173"}
+}
+
+func (s *HTTPServer) corsHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		for _, allowed := range s.allowedOrigins {
+			if origin != "" && origin == strings.TrimSpace(allowed) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+				break
+			}
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+// requireAPIToken gates state-mutating routes (isolate/restore) behind a
+// bearer token configured via KB_HTTP_API_TOKEN. Fails closed: if no token
+// is configured, the route is unusable rather than silently unauthenticated
+// (BUG-001 — these previously had zero auth of any kind).
+func (s *HTTPServer) requireAPIToken(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.apiToken == "" {
+			http.Error(w, "API token not configured on server", http.StatusServiceUnavailable)
+			return
+		}
+		const prefix = "Bearer "
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, prefix) || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, prefix)), []byte(s.apiToken)) != 1 {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // JSON helpers
@@ -277,7 +328,7 @@ func isProcessRunning(name string) bool {
 		if err != nil {
 			continue
 		}
-		
+
 		// Split cmdline by null byte
 		args := bytes.Split(cmdline, []byte{0})
 		for _, arg := range args {
@@ -331,7 +382,7 @@ func (s *HTTPServer) handleServices(w http.ResponseWriter, r *http.Request) {
 		aadsStatus = "ok"
 	}
 
-	grpcSocketPath := os.Getenv("KB_GRPC_SOCKET")
+	grpcSocketPath := s.cp.grpcSocketPath
 	if grpcSocketPath == "" {
 		grpcSocketPath = ipc.SocketGRPC
 	}
@@ -454,7 +505,6 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// Subscribe to event channel
 	chEvents := make(chan *pb.KBEvent, 128)

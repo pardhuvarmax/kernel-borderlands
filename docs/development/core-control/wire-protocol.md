@@ -4,10 +4,13 @@
 scope for this pass, worth its own rewrite):** `version = 1` below is outdated —
 `kb_bridge.h`'s current `KB_WIRE_VERSION` is `3`, `ProcessState` doesn't include the
 `start_time_ns` field the v3 bump added (see `wire-update.md`), and this doc only
-documents `msg_type` 1/2 — it's silent on `ContainmentCmd` (5), `ProcessExit` (4), and
-`SensitivePaths` (6), all of which exist in `kb_bridge.h` today. Only the Socket Path
-section below has been corrected as part of this pass (it was directly affected by the
-kbd.sock/kbct.sock split); the rest predates that and was already out of date before it.
+documents `msg_type` 1/2 — it's silent on `ContainmentCmd` (5), `ProcessExit` (4),
+`SensitivePaths` (6), `CPMProtectedExec` (7), and `CWPWorkloads` (8), all of which
+exist in `kb_bridge.h` today (`CPMProtectedExec`/`CWPWorkloads` were added since this
+disclaimer was first written, for CPM's/CWP's operator-pushed registries — see
+`docs/features/CPM.md`/`CWP.md`). Only the Socket Path section below has been
+corrected as part of this pass (it was directly affected by the kbd.sock/kbct.sock
+split); the rest predates that and was already out of date before it.
 
 **format :** 
 

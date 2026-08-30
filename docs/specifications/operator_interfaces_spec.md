@@ -15,7 +15,7 @@ Kernel-level security operations demand high availability, privilege separation,
                                └─────────────┬─────────────┘
                                              │
              ┌──────────────────────┬────────┴──────────────┬──────────────────────┐
-             │ (WebSockets)         │ (gRPC)                │ (gRPC)               │ (gRPC)
+             │ (REST + SSE)         │ (gRPC)                │ (gRPC)               │ (gRPC)
              ▼                      ▼                       ▼                      ▼
       +--------------+      +--------------+        +--------------+       +--------------+
       | kb-dashboard |      |    kbctl     |        |    kb-tui    |       |    kb-mcp    |
@@ -32,9 +32,9 @@ By maintaining four independent surfaces, Kernel Borderlands achieves **Graceful
 
 | Subsystem | Primary Target | Protocol / Transport | Key Capabilities | Best Used For |
 |---|---|---|---|---|
-| **`kb-dashboard`** | Security Operations Center (SOC) Analysts | WebSockets (JSON stream) | - D3.js live process swarm graphs<br>- Zone distribution heatmaps<br>- Visual trend metrics | Real-time threat visual monitoring and human-in-the-loop security oversight. |
+| **`kb-dashboard`** | Security Operations Center (SOC) Analysts | REST (`fetch`) + Server-Sent Events (`/api/events`) — not WebSockets | - Live process tables<br>- Zone/threat distribution charts (Recharts)<br>- Real-time alert feed | Real-time threat visual monitoring and human-in-the-loop security oversight. |
 | **`kbctl`** | DevOps / Security Engineers & CI Pipelines | gRPC / Protobuf | - Dynamic policy reloads<br>- Target process isolation<br>- Cryptographic audit exports | Scripted playbooks, CI/CD integrations, and rapid command-line overrides. |
-| **`kb-tui`** | Remote Operators & Systems Administrators | gRPC over UDS (`/run/kb/kba.sock`) / ratatui, SSH transport provided by `kbd` | - Headless process tables<br>- Live scrollable alert feeds<br>- Keyboard-driven containment | Low-bandwidth emergency triage and headless server monitoring without browser overhead. |
+| **`kb-tui`** | Remote Operators & Systems Administrators | gRPC over UDS (`/run/kb/kba.sock`) / ratatui, SSH transport provided by a dedicated `sshd` instance (not `kbd`) | - Headless process tables<br>- Live scrollable alert feeds<br>- Keyboard-driven containment | Low-bandwidth emergency triage and headless server monitoring without browser overhead. |
 | **`kb-mcp`** | AI Agents, LLM engines, & AADS Swarm | JSON-RPC 2.0 / stdio | - Telemetry resource streams<br>- Process profile and anomaly tools<br>- AI-native prompt templates | Standardized workspace interface allowing AI tools to query states and execute containment. |
 
 ---
@@ -42,9 +42,9 @@ By maintaining four independent surfaces, Kernel Borderlands achieves **Graceful
 ## 3. Deep-Dive Surface Specifications
 
 ### A. Web Dashboard (`kb-op/kb-dashboard/`)
-The web dashboard is the visual focal point of the platform. By leveraging D3.js force-directed graphs, it maps process lineage dependencies dynamically. If a process spawns a suspicious socket connection, the node shifts visually to neon orange; if it triggers BPF LSM blocking rules, it is dragged into the red containment boundary. 
-- **WebSocket Transport**: Emits JSON payloads over a persistent socket connection to eliminate polling overhead and browser rendering lag.
-- **Visual Heatmaps**: Visualizes process metrics mapped to threat severity scales to enable rapid analyst assessment.
+The web dashboard is the visual focal point of the platform. **Correction**: this section previously described D3.js force-directed process-lineage graphs and a WebSocket transport — neither exists in `kb-op/kb-dashboard/package.json` (dependencies are React, `recharts`, `lucide-react`; no `d3` package). The actual transport is REST `fetch()` calls against `kbd`'s HTTP API (`:8080`) for process/alert/log tables, plus a Server-Sent Events stream (`/api/events`) for live updates — a live-updating table/chart view, not a force-directed graph visualization.
+- **SSE Transport**: Consumes a persistent `EventSource` stream (`/api/events`) to receive live telemetry/alerts without polling.
+- **Charts**: Recharts-based process/zone/threat metric charts to enable rapid analyst assessment.
 
 ### B. Command-Line Client (`kb-op/kbctl/`)
 `kbctl` is the programmatic workhorse of the operator suite. Every operation is structured as a typed protobuf gRPC request, providing maximum execution speed and zero rendering latency.
@@ -52,7 +52,7 @@ The web dashboard is the visual focal point of the platform. By leveraging D3.js
 - **Playbook Integration**: Allows shell script wrappers to automate recovery actions (e.g., if a high-value database process enters the `SUSPICIOUS` zone, `kbctl` can be scripted to trigger backup snapshots and reload network rules automatically).
 
 ### C. SSH Terminal Interface (`kb-op/kb-tui/`)
-The terminal console is a Rust binary built with ratatui, driven over the stdin/stdout of a PTY that `kbd` allocates and attaches after authenticating the SSH connection (SSH host keys, `authorized_keys`, and PTY handling all live in `kbd`, not in `kb-tui` itself). `kb-tui` talks to the control plane's `KernelBorderlands` gRPC service over the Unix domain socket at `/run/kb/kba.sock` — the same UDS gateway used by `kb-checker` and the Ray agent swarm.
+The terminal console is a Rust binary built with ratatui, driven over the stdin/stdout of a PTY that a dedicated, independent `sshd` instance (`sshd@kb-operator.service`, port 2222) allocates and attaches after authenticating the SSH connection via `ForceCommand` — SSH host keys, `authorized_keys`, and PTY handling all live in that `sshd` instance, not in `kbd` or `kb-tui` itself (see `docs/development/core-control/control-plane-catalog.md` §2.11, `docs/architecture/boot_sequence_spec.md` §3). `kb-tui` talks to the control plane's `KernelBorderlands` gRPC service over the Unix domain socket at `/run/kb/kba.sock` — the same UDS gateway used by `kb-checker` and the Ray agent swarm.
 - **Zero Browser Dependencies**: Renders high-fidelity process tables and scrolling audit logs in standard terminal windows.
 - **Secure Remote Access**: Permits operator access over standard encrypted SSH channels, removing the need to expose web servers or HTTP gateways on production bastions.
 - **Graceful Degradation**: If `/run/kb/kba.sock` is unreachable, `kb-tui` falls back to a clearly-bannered offline/demo mode rather than failing outright.

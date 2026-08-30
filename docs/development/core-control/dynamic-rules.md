@@ -2,6 +2,8 @@
 
 **Status:** Completed — implemented in `kb-control-plane/internal/ipc/rules.go` and `kb-control-plane/config/rules.yaml`.
 
+**Correction, 2026-08-30**: this doc's "Completed" status was accurate for the serialization/parsing pieces (B and C below) but not for the actual delivery — `SendRulesPayload` was fully implemented and unit-tested but had **zero production call sites**; nothing ever invoked it, so editing `rules.yaml` had no effect on a running sensor despite this doc's §1 architecture diagram showing it happening. `kbd_sensor.c` itself carried an honest comment documenting this exact gap at its `read_rules_from_bridge()` call site. Now genuinely wired: `ipc.Listener.pushConnectTimeFrames` calls `SendRulesPayload` on every new sensor connection, configurable via `kbd --rules` (default `config/rules.yaml`). One correctness note worth preserving here since it's easy to get backwards: **send order matters** — the C sensor's connect-time handshake reads the rules frame first, then the sensitive-paths frame second, and only the second read has a fallback for "the wrong frame arrived here." Sending sensitive-paths before rules silently corrupts the connection's later framing. Regression test guarding this exact ordering: `TestPushConnectTimeFrames_RulesSentBeforeSensitivePaths` (`internal/ipc/rules_push_test.go`).
+
 We have designed and implemented a **Dynamic Rule Delivery System** to ensure Kernel Borderlands is never blind to new attacks. Analysts can now add or edit attack-chain rules in a human-readable YAML configuration file, which the Go control plane dynamically parses, serializes into a packed binary format, and delivers to the C sensor at startup or upon connection.
 
 ---

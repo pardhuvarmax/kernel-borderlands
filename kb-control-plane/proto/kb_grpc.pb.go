@@ -30,6 +30,8 @@ const (
 	KernelBorderlands_ExportAuditLog_FullMethodName      = "/kb.KernelBorderlands/ExportAuditLog"
 	KernelBorderlands_OverrideZone_FullMethodName        = "/kb.KernelBorderlands/OverrideZone"
 	KernelBorderlands_ReloadPolicy_FullMethodName        = "/kb.KernelBorderlands/ReloadPolicy"
+	KernelBorderlands_ReloadWorkloads_FullMethodName     = "/kb.KernelBorderlands/ReloadWorkloads"
+	KernelBorderlands_RecordSSHSession_FullMethodName    = "/kb.KernelBorderlands/RecordSSHSession"
 )
 
 // KernelBorderlandsClient is the client API for KernelBorderlands service.
@@ -66,6 +68,12 @@ type KernelBorderlandsClient interface {
 	// the active policy.Engine and re-pushing sensitive_paths to the
 	// sensor over kbct.sock.
 	ReloadPolicy(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ReloadPolicyResponse, error)
+	// Re-reads workloads.yaml and broadcasts the protected-workload
+	// registry to every connected sensor. See docs/features/CWP.md.
+	ReloadWorkloads(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ReloadWorkloadsResponse, error)
+	// Records an SSH session start/end into the audit log — called by the
+	// ForceCommand wrapper script, not by kb-tui itself. See §2.12 step 5.
+	RecordSSHSession(ctx context.Context, in *SSHSessionEvent, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type kernelBorderlandsClient struct {
@@ -213,6 +221,26 @@ func (c *kernelBorderlandsClient) ReloadPolicy(ctx context.Context, in *Empty, o
 	return out, nil
 }
 
+func (c *kernelBorderlandsClient) ReloadWorkloads(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ReloadWorkloadsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReloadWorkloadsResponse)
+	err := c.cc.Invoke(ctx, KernelBorderlands_ReloadWorkloads_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kernelBorderlandsClient) RecordSSHSession(ctx context.Context, in *SSHSessionEvent, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, KernelBorderlands_RecordSSHSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KernelBorderlandsServer is the server API for KernelBorderlands service.
 // All implementations must embed UnimplementedKernelBorderlandsServer
 // for forward compatibility.
@@ -247,6 +275,12 @@ type KernelBorderlandsServer interface {
 	// the active policy.Engine and re-pushing sensitive_paths to the
 	// sensor over kbct.sock.
 	ReloadPolicy(context.Context, *Empty) (*ReloadPolicyResponse, error)
+	// Re-reads workloads.yaml and broadcasts the protected-workload
+	// registry to every connected sensor. See docs/features/CWP.md.
+	ReloadWorkloads(context.Context, *Empty) (*ReloadWorkloadsResponse, error)
+	// Records an SSH session start/end into the audit log — called by the
+	// ForceCommand wrapper script, not by kb-tui itself. See §2.12 step 5.
+	RecordSSHSession(context.Context, *SSHSessionEvent) (*Empty, error)
 	mustEmbedUnimplementedKernelBorderlandsServer()
 }
 
@@ -289,6 +323,12 @@ func (UnimplementedKernelBorderlandsServer) OverrideZone(context.Context, *ZoneO
 }
 func (UnimplementedKernelBorderlandsServer) ReloadPolicy(context.Context, *Empty) (*ReloadPolicyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReloadPolicy not implemented")
+}
+func (UnimplementedKernelBorderlandsServer) ReloadWorkloads(context.Context, *Empty) (*ReloadWorkloadsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReloadWorkloads not implemented")
+}
+func (UnimplementedKernelBorderlandsServer) RecordSSHSession(context.Context, *SSHSessionEvent) (*Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "method RecordSSHSession not implemented")
 }
 func (UnimplementedKernelBorderlandsServer) mustEmbedUnimplementedKernelBorderlandsServer() {}
 func (UnimplementedKernelBorderlandsServer) testEmbeddedByValue()                           {}
@@ -488,6 +528,42 @@ func _KernelBorderlands_ReloadPolicy_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KernelBorderlands_ReloadWorkloads_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KernelBorderlandsServer).ReloadWorkloads(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KernelBorderlands_ReloadWorkloads_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KernelBorderlandsServer).ReloadWorkloads(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KernelBorderlands_RecordSSHSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SSHSessionEvent)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KernelBorderlandsServer).RecordSSHSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KernelBorderlands_RecordSSHSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KernelBorderlandsServer).RecordSSHSession(ctx, req.(*SSHSessionEvent))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KernelBorderlands_ServiceDesc is the grpc.ServiceDesc for KernelBorderlands service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -526,6 +602,14 @@ var KernelBorderlands_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReloadPolicy",
 			Handler:    _KernelBorderlands_ReloadPolicy_Handler,
+		},
+		{
+			MethodName: "ReloadWorkloads",
+			Handler:    _KernelBorderlands_ReloadWorkloads_Handler,
+		},
+		{
+			MethodName: "RecordSSHSession",
+			Handler:    _KernelBorderlands_RecordSSHSession_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

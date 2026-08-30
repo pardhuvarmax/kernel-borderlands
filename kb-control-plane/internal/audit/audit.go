@@ -67,7 +67,9 @@ func (a *Logger) VerifyChain() (bool, int, error) {
     for rows.Next() {
         var ts int64
         var action, subject, actor, reason, prevH, entryH string
-        rows.Scan(&ts, &action, &subject, &actor, &reason, &prevH, &entryH)
+        if err := rows.Scan(&ts, &action, &subject, &actor, &reason, &prevH, &entryH); err != nil {
+            return false, count, err
+        }
 
         content := fmt.Sprintf("%d|%s|%s|%s|%s|%s",
             ts, action, subject, actor, reason, prev)

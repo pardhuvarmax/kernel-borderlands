@@ -72,12 +72,21 @@ func (s *Store) flushL2Worker() {
 // durable SQLite write asynchronously. Never blocks on disk I/O; if the
 // pipe is full, L1 remains correct and only the durable copy lags.
 func (s *Store) UpsertProcessState(msg *ipc.ProcessStateMsg) error {
+	// Preserve Containment across telemetry updates — this handler runs on
+	// every routine ProcessState from kb-core, which keeps monitoring a
+	// contained process, so a full-literal overwrite here would silently
+	// reset any active containment back to NONE (BUG-002).
+	var containment int32
+	if v, ok := s.l1.Load(msg.PID); ok {
+		containment = v.(*CachedState).Containment
+	}
 	s.l1.Store(msg.PID, &CachedState{
 		PID: msg.PID, PPID: msg.PPID, UID: msg.UID, Comm: msg.Comm,
 		StartTimeNs: msg.StartTimeNs, LastUpdatedNs: msg.LastUpdatedNs,
 		DimScore: msg.DimScore, CompositeScore: msg.CompositeScore,
 		EMAScore: msg.EMAScore, SyscallEntropyLifetime: msg.SyscallEntropyLifetime,
 		Zone: msg.Zone, EventCount: msg.EventCount,
+		Containment: containment,
 	})
 
 	select {

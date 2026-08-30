@@ -54,6 +54,18 @@ kbctl audit export --out /var/log/kb_audit.json
 kbctl stats
 ```
 
+### D. CWP Protected-Workload Registry
+Reload `workloads.yaml` and push the registry live to every connected sensor, without
+restarting `kbd` (see `docs/features/CWP.md`):
+```bash
+kbctl workload reload
+```
+
+`kbctl ssh session-start`/`session-end` also exist, but are not operator-facing
+commands — they're the audit-tie-in callback the `sshd@kb-operator` `ForceCommand`
+wrapper script invokes around every session (`docs/architecture/boot_sequence_spec.md`
+§3), hidden from `--help` since there's no reason to run them by hand.
+
 ---
 
 ## 3. Build & Run

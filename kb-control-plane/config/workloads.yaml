@@ -1,0 +1,35 @@
+# CWP (Critical Workload Protection) protected-workload registry.
+# See docs/features/CWP.md for the full design; this file follows §12.1's
+# YAML schema, trimmed to the fields actually sent over the wire today
+# (path + identity_tier + expected_hash — owner_team/justification are
+# parsed and logged for operator documentation value but not yet part of
+# any alert, per CWP.md §9's "still open" note).
+#
+# Loaded by kbd at startup (--workloads, default this file) and pushed to
+# the sensor at connect time; `kbctl workload reload` re-reads this file
+# and pushes the result live to every currently-connected sensor without
+# restarting kbd.
+#
+# identity_tier: path (default) — matches on resolved executable path only.
+# identity_tier: hash — also requires the binary's SHA-256 to match.
+#   If expected_hash is omitted, kbd computes it locally from the file at
+#   `path` on load (kbd runs on the same host as the sensor) — recompute by
+#   re-running `kbctl workload reload` after every legitimate binary
+#   upgrade, or the entry will start rejecting the new (correct) binary.
+#
+# Empty by default — CWP is opt-in. Uncomment/add entries for your own
+# mission-critical applications.
+
+critical_workloads: []
+
+# Example:
+# critical_workloads:
+#   - path: /usr/bin/postgres
+#     identity_tier: path
+#     owner_team: data-platform
+#     justification: "Primary production OLTP database"
+#
+#   - path: /usr/bin/vault
+#     identity_tier: hash
+#     owner_team: security-infra
+#     justification: "Secrets management; elevated identity verification required"

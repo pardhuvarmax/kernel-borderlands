@@ -1245,6 +1245,147 @@ func (x *ReloadPolicyResponse) GetMessage() string {
 	return ""
 }
 
+// Re-reads workloads.yaml (docs/features/CWP.md's protected-workload
+// registry) and broadcasts it to every currently-connected sensor. Unlike
+// ReloadPolicy, this is a genuinely live push, not just a Go-side state
+// swap — the sensor polls for CWP workload updates continuously at
+// runtime (see kbd_sensor.c's read_cwp_workloads_from_bridge).
+type ReloadWorkloadsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	WorkloadCount uint32                 `protobuf:"varint,3,opt,name=workload_count,json=workloadCount,proto3" json:"workload_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReloadWorkloadsResponse) Reset() {
+	*x = ReloadWorkloadsResponse{}
+	mi := &file_proto_kb_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReloadWorkloadsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReloadWorkloadsResponse) ProtoMessage() {}
+
+func (x *ReloadWorkloadsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_kb_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReloadWorkloadsResponse.ProtoReflect.Descriptor instead.
+func (*ReloadWorkloadsResponse) Descriptor() ([]byte, []int) {
+	return file_proto_kb_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ReloadWorkloadsResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReloadWorkloadsResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *ReloadWorkloadsResponse) GetWorkloadCount() uint32 {
+	if x != nil {
+		return x.WorkloadCount
+	}
+	return 0
+}
+
+// Reported by the ForceCommand wrapper script (see
+// docs/architecture/boot_sequence_spec.md §3, sshd_config.d/kb-operator.conf)
+// on every SSH session into kb-tui — the audit-tie-in callback described in
+// docs/development/core-control/control-plane-catalog.md §2.12 step 5.
+// Deliberately narrow: this RPC only ever writes one of two fixed audit
+// actions (SSH_SESSION_START/SSH_SESSION_END), not an arbitrary-action
+// write endpoint — same "advisory, not cryptographically authoritative"
+// trust level as AgentDecision.AuthorizedBy elsewhere in this API.
+type SSHSessionEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Principal     string                 `protobuf:"bytes,1,opt,name=principal,proto3" json:"principal,omitempty"`                     // local user landed as, e.g. "operator"
+	RemoteAddr    string                 `protobuf:"bytes,2,opt,name=remote_addr,json=remoteAddr,proto3" json:"remote_addr,omitempty"` // $SSH_CONNECTION client address
+	Identity      string                 `protobuf:"bytes,3,opt,name=identity,proto3" json:"identity,omitempty"`                       // key fingerprint today; cert principal/serial once §2.12's CA lands
+	Event         string                 `protobuf:"bytes,4,opt,name=event,proto3" json:"event,omitempty"`                             // "session_start" | "session_end"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SSHSessionEvent) Reset() {
+	*x = SSHSessionEvent{}
+	mi := &file_proto_kb_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SSHSessionEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SSHSessionEvent) ProtoMessage() {}
+
+func (x *SSHSessionEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_kb_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SSHSessionEvent.ProtoReflect.Descriptor instead.
+func (*SSHSessionEvent) Descriptor() ([]byte, []int) {
+	return file_proto_kb_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *SSHSessionEvent) GetPrincipal() string {
+	if x != nil {
+		return x.Principal
+	}
+	return ""
+}
+
+func (x *SSHSessionEvent) GetRemoteAddr() string {
+	if x != nil {
+		return x.RemoteAddr
+	}
+	return ""
+}
+
+func (x *SSHSessionEvent) GetIdentity() string {
+	if x != nil {
+		return x.Identity
+	}
+	return ""
+}
+
+func (x *SSHSessionEvent) GetEvent() string {
+	if x != nil {
+		return x.Event
+	}
+	return ""
+}
+
 var File_proto_kb_proto protoreflect.FileDescriptor
 
 const file_proto_kb_proto_rawDesc = "" +
@@ -1341,7 +1482,17 @@ const file_proto_kb_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"J\n" +
 	"\x14ReloadPolicyResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage*1\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"t\n" +
+	"\x17ReloadWorkloadsResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
+	"\x0eworkload_count\x18\x03 \x01(\rR\rworkloadCount\"\x82\x01\n" +
+	"\x0fSSHSessionEvent\x12\x1c\n" +
+	"\tprincipal\x18\x01 \x01(\tR\tprincipal\x12\x1f\n" +
+	"\vremote_addr\x18\x02 \x01(\tR\n" +
+	"remoteAddr\x12\x1a\n" +
+	"\bidentity\x18\x03 \x01(\tR\bidentity\x12\x14\n" +
+	"\x05event\x18\x04 \x01(\tR\x05event*1\n" +
 	"\x04Zone\x12\b\n" +
 	"\x04SAFE\x10\x00\x12\x0e\n" +
 	"\n" +
@@ -1353,7 +1504,7 @@ const file_proto_kb_proto_rawDesc = "" +
 	"\x06CGROUP\x10\x01\x12\v\n" +
 	"\aSECCOMP\x10\x02\x12\r\n" +
 	"\tNAMESPACE\x10\x03\x12\r\n" +
-	"\tTERMINATE\x10\x042\xe9\x04\n" +
+	"\tTERMINATE\x10\x042\xd8\x05\n" +
 	"\x11KernelBorderlands\x123\n" +
 	"\x0fGetProcessState\x12\x0e.kb.PidRequest\x1a\x10.kb.ProcessState\x12/\n" +
 	"\bListZone\x12\x0f.kb.ZoneRequest\x1a\x10.kb.ProcessState0\x01\x12A\n" +
@@ -1365,7 +1516,9 @@ const file_proto_kb_proto_rawDesc = "" +
 	"\x10VerifyAuditChain\x12\t.kb.Empty\x1a\x17.kb.AuditVerifyResponse\x124\n" +
 	"\x0eExportAuditLog\x12\t.kb.Empty\x1a\x17.kb.AuditExportResponse\x12A\n" +
 	"\fOverrideZone\x12\x17.kb.ZoneOverrideRequest\x1a\x18.kb.ZoneOverrideResponse\x123\n" +
-	"\fReloadPolicy\x12\t.kb.Empty\x1a\x18.kb.ReloadPolicyResponseBCZAgithub.com/pardhuvarmax/kernel-borderlands/kb-control-plane/protob\x06proto3"
+	"\fReloadPolicy\x12\t.kb.Empty\x1a\x18.kb.ReloadPolicyResponse\x129\n" +
+	"\x0fReloadWorkloads\x12\t.kb.Empty\x1a\x1b.kb.ReloadWorkloadsResponse\x122\n" +
+	"\x10RecordSSHSession\x12\x13.kb.SSHSessionEvent\x1a\t.kb.EmptyBCZAgithub.com/pardhuvarmax/kernel-borderlands/kb-control-plane/protob\x06proto3"
 
 var (
 	file_proto_kb_proto_rawDescOnce sync.Once
@@ -1380,34 +1533,36 @@ func file_proto_kb_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_kb_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_kb_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_proto_kb_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_proto_kb_proto_goTypes = []any{
-	(Zone)(0),                    // 0: kb.Zone
-	(ContainmentLevel)(0),        // 1: kb.ContainmentLevel
-	(*ProcessState)(nil),         // 2: kb.ProcessState
-	(*KBEvent)(nil),              // 3: kb.KBEvent
-	(*Alert)(nil),                // 4: kb.Alert
-	(*AgentDecision)(nil),        // 5: kb.AgentDecision
-	(*PidRequest)(nil),           // 6: kb.PidRequest
-	(*ZoneRequest)(nil),          // 7: kb.ZoneRequest
-	(*EventFilter)(nil),          // 8: kb.EventFilter
-	(*DecisionAck)(nil),          // 9: kb.DecisionAck
-	(*ContainmentRequest)(nil),   // 10: kb.ContainmentRequest
-	(*ContainmentResponse)(nil),  // 11: kb.ContainmentResponse
-	(*Empty)(nil),                // 12: kb.Empty
-	(*SystemStats)(nil),          // 13: kb.SystemStats
-	(*AuditEntry)(nil),           // 14: kb.AuditEntry
-	(*AuditVerifyResponse)(nil),  // 15: kb.AuditVerifyResponse
-	(*AuditExportResponse)(nil),  // 16: kb.AuditExportResponse
-	(*ZoneOverrideRequest)(nil),  // 17: kb.ZoneOverrideRequest
-	(*ZoneOverrideResponse)(nil), // 18: kb.ZoneOverrideResponse
-	(*ReloadPolicyResponse)(nil), // 19: kb.ReloadPolicyResponse
-	nil,                          // 20: kb.KBEvent.MetadataEntry
+	(Zone)(0),                       // 0: kb.Zone
+	(ContainmentLevel)(0),           // 1: kb.ContainmentLevel
+	(*ProcessState)(nil),            // 2: kb.ProcessState
+	(*KBEvent)(nil),                 // 3: kb.KBEvent
+	(*Alert)(nil),                   // 4: kb.Alert
+	(*AgentDecision)(nil),           // 5: kb.AgentDecision
+	(*PidRequest)(nil),              // 6: kb.PidRequest
+	(*ZoneRequest)(nil),             // 7: kb.ZoneRequest
+	(*EventFilter)(nil),             // 8: kb.EventFilter
+	(*DecisionAck)(nil),             // 9: kb.DecisionAck
+	(*ContainmentRequest)(nil),      // 10: kb.ContainmentRequest
+	(*ContainmentResponse)(nil),     // 11: kb.ContainmentResponse
+	(*Empty)(nil),                   // 12: kb.Empty
+	(*SystemStats)(nil),             // 13: kb.SystemStats
+	(*AuditEntry)(nil),              // 14: kb.AuditEntry
+	(*AuditVerifyResponse)(nil),     // 15: kb.AuditVerifyResponse
+	(*AuditExportResponse)(nil),     // 16: kb.AuditExportResponse
+	(*ZoneOverrideRequest)(nil),     // 17: kb.ZoneOverrideRequest
+	(*ZoneOverrideResponse)(nil),    // 18: kb.ZoneOverrideResponse
+	(*ReloadPolicyResponse)(nil),    // 19: kb.ReloadPolicyResponse
+	(*ReloadWorkloadsResponse)(nil), // 20: kb.ReloadWorkloadsResponse
+	(*SSHSessionEvent)(nil),         // 21: kb.SSHSessionEvent
+	nil,                             // 22: kb.KBEvent.MetadataEntry
 }
 var file_proto_kb_proto_depIdxs = []int32{
 	0,  // 0: kb.ProcessState.zone:type_name -> kb.Zone
 	1,  // 1: kb.ProcessState.containment:type_name -> kb.ContainmentLevel
-	20, // 2: kb.KBEvent.metadata:type_name -> kb.KBEvent.MetadataEntry
+	22, // 2: kb.KBEvent.metadata:type_name -> kb.KBEvent.MetadataEntry
 	0,  // 3: kb.ZoneRequest.zone:type_name -> kb.Zone
 	1,  // 4: kb.ContainmentRequest.level:type_name -> kb.ContainmentLevel
 	14, // 5: kb.AuditExportResponse.entries:type_name -> kb.AuditEntry
@@ -1423,19 +1578,23 @@ var file_proto_kb_proto_depIdxs = []int32{
 	12, // 15: kb.KernelBorderlands.ExportAuditLog:input_type -> kb.Empty
 	17, // 16: kb.KernelBorderlands.OverrideZone:input_type -> kb.ZoneOverrideRequest
 	12, // 17: kb.KernelBorderlands.ReloadPolicy:input_type -> kb.Empty
-	2,  // 18: kb.KernelBorderlands.GetProcessState:output_type -> kb.ProcessState
-	2,  // 19: kb.KernelBorderlands.ListZone:output_type -> kb.ProcessState
-	11, // 20: kb.KernelBorderlands.SetContainment:output_type -> kb.ContainmentResponse
-	3,  // 21: kb.KernelBorderlands.StreamEvents:output_type -> kb.KBEvent
-	9,  // 22: kb.KernelBorderlands.SubmitAgentDecision:output_type -> kb.DecisionAck
-	4,  // 23: kb.KernelBorderlands.StreamAlerts:output_type -> kb.Alert
-	13, // 24: kb.KernelBorderlands.GetSystemStats:output_type -> kb.SystemStats
-	15, // 25: kb.KernelBorderlands.VerifyAuditChain:output_type -> kb.AuditVerifyResponse
-	16, // 26: kb.KernelBorderlands.ExportAuditLog:output_type -> kb.AuditExportResponse
-	18, // 27: kb.KernelBorderlands.OverrideZone:output_type -> kb.ZoneOverrideResponse
-	19, // 28: kb.KernelBorderlands.ReloadPolicy:output_type -> kb.ReloadPolicyResponse
-	18, // [18:29] is the sub-list for method output_type
-	7,  // [7:18] is the sub-list for method input_type
+	12, // 18: kb.KernelBorderlands.ReloadWorkloads:input_type -> kb.Empty
+	21, // 19: kb.KernelBorderlands.RecordSSHSession:input_type -> kb.SSHSessionEvent
+	2,  // 20: kb.KernelBorderlands.GetProcessState:output_type -> kb.ProcessState
+	2,  // 21: kb.KernelBorderlands.ListZone:output_type -> kb.ProcessState
+	11, // 22: kb.KernelBorderlands.SetContainment:output_type -> kb.ContainmentResponse
+	3,  // 23: kb.KernelBorderlands.StreamEvents:output_type -> kb.KBEvent
+	9,  // 24: kb.KernelBorderlands.SubmitAgentDecision:output_type -> kb.DecisionAck
+	4,  // 25: kb.KernelBorderlands.StreamAlerts:output_type -> kb.Alert
+	13, // 26: kb.KernelBorderlands.GetSystemStats:output_type -> kb.SystemStats
+	15, // 27: kb.KernelBorderlands.VerifyAuditChain:output_type -> kb.AuditVerifyResponse
+	16, // 28: kb.KernelBorderlands.ExportAuditLog:output_type -> kb.AuditExportResponse
+	18, // 29: kb.KernelBorderlands.OverrideZone:output_type -> kb.ZoneOverrideResponse
+	19, // 30: kb.KernelBorderlands.ReloadPolicy:output_type -> kb.ReloadPolicyResponse
+	20, // 31: kb.KernelBorderlands.ReloadWorkloads:output_type -> kb.ReloadWorkloadsResponse
+	12, // 32: kb.KernelBorderlands.RecordSSHSession:output_type -> kb.Empty
+	20, // [20:33] is the sub-list for method output_type
+	7,  // [7:20] is the sub-list for method input_type
 	7,  // [7:7] is the sub-list for extension type_name
 	7,  // [7:7] is the sub-list for extension extendee
 	0,  // [0:7] is the sub-list for field type_name
@@ -1452,7 +1611,7 @@ func file_proto_kb_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_kb_proto_rawDesc), len(file_proto_kb_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -65,23 +65,12 @@ You should now see `bpf` at the end of the output list.
 
 ---
 
-## 6. Activate the LSM Hook in Kernel Borderlands
-Once the host supports BPF LSM, activate the pre-staged `kb_lsm_file_open` block hook:
+## 6. The LSM Hook in Kernel Borderlands
 
-1.  Open [userspace/sensor/kbd_sensor.c](file:///home/emergence/Desktop/kernel-borderlands/kb-core/userspace/sensor/kbd_sensor.c).
-2.  Locate the autoload controls in `main()`:
-    ```c
-    bpf_program__set_autoload(skel->progs.kb_ssl_write, false);
-    bpf_program__set_autoload(skel->progs.kb_go_tls_write, false);
-    bpf_program__set_autoload(skel->progs.kb_lsm_file_open, false);
-    ```
-3.  Change `false` to `true` for the LSM hook:
-    ```c
-    bpf_program__set_autoload(skel->progs.kb_lsm_file_open, true);
-    ```
-4.  Recompile and run:
-    ```bash
-    make
-    sudo ./build/kbd_sensor
-    ```
-The sensor will now load the LSM program into the kernel, enabling Ring 0 file access blocks.
+**Correction, 2026-08-30**: this section previously described `kb_lsm_file_open` as "pre-staged" with autoload set to `false`, requiring a manual code edit to activate. That's no longer true — `kb-core/userspace/sensor/kbd_sensor.c`'s `main()` already sets all three of these to `true` unconditionally:
+```c
+bpf_program__set_autoload(skel->progs.kb_ssl_write, true);
+bpf_program__set_autoload(skel->progs.kb_go_tls_write, true);
+bpf_program__set_autoload(skel->progs.kb_lsm_file_open, true);
+```
+No manual activation step is needed — as long as the host supports and has enabled BPF LSM (§1–§5 above), `sudo ./build/kbd_sensor` loads `kb_lsm_file_open` into the kernel automatically, enabling Ring 0 file access blocks. If BPF LSM isn't enabled on the host, the LSM program simply fails to attach at startup (check `kbd_sensor`'s startup log) rather than silently doing nothing — §1–§5 above is what fixes that.

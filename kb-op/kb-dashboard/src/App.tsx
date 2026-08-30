@@ -25,11 +25,18 @@ interface KBAlert {
 
 interface ChartPoint { t: string; safe: number; sus: number; bl: number; }
 
-// kbd's HTTP/SSE API lives on the same host the dashboard was loaded from,
-// port 8080 — a hardcoded "localhost" here would resolve to the browser's
-// own machine instead of the dev host whenever the dashboard is opened
-// remotely (e.g. over Tailscale/VM port-forwarding).
-const API_BASE = `http://${window.location.hostname}:8080`;
+// kbd's HTTP/SSE API base. Configurable via VITE_KB_API_BASE (e.g. for a
+// remote deployment behind TLS/a different port); defaults to the same
+// host the dashboard was loaded from, port 8080 — a hardcoded "localhost"
+// here would resolve to the browser's own machine instead of the dev host
+// whenever the dashboard is opened remotely (e.g. over Tailscale/VM
+// port-forwarding).
+const API_BASE = import.meta.env.VITE_KB_API_BASE || `http://${window.location.hostname}:8080`;
+
+// Bearer token sent as Authorization on state-mutating requests
+// (/api/isolate, /api/restore) — kbd refuses those routes without one
+// (KB_HTTP_API_TOKEN on the server side, see BUG-001).
+const API_TOKEN = import.meta.env.VITE_KB_API_TOKEN || '';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const ts = () =>
@@ -432,7 +439,7 @@ export default function App() {
     } else {
       fetch(`${API_BASE}/api/isolate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(API_TOKEN ? { 'Authorization': `Bearer ${API_TOKEN}` } : {}) },
         body: JSON.stringify({ pid })
       }).then(res => {
         if (res.ok) {
@@ -455,7 +462,7 @@ export default function App() {
     } else {
       fetch(`${API_BASE}/api/restore`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(API_TOKEN ? { 'Authorization': `Bearer ${API_TOKEN}` } : {}) },
         body: JSON.stringify({ pid })
       }).then(res => {
         if (res.ok) {

@@ -428,9 +428,11 @@ static void scan_syscall_entropy(struct kbd_sensor_bpf *skel)
     }
 }
 
-// kbd currently sends at most one frame at connect time (the
-// sensitive_paths push below) — the rules push (msg_type 3) this
-// function reads for is never actually sent by production Go code. Since
+// kbd now sends both a rules push (msg_type 3) and a sensitive_paths push
+// at connect time (docs/development/core-control/dynamic-rules.md —
+// previously compiled Go-side but never actually called from production
+// code; wired into ipc.Listener's accept loop as of the fix that added
+// this comment update). Frame order on the wire is not guaranteed. Since
 // this is a blind length-prefixed read (it must consume the bytes before
 // it can even see the msg_type field inside them), if a sensitive_paths
 // frame arrives here instead, it would otherwise be silently drained and

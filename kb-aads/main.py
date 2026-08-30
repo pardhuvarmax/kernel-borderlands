@@ -23,6 +23,7 @@ async def main():
     await orchestrator.start_swarm(
         cfg["swarm"],
         grpc_socket=cfg.get("control_plane", {}).get("grpc_socket", "/run/kb/kba.sock"),
+        jury_pool_size=cfg.get("jury", {}).get("pool_size", 5),
     )
 
 if __name__ == "__main__":

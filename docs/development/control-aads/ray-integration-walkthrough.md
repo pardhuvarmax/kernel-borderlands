@@ -2,6 +2,16 @@
 
 This guide serves as a comprehensive onboarding and technical walkthrough for **Karthik (AADS Swarm Lead)** to migrate the local Python MARL (Multi-Agent Reinforcement Learning) swarm inside `kb-aads` to a distributed **Ray Cluster** environment.
 
+**Correction, 2026-08-30: this is a pre-implementation planning worksheet, not as-built documentation.** The actual Ray migration diverged from several sketches below in concrete, source-verified ways — treat the code blocks here as historical design intent, not current API. Confirmed divergences:
+- **§4/§6B — `RaySwarmOrchestrator.__init__`**: sketched as `__init__(self)` unconditionally calling `ray.init(address="auto")`. Actual (`swarm/orchestrator.py`): `__init__(self, ray_mode: str = "local")` — defaults to a local in-process head (`ray.init(ignore_reinit_error=True, dashboard_host="0.0.0.0")`); `address="auto"` only happens when `ray_mode="cluster"` is explicitly passed.
+- **§6B — agent spawning**: sketched as `create_agent`. Actual method name is `spawn_agent`.
+- **§6B — `start_swarm`**: sketched as `start_swarm(self, config: dict)` spawning only Patroller/Hunter. Actual signature is `start_swarm(self, config: dict, grpc_socket="/run/kb/kba.sock", jury_pool_size=5)` and also spawns the singleton `ExecutorAgent`/`JudgeAgent`, plus per-round Jury actors spawned dynamically inside `consensus/jje.py` (not by the orchestrator directly).
+- **§5C — Executor's socket**: sketched as pushing over `/run/kb/kbd-grpc.sock`. The actual (and only) socket anywhere in source is `/run/kb/kba.sock` — `kbd-grpc.sock` never existed.
+- **§6A — `BaseAgent`**: sketched as itself `@ray.remote`-decorated. Actual `agents/base_agent.py` deliberately keeps `BaseAgent` undecorated (Ray actor classes can't be subclassed) — a separate `RemoteBaseAgent` exists for roles with no dedicated subclass, and concrete roles (`HunterAgent`, `PatrollerAgent`, etc.) apply `@ray.remote` themselves.
+- **§7 — cluster launch**: presented as current operational guidance. Actual current scope is single-node/local-mode only (`aads-development-plan.md`) — multi-node `ray start --head`/worker-node cluster launch is explicitly deferred (Phase 3.5), not something to run today.
+
+For current, source-verified behavior, read `kb-aads/swarm/orchestrator.py`, `kb-aads/agents/base_agent.py`, and `kb-aads/consensus/jje.py` directly rather than this worksheet's code blocks.
+
 ---
 
 ## 📂 Walkthrough Index
