@@ -109,3 +109,85 @@ class ContainmentEnv(gym.Env):
         obs = np.zeros(5, dtype=np.float32)  # terminal obs, unused past this step
         info = {"target_containment": self._current_target}
         return obs, reward, terminated, truncated, info
+
+
+ALLOW, CONTAIN = 0, 1
+
+
+class JuryEnv(gym.Env):
+    """
+    Training environment for the Jury agent's RL vote (marl/README.md's
+    "RL scope" table: Jury is a bounded binary decision — CONTAIN or
+    ALLOW — with a computable reward, same class of problem as
+    Containment above, just a coarser 2-action space instead of 5).
+
+    Reuses the exact same labeled dataset as ContainmentEnv
+    (scripts/dataset/label.py's output — real ADFA-LD + /proc telemetry,
+    not synthetic) rather than needing a separate collection effort:
+    target_containment > 0 (any real attack category) collapses to
+    CONTAIN, target_containment == 0 (normal) collapses to ALLOW. This is
+    a legitimate, honest reuse — Jury's question ("should this be
+    contained at all?") is a strict coarsening of Containment's question
+    ("which level?"), not a different question needing different ground
+    truth.
+
+    Reward follows marl/README.md's "Reward Signals (Jury/Healer)" table
+    verbatim (True Positive +1.0, False Positive -0.5, True Negative
+    +0.1, False Negative -1.0) — that table predates this environment and
+    was written as the intended design for exactly this agent.
+    """
+
+    def __init__(self, env_config=None):
+        super().__init__()
+        env_config = env_config or {}
+        csv_path = env_config.get("csv_path")
+        if csv_path is None:
+            raise ValueError("JuryEnv requires env_config['csv_path']")
+
+        df = pd.read_csv(csv_path)
+        self._rows_by_category = {
+            cat: sub.to_dict("records") for cat, sub in df.groupby("category")
+        }
+        self._categories = list(self._rows_by_category.keys())
+
+        self.observation_space = spaces.Box(
+            low=np.array([0.0, 0.0, 0.0, -100.0, 0.0], dtype=np.float32),
+            high=np.array([100.0, 2.0, 1.0, 100.0, 5.0], dtype=np.float32),
+            dtype=np.float32,
+        )
+        self.action_space = spaces.Discrete(2)  # ALLOW, CONTAIN
+        self._current_target = None
+
+    def _sample_row(self):
+        cat = random.choice(self._categories)
+        return random.choice(self._rows_by_category[cat])
+
+    def _obs_from_row(self, row):
+        return np.array([
+            row["score"], row["zone"], row["uid_is_root"],
+            row["score_delta"], row["event_type"],
+        ], dtype=np.float32)
+
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
+        row = self._sample_row()
+        self._current_target = CONTAIN if int(row["target_containment"]) > 0 else ALLOW
+        obs = self._obs_from_row(row)
+        return obs, {"target_contain": self._current_target}
+
+    def _reward(self, action: int, target: int) -> float:
+        if action == CONTAIN and target == CONTAIN:
+            return 1.0   # True Positive
+        if action == CONTAIN and target == ALLOW:
+            return -0.5  # False Positive
+        if action == ALLOW and target == ALLOW:
+            return 0.1   # True Negative
+        return -1.0      # False Negative (action == ALLOW, target == CONTAIN)
+
+    def step(self, action):
+        reward = self._reward(int(action), self._current_target)
+        terminated = True
+        truncated = False
+        obs = np.zeros(5, dtype=np.float32)
+        info = {"target_contain": self._current_target}
+        return obs, reward, terminated, truncated, info

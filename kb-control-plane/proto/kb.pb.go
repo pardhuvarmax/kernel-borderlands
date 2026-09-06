@@ -331,17 +331,28 @@ func (x *KBEvent) GetMetadata() map[string]string {
 
 // Alert
 type Alert struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AlertId       string                 `protobuf:"bytes,1,opt,name=alert_id,json=alertId,proto3" json:"alert_id,omitempty"`
-	AlertType     string                 `protobuf:"bytes,2,opt,name=alert_type,json=alertType,proto3" json:"alert_type,omitempty"`
-	Pid           uint32                 `protobuf:"varint,3,opt,name=pid,proto3" json:"pid,omitempty"`
-	Comm          string                 `protobuf:"bytes,4,opt,name=comm,proto3" json:"comm,omitempty"`
-	Confidence    float32                `protobuf:"fixed32,5,opt,name=confidence,proto3" json:"confidence,omitempty"`
-	Severity      string                 `protobuf:"bytes,6,opt,name=severity,proto3" json:"severity,omitempty"`
-	Timestamp     int64                  `protobuf:"varint,7,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	Evidence      []string               `protobuf:"bytes,8,rep,name=evidence,proto3" json:"evidence,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	AlertId    string                 `protobuf:"bytes,1,opt,name=alert_id,json=alertId,proto3" json:"alert_id,omitempty"`
+	AlertType  string                 `protobuf:"bytes,2,opt,name=alert_type,json=alertType,proto3" json:"alert_type,omitempty"`
+	Pid        uint32                 `protobuf:"varint,3,opt,name=pid,proto3" json:"pid,omitempty"`
+	Comm       string                 `protobuf:"bytes,4,opt,name=comm,proto3" json:"comm,omitempty"`
+	Confidence float32                `protobuf:"fixed32,5,opt,name=confidence,proto3" json:"confidence,omitempty"`
+	Severity   string                 `protobuf:"bytes,6,opt,name=severity,proto3" json:"severity,omitempty"`
+	Timestamp  int64                  `protobuf:"varint,7,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Evidence   []string               `protobuf:"bytes,8,rep,name=evidence,proto3" json:"evidence,omitempty"`
+	// CWP (Critical Workload Protection, docs/features/CWP.md §9) severity
+	// escalation. protected_workload is true when this alert's process
+	// matched a CWP-registered workload; severity above is already the
+	// POST-escalation value in that case (escalated one tier, capped at
+	// CRITICAL — see internal/controlplane/severity.go). owner_team/
+	// justification/policy_id are only populated when protected_workload
+	// is true, mirroring the entry's config/workloads.yaml metadata.
+	ProtectedWorkload bool   `protobuf:"varint,9,opt,name=protected_workload,json=protectedWorkload,proto3" json:"protected_workload,omitempty"`
+	OwnerTeam         string `protobuf:"bytes,10,opt,name=owner_team,json=ownerTeam,proto3" json:"owner_team,omitempty"`
+	Justification     string `protobuf:"bytes,11,opt,name=justification,proto3" json:"justification,omitempty"`
+	PolicyId          uint32 `protobuf:"varint,12,opt,name=policy_id,json=policyId,proto3" json:"policy_id,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Alert) Reset() {
@@ -428,6 +439,34 @@ func (x *Alert) GetEvidence() []string {
 		return x.Evidence
 	}
 	return nil
+}
+
+func (x *Alert) GetProtectedWorkload() bool {
+	if x != nil {
+		return x.ProtectedWorkload
+	}
+	return false
+}
+
+func (x *Alert) GetOwnerTeam() string {
+	if x != nil {
+		return x.OwnerTeam
+	}
+	return ""
+}
+
+func (x *Alert) GetJustification() string {
+	if x != nil {
+		return x.Justification
+	}
+	return ""
+}
+
+func (x *Alert) GetPolicyId() uint32 {
+	if x != nil {
+		return x.PolicyId
+	}
+	return 0
 }
 
 // Agent decision
@@ -1414,7 +1453,7 @@ const file_proto_kb_proto_rawDesc = "" +
 	"\bmetadata\x18\a \x03(\v2\x19.kb.KBEvent.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xdd\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xee\x02\n" +
 	"\x05Alert\x12\x19\n" +
 	"\balert_id\x18\x01 \x01(\tR\aalertId\x12\x1d\n" +
 	"\n" +
@@ -1426,7 +1465,13 @@ const file_proto_kb_proto_rawDesc = "" +
 	"confidence\x12\x1a\n" +
 	"\bseverity\x18\x06 \x01(\tR\bseverity\x12\x1c\n" +
 	"\ttimestamp\x18\a \x01(\x03R\ttimestamp\x12\x1a\n" +
-	"\bevidence\x18\b \x03(\tR\bevidence\"\xba\x01\n" +
+	"\bevidence\x18\b \x03(\tR\bevidence\x12-\n" +
+	"\x12protected_workload\x18\t \x01(\bR\x11protectedWorkload\x12\x1d\n" +
+	"\n" +
+	"owner_team\x18\n" +
+	" \x01(\tR\townerTeam\x12$\n" +
+	"\rjustification\x18\v \x01(\tR\rjustification\x12\x1b\n" +
+	"\tpolicy_id\x18\f \x01(\rR\bpolicyId\"\xba\x01\n" +
 	"\rAgentDecision\x12\x1f\n" +
 	"\vdecision_id\x18\x01 \x01(\tR\n" +
 	"decisionId\x12\x19\n" +

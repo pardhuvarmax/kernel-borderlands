@@ -226,12 +226,23 @@ func (s *HTTPServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 
 		t := time.Unix(0, tsNs).Format("15:04:05")
+		// classifySeverity here reproduces the LIVE alert's base tier
+		// (before any CWP escalation, CWP.md §9), for consistency with
+		// controlplane.go's OnZoneTransition — it was hardcoded to
+		// "CRITICAL" before. The CWP-escalated severity itself is NOT
+		// reconstructable here: zone_transitions rows don't persist
+		// whether the process matched a protected workload at alert
+		// time, so a historical query can't know if this alert was
+		// escalated. Fixing that would need a schema change to persist
+		// protected_workload/escalated_severity on the row, which is out
+		// of scope for this pass — the live gRPC/SSE alert stream
+		// (fanOutAlert) already carries the real escalated value.
 		list = append(list, AlertJSON{
 			Id:        fmt.Sprintf("alt-%d-%d", pid, tsNs),
 			AlertType: "BORDERLANDS_ENTRY",
 			Pid:       pid,
 			Comm:      comm,
-			Severity:  "CRITICAL",
+			Severity:  classifySeverity(score),
 			Timestamp: t,
 			Evidence: []string{
 				fmt.Sprintf("ema_score=%.2f", score),
@@ -606,23 +617,31 @@ func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 		case al := <-chAlerts:
 			// Stream alert
 			type AlertData struct {
-				AlertId   string   `json:"alertId"`
-				AlertType string   `json:"alertType"`
-				Pid       uint32   `json:"pid"`
-				Comm      string   `json:"comm"`
-				Severity  string   `json:"severity"`
-				Timestamp string   `json:"timestamp"`
-				Evidence  []string `json:"evidence"`
+				AlertId           string   `json:"alertId"`
+				AlertType         string   `json:"alertType"`
+				Pid               uint32   `json:"pid"`
+				Comm              string   `json:"comm"`
+				Severity          string   `json:"severity"`
+				Timestamp         string   `json:"timestamp"`
+				Evidence          []string `json:"evidence"`
+				ProtectedWorkload bool     `json:"protectedWorkload"`
+				OwnerTeam         string   `json:"ownerTeam,omitempty"`
+				Justification     string   `json:"justification,omitempty"`
+				PolicyId          uint32   `json:"policyId,omitempty"`
 			}
 			t := time.Unix(0, al.Timestamp).Format("15:04:05")
 			err := sendSSE("alert", AlertData{
-				AlertId:   al.AlertId,
-				AlertType: al.AlertType,
-				Pid:       al.Pid,
-				Comm:      al.Comm,
-				Severity:  al.Severity,
-				Timestamp: t,
-				Evidence:  al.Evidence,
+				AlertId:           al.AlertId,
+				AlertType:         al.AlertType,
+				Pid:               al.Pid,
+				Comm:              al.Comm,
+				Severity:          al.Severity,
+				Timestamp:         t,
+				Evidence:          al.Evidence,
+				ProtectedWorkload: al.ProtectedWorkload,
+				OwnerTeam:         al.OwnerTeam,
+				Justification:     al.Justification,
+				PolicyId:          al.PolicyId,
 			})
 			if err != nil {
 				return

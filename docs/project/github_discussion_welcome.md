@@ -18,7 +18,7 @@ Unlike traditional security solutions that focus on static signatures or one-off
 - **`kb-checker` (Rust)**: Safety & integrity enforcement agent checking loaded programs and UDS sockets.
 - **`kb-op/` (Operator Suite)**: 
   - **`kb-dashboard`**: React & D3.js process swarms.
-  - **`kb-tui`**: SSH Wish terminal console (port 2222).
+  - **`kb-tui`**: Rust/ratatui terminal console, reached via an independent `sshd` (port 2222) with `ForceCommand` exec'ing the binary — not an in-process Go/Wish SSH server.
   - **`kb-mcp`**: Standard Model Context Protocol (MCP) server for AI-native agent integration.
 - **`kb-aads` (Python)**: Multi-agent reinforcement learning (MARL) reasoning swarm.
 
@@ -61,7 +61,7 @@ Core team members and contributors post design proposals under the **RFCs (Reque
 For coordination on specific components, filter discussions by tags:
 - `#kb-core` — for kernel hooks, memory safety, and C sensors.
 - `#kb-control-plane` — for Go-level event ingestion and L1/L2 database flushes.
-- `#kb-op` — for React Dashboards, SSH Wish TUIs, and MCP servers.
+- `#kb-op` — for React Dashboards, the Rust/ratatui TUI, and MCP servers.
 - `#kb-checker` — for Rust diagnostics and runtime verification scripts.
 - `#kb-aads` — for multi-agent coordination, Ray Actor pipelines, and models.
 

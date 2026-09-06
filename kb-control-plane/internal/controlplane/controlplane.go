@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"log"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/audit"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/detection"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/enforcement"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/policy"
@@ -40,6 +42,20 @@ type ControlPlane struct {
 	policy        *policy.Engine
 	policyPath    string
 	workloadsPath string // docs/features/CWP.md — config/workloads.yaml by convention
+	// cwpPubKey, when non-nil, requires workloadsPath to carry a valid
+	// Ed25519 signature (CWP.md §4.3/§11.4, internal/ipc.VerifyWorkloadsSignature)
+	// before it's trusted. nil (the default, --workloads-pubkey unset)
+	// preserves the pre-existing unsigned/opt-in behavior — CWP.md's
+	// signing requirement only applies once an operator has actually
+	// configured a trusted key, matching CWP's own "opt-in" posture.
+	cwpPubKey ed25519.PublicKey
+	// cwpRegistry mirrors the entries most recently loaded from
+	// workloadsPath, WITH the OwnerTeam/Justification/PolicyID metadata
+	// the wire frame doesn't carry (ipc.SendCWPWorkloads drops those) —
+	// used only for Go-side severity-escalated alerting (CWP.md §9,
+	// severity.go), never sent anywhere itself.
+	cwpRegistryMu sync.RWMutex
+	cwpRegistry   []ipc.CWPWorkloadEntry
 	grpc          *grpc.Server
 	// grpcSocketPath is set once in Start() (from --grpc-socket/KB_GRPC_SOCKET)
 	// and read by the HTTP API's /api/services health probe — a single
@@ -81,7 +97,30 @@ type ControlPlane struct {
 	// these RPCs previously had no backpressure at all.
 	rateLimitMu   sync.Mutex
 	lastDecision  map[string]time.Time
+
+	// exfilDetector implements the slow-exfiltration/beaconing detector
+	// from docs/development/control-aads/dev-exfiltration-detection.md —
+	// see internal/detection/exfil.go and OnNetFlow below.
+	exfilDetector *detection.Detector
+
+	// lastExfilAlertMu/lastExfilAlert debounce OnNetFlow's alert per
+	// (pid,daddr,dport): once a sustained beacon crosses the threshold it
+	// STAYS crossed for every subsequent connect event until the
+	// underlying window's stats change, so without this every single
+	// connection on an already-flagged flow would re-alert/re-audit-log
+	// forever — same class of flood exfilAlertMinInterval prevents that
+	// the existing per-agent-ID throttle (rateLimitMu/lastDecision) above
+	// prevents for SubmitAgentDecision/SetContainment.
+	lastExfilAlertMu sync.Mutex
+	lastExfilAlert   map[string]time.Time
 }
+
+// exfilAlertMinInterval is how often OnNetFlow will re-alert on the same
+// already-flagged (pid,daddr,dport) flow. Not configurable today — a
+// fixed, conservative re-alert cadence is enough to keep the alert
+// stream/audit log usable without losing the "still ongoing" signal
+// entirely.
+const exfilAlertMinInterval = 5 * time.Minute
 
 // rulesPath points at rules.yaml (docs/development/core-control/
 // dynamic-rules.md) — pass "" to disable the dynamic-rules push entirely
@@ -92,7 +131,11 @@ type ControlPlane struct {
 // policy.New's own missing-file handling) — it's logged and CWP simply
 // has nothing registered until a valid file exists and ReloadWorkloads
 // (or a restart) picks it up.
-func New(dbPath, policyPath, rulesPath, workloadsPath string) (*ControlPlane, error) {
+// workloadsPubKeyPath, if non-empty, points at an Ed25519 public key
+// (CWP.md §4.3/§11.4) that workloadsPath must be validly signed against —
+// see ipc.LoadEd25519PublicKey for accepted encodings. Empty preserves
+// the pre-existing unsigned-CWP behavior.
+func New(dbPath, policyPath, rulesPath, workloadsPath, workloadsPubKeyPath string) (*ControlPlane, error) {
 	s, err := store.New(dbPath)
 	if err != nil {
 		return nil, err
@@ -112,6 +155,15 @@ func New(dbPath, policyPath, rulesPath, workloadsPath string) (*ControlPlane, er
 		return nil, err
 	}
 
+	var cwpPubKey ed25519.PublicKey
+	if workloadsPubKeyPath != "" {
+		cwpPubKey, err = ipc.LoadEd25519PublicKey(workloadsPubKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("cwp workloads pubkey: %w", err)
+		}
+		log.Printf("[KB] CWP: signature verification enabled (%s)", workloadsPubKeyPath)
+	}
+
 	// Build cp first (handler must exist before NewListener so it can be
 	// passed as the MessageHandler), then wire the enforcer to the listener.
 	cp := &ControlPlane{
@@ -120,8 +172,11 @@ func New(dbPath, policyPath, rulesPath, workloadsPath string) (*ControlPlane, er
 		policy:        p,
 		policyPath:    policyPath,
 		workloadsPath: workloadsPath,
+		cwpPubKey:     cwpPubKey,
 		healthServer:  health.NewServer(),
-		lastDecision:  make(map[string]time.Time),
+		lastDecision:   make(map[string]time.Time),
+		exfilDetector:  detection.NewDetector(detection.DefaultEntropyThreshold),
+		lastExfilAlert: make(map[string]time.Time),
 	}
 
 	// NewListener records the socket path and stores cp as the MessageHandler.
@@ -150,7 +205,9 @@ func New(dbPath, policyPath, rulesPath, workloadsPath string) (*ControlPlane, er
 	cp.controlListener = controlListener
 	controlListener.SetSensitivePaths(p.SensitivePaths())
 	controlListener.SetRulesPath(rulesPath)
-	controlListener.SetCWPWorkloads(loadWorkloadsOrEmpty(workloadsPath))
+	initialWorkloads := cp.loadWorkloadsOrEmpty(workloadsPath)
+	cp.cwpRegistry = initialWorkloads
+	controlListener.SetCWPWorkloads(initialWorkloads)
 
 	// Enforcer routes containment commands to the C sensor via the control listener.
 	cp.enforcer = enforcement.NewEnforcer(controlListener, s)
@@ -255,12 +312,28 @@ func (cp *ControlPlane) reloadPolicyFromDisk() (bool, string, error) {
 
 // loadWorkloadsOrEmpty reads workloadsPath (docs/features/CWP.md) and
 // returns its entries, or nil if the path is empty, the file doesn't
-// exist, or it fails to parse — CWP is opt-in and a missing/bad config
-// file is never fatal to daemon startup, same posture as policy.New's own
-// missing-file handling.
-func loadWorkloadsOrEmpty(workloadsPath string) []ipc.CWPWorkloadEntry {
+// exist, fails to parse, or (when cp.cwpPubKey is configured) fails
+// signature verification — CWP is opt-in and a missing/bad config file is
+// never fatal to daemon startup, same posture as policy.New's own
+// missing-file handling. Signature failure is treated the same way as a
+// parse failure: log and return nil, never a partially-trusted registry
+// (CWP.md §4.1's "retains the previous known-good snapshot" principle —
+// at startup there IS no previous snapshot, so "nil" is the correct
+// known-good state to fall back to, not the untrusted file's contents).
+func (cp *ControlPlane) loadWorkloadsOrEmpty(workloadsPath string) []ipc.CWPWorkloadEntry {
 	if workloadsPath == "" {
 		return nil
+	}
+	if cp.cwpPubKey != nil {
+		data, err := os.ReadFile(workloadsPath)
+		if err != nil {
+			log.Printf("[KB] CWP: no workloads loaded from %s: %v", workloadsPath, err)
+			return nil
+		}
+		if err := ipc.VerifyWorkloadsSignature(data, cp.cwpPubKey); err != nil {
+			log.Printf("[KB] CWP: SECURITY EVENT — %s failed signature verification, not loading: %v", workloadsPath, err)
+			return nil
+		}
 	}
 	entries, err := ipc.LoadWorkloadsYAML(workloadsPath)
 	if err != nil {
@@ -280,10 +353,22 @@ func (cp *ControlPlane) reloadWorkloadsFromDisk() (int, string, error) {
 	if cp.workloadsPath == "" {
 		return 0, "", fmt.Errorf("no --workloads path configured")
 	}
+	if cp.cwpPubKey != nil {
+		data, err := os.ReadFile(cp.workloadsPath)
+		if err != nil {
+			return 0, "", fmt.Errorf("reload workloads: %w", err)
+		}
+		if err := ipc.VerifyWorkloadsSignature(data, cp.cwpPubKey); err != nil {
+			return 0, "", fmt.Errorf("reload workloads: signature verification failed, keeping previous registry: %w", err)
+		}
+	}
 	entries, err := ipc.LoadWorkloadsYAML(cp.workloadsPath)
 	if err != nil {
 		return 0, "", fmt.Errorf("reload workloads: %w", err)
 	}
+	cp.cwpRegistryMu.Lock()
+	cp.cwpRegistry = entries
+	cp.cwpRegistryMu.Unlock()
 	if cp.controlListener != nil {
 		cp.controlListener.SetCWPWorkloads(entries)
 		if err := cp.controlListener.BroadcastCWPWorkloads(); err != nil {
@@ -443,6 +528,84 @@ func (cp *ControlPlane) OnProcessExit(msg *ipc.ProcessExitMsg) {
 	log.Printf("[KB] Process PID=%d terminated (Code: %d)", msg.PID, msg.ExitCode)
 }
 
+// maxTimingEntropyForConfidence is log2(5) — the ceiling for
+// CalculateTimingEntropy's 5-bin distribution (max entropy = a uniform
+// spread across all 5 bins) — used only to map entropy onto a rough
+// 0-1 confidence figure for the alert, not a detection threshold itself.
+const maxTimingEntropyForConfidence = 2.3219
+
+// OnNetFlow feeds one connect-event sample into the slow-exfiltration/
+// beaconing detector (docs/development/control-aads/
+// dev-exfiltration-detection.md, internal/detection/exfil.go) and raises
+// an alert when both its timing-entropy and CUSUM signals agree. See
+// exfil.go's package doc comment for the byte-volume-vs-connection-
+// frequency fidelity trade-off this detector runs under.
+func (cp *ControlPlane) OnNetFlow(msg *ipc.NetFlowMsg) {
+	result := cp.exfilDetector.Observe(msg.PID, msg.Daddr, msg.Dport, msg.TsNs)
+	if !result.Beacon {
+		return
+	}
+
+	flowKey := fmt.Sprintf("%d:%d:%d", msg.PID, msg.Daddr, msg.Dport)
+	now := time.Now()
+	cp.lastExfilAlertMu.Lock()
+	if last, ok := cp.lastExfilAlert[flowKey]; ok && now.Sub(last) < exfilAlertMinInterval {
+		cp.lastExfilAlertMu.Unlock()
+		return
+	}
+	cp.lastExfilAlert[flowKey] = now
+	cp.lastExfilAlertMu.Unlock()
+
+	comm := ""
+	if v, ok := cp.commCache.Load(msg.PID); ok {
+		comm = v.(string)
+	}
+
+	log.Printf("[KB] EXFIL_BEACON_SUSPECTED PID=%d COMM=%s entropy=%.3f cusum_exceeded=%v samples=%d",
+		msg.PID, comm, result.Entropy, result.CUSUMExceeded, result.SampleCount)
+
+	severity := "HIGH" // base tier for a statistical beaconing suspicion, not yet a confirmed BORDERLANDS classification
+	alert := &pb.Alert{
+		AlertId:    fmt.Sprintf("alert-exfil-%d-%d", msg.PID, msg.TsNs),
+		AlertType:  "EXFIL_BEACON_SUSPECTED",
+		Pid:        msg.PID,
+		Comm:       comm,
+		Confidence: float32(1.0 - result.Entropy/maxTimingEntropyForConfidence),
+		Severity:   severity,
+		Timestamp:  int64(msg.TsNs),
+		Evidence: []string{
+			fmt.Sprintf("timing_entropy=%.3f", result.Entropy),
+			fmt.Sprintf("cusum_exceeded=%v", result.CUSUMExceeded),
+			fmt.Sprintf("daddr=%d dport=%d", msg.Daddr, msg.Dport),
+		},
+	}
+
+	if m, matched := findCWPMatch(cp.cwpRegistrySnapshot(), comm); matched {
+		escalated := escalateSeverity(severity)
+		alert.Severity = escalated
+		alert.ProtectedWorkload = true
+		alert.OwnerTeam = m.OwnerTeam
+		alert.Justification = m.Justification
+		alert.PolicyId = m.PolicyID
+		severity = escalated
+	}
+	cp.fanOutAlert(alert)
+
+	cp.audit.Log("EXFIL_BEACON_SUSPECTED",
+		fmt.Sprintf("pid=%d comm=%s daddr=%d dport=%d", msg.PID, comm, msg.Daddr, msg.Dport),
+		"SYSTEM_AUTO", fmt.Sprintf("entropy=%.3f cusum_exceeded=%v severity=%s", result.Entropy, result.CUSUMExceeded, severity))
+
+	cp.policyMu.RLock()
+	autoNamespace := cp.policy.AutoNamespaceOnExfilBeacon(comm)
+	cp.policyMu.RUnlock()
+	if autoNamespace {
+		cp.enforcer.Contain(msg.PID, uint32(pb.ContainmentLevel_NAMESPACE), "exfil:beaconing_detected")
+		cp.audit.Log("NAMESPACE_CONTAIN",
+			fmt.Sprintf("pid=%d comm=%s", msg.PID, comm),
+			"SYSTEM_AUTO", "policy:auto_namespace_on_exfil_beacon=true")
+	}
+}
+
 func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
 	cp.recordEventTime()
 	comm := ""
@@ -466,19 +629,40 @@ func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
 	cp.audit.LogZoneTransition(msg, comm)
 
 	if msg.ToZone == ipc.ZoneBorderlands {
+		severity := classifySeverity(msg.Score)
 		alert := &pb.Alert{
 			AlertId:    fmt.Sprintf("alert-%d-%d", msg.PID, msg.TsNs),
 			AlertType:  "BORDERLANDS_ENTRY",
 			Pid:        msg.PID,
 			Comm:       comm,
 			Confidence: float32(msg.Score / 100.0),
-			Severity:   "CRITICAL",
+			Severity:   severity,
 			Timestamp:  int64(msg.TsNs),
 			Evidence: []string{
 				fmt.Sprintf("ema_score=%.1f", msg.Score),
 				fmt.Sprintf("from=%s", msg.FromZone),
 			},
 		}
+
+		// CWP.md §9: escalate severity one tier and surface policy
+		// metadata whenever the alerting process matches a CWP-registered
+		// workload (see findCWPMatch's doc comment for the basename-match
+		// caveat this Go-side check carries, distinct from the real
+		// path-resolved kernel-side CWP enforcement gate).
+		if m, matched := findCWPMatch(cp.cwpRegistrySnapshot(), comm); matched {
+			escalated := escalateSeverity(severity)
+			alert.Severity = escalated
+			alert.ProtectedWorkload = true
+			alert.OwnerTeam = m.OwnerTeam
+			alert.Justification = m.Justification
+			alert.PolicyId = m.PolicyID
+			log.Printf("[CWP] Protected Workload Alert — ESCALATED PID=%d COMM=%s Executable=%s PolicyID=%d Owner=%s RawSeverity=%s EscalatedSeverity=%s",
+				msg.PID, comm, m.Path, m.PolicyID, m.OwnerTeam, severity, escalated)
+			cp.audit.Log("CWP_ALERT_ESCALATED",
+				fmt.Sprintf("pid=%d comm=%s executable=%s policy_id=%d", msg.PID, comm, m.Path, m.PolicyID),
+				"SYSTEM_AUTO", fmt.Sprintf("raw_severity=%s escalated_severity=%s owner_team=%s", severity, escalated, m.OwnerTeam))
+		}
+
 		cp.fanOutAlert(alert)
 
 		cp.policyMu.RLock()

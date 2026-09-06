@@ -229,3 +229,18 @@ int kb_bridge_send_process_exit(int fd, uint32_t pid, uint64_t exit_time_ns, uin
 
     return send_framed(fd, &w, sizeof(w));
 }
+
+int kb_bridge_send_net_flow(int fd, uint32_t pid, uint32_t daddr, uint16_t dport, uint64_t ts_ns)
+{
+    struct kb_wire_net_flow w = {0};
+    w.hdr.magic    = KB_WIRE_MAGIC;
+    w.hdr.version  = KB_WIRE_VERSION;
+    w.hdr.msg_type = KB_WIRE_MSG_NET_FLOW;
+
+    w.pid   = pid;
+    w.daddr = daddr;
+    w.dport = dport;
+    w.ts_ns = ts_ns;
+
+    return send_framed(fd, &w, sizeof(w));
+}

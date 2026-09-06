@@ -79,6 +79,31 @@ policies:
 	}
 }
 
+func TestPerCommAutoNamespaceOnExfilBeacon(t *testing.T) {
+	path := writeTestPolicy(t, `
+policies:
+  - comm: exfil-prone-app
+    auto_namespace_on_exfil_beacon: true
+
+  - comm: nginx
+    auto_namespace_on_exfil_beacon: false
+`)
+	e, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if !e.AutoNamespaceOnExfilBeacon("exfil-prone-app") {
+		t.Error("exfil-prone-app should have auto_namespace_on_exfil_beacon=true")
+	}
+	if e.AutoNamespaceOnExfilBeacon("nginx") {
+		t.Error("nginx should have auto_namespace_on_exfil_beacon=false")
+	}
+	if e.AutoNamespaceOnExfilBeacon("unlisted-proc") {
+		t.Error("unlisted comm should default to false")
+	}
+}
+
 func TestSensitivePathsValid(t *testing.T) {
 	path := writeTestPolicy(t, `
 sensitive_paths:

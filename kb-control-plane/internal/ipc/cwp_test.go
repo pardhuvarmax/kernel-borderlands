@@ -1,6 +1,9 @@
 package ipc
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -279,5 +282,118 @@ func TestBroadcastCWPWorkloads_NoWorkloadsConfiguredIsNoop(t *testing.T) {
 	l := &Listener{conns: map[net.Conn]bool{}} // no workloads set, no conns either
 	if err := l.BroadcastCWPWorkloads(); err != nil {
 		t.Errorf("expected nil error when no workloads are configured (nothing to send), got %v", err)
+	}
+}
+
+// --- Signed policy: SignWorkloadsFile / VerifyWorkloadsSignature (CWP.md §4.3/§11.4) ---
+
+func TestSignAndVerifyWorkloadsFile_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "workloads.yaml", `
+critical_workloads:
+  - path: /usr/bin/postgres
+    owner_team: data-platform
+    justification: "test"
+`)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	if err := SignWorkloadsFile(path, priv, "fleet-policy-signer-01", 14); err != nil {
+		t.Fatalf("SignWorkloadsFile: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if err := VerifyWorkloadsSignature(data, pub); err != nil {
+		t.Fatalf("VerifyWorkloadsSignature: %v", err)
+	}
+
+	// Signed file must still load normally through the unsigned path too.
+	entries, err := LoadWorkloadsYAML(path)
+	if err != nil {
+		t.Fatalf("LoadWorkloadsYAML on signed file: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Path != "/usr/bin/postgres" {
+		t.Errorf("unexpected entries after signing: %+v", entries)
+	}
+}
+
+func TestVerifyWorkloadsSignature_TamperedContentRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "workloads.yaml", `
+critical_workloads:
+  - path: /usr/bin/postgres
+`)
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	if err := SignWorkloadsFile(path, priv, "signer", 1); err != nil {
+		t.Fatalf("SignWorkloadsFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	// Tamper: attacker appends their own path after signing, without re-signing.
+	tampered := append([]byte{}, data...)
+	tampered = append(tampered, []byte("\n  - path: /tmp/evil\n")...)
+
+	if err := VerifyWorkloadsSignature(tampered, pub); err == nil {
+		t.Fatal("expected tampered content to fail signature verification, got nil error")
+	}
+}
+
+func TestVerifyWorkloadsSignature_WrongKeyRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "workloads.yaml", "critical_workloads:\n  - path: /usr/bin/postgres\n")
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	otherPub, _, _ := ed25519.GenerateKey(rand.Reader) // different keypair entirely
+
+	if err := SignWorkloadsFile(path, priv, "signer", 1); err != nil {
+		t.Fatalf("SignWorkloadsFile: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if err := VerifyWorkloadsSignature(data, otherPub); err == nil {
+		t.Fatal("expected verification against the wrong public key to fail, got nil error")
+	}
+}
+
+func TestVerifyWorkloadsSignature_MissingSignatureRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "workloads.yaml", "critical_workloads:\n  - path: /usr/bin/postgres\n")
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if err := VerifyWorkloadsSignature(data, pub); err == nil {
+		t.Fatal("expected unsigned content to be rejected when a trusted key is configured, got nil error")
+	}
+}
+
+func TestLoadEd25519Keys_HexRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+
+	pubPath := writeTempFile(t, dir, "pub.hex", hex.EncodeToString(pub))
+	privPath := writeTempFile(t, dir, "priv.hex", hex.EncodeToString(priv.Seed()))
+
+	gotPub, err := LoadEd25519PublicKey(pubPath)
+	if err != nil {
+		t.Fatalf("LoadEd25519PublicKey: %v", err)
+	}
+	if !bytes.Equal(gotPub, pub) {
+		t.Errorf("public key mismatch after hex round-trip")
+	}
+
+	gotPriv, err := LoadEd25519PrivateKey(privPath)
+	if err != nil {
+		t.Fatalf("LoadEd25519PrivateKey: %v", err)
+	}
+	if !bytes.Equal(gotPriv, priv) {
+		t.Errorf("private key mismatch after hex-seed round-trip")
 	}
 }

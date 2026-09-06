@@ -54,6 +54,18 @@ message Alert {
     string severity     = 6;
     int64  timestamp    = 7;
     repeated string evidence = 8;
+
+    // CWP (Critical Workload Protection, docs/features/CWP.md §9) severity
+    // escalation. protected_workload is true when this alert's process
+    // matched a CWP-registered workload; severity above is already the
+    // POST-escalation value in that case (escalated one tier, capped at
+    // CRITICAL — see internal/controlplane/severity.go). owner_team/
+    // justification/policy_id are only populated when protected_workload
+    // is true, mirroring the entry's config/workloads.yaml metadata.
+    bool   protected_workload = 9;
+    string owner_team         = 10;
+    string justification      = 11;
+    uint32 policy_id          = 12;
 }
 
 // Agent decision

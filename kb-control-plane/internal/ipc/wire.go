@@ -14,6 +14,7 @@ const (
     WireVersion        uint8  = 3
     WireMsgProcessState   uint8 = 1
     WireMsgZoneTransition uint8 = 2
+    WireMsgNetFlow        uint8 = 9
     DefaultSocketPath           = "/run/kb/kbd.sock"
     DimCount                    = 6
 )
@@ -75,10 +76,22 @@ type ZoneTransitionMsg struct {
     TsNs         uint64
 }
 
+// NetFlowMsg mirrors C's struct kb_wire_net_flow exactly (kb_bridge.h) —
+// one per KB_EVT_NETWORK_CONNECT, sent from kbd_sensor.c's userspace
+// event handler (not the eBPF program). Feeds internal/detection's
+// beaconing/exfiltration timing-entropy detector.
+type NetFlowMsg struct {
+    PID   uint32
+    Daddr uint32 // destination IPv4, network byte order (matches e->daddr)
+    Dport uint16 // destination port, host byte order
+    TsNs  uint64
+}
+
 type MessageHandler interface {
     OnProcessState(msg *ProcessStateMsg)
     OnZoneTransition(msg *ZoneTransitionMsg)
     OnProcessExit(msg *ProcessExitMsg)
+    OnNetFlow(msg *NetFlowMsg)
 }
 
 func readFloat64(buf []byte, off int) (float64, int) {
@@ -154,6 +167,21 @@ func parseProcessExit(buf []byte) (*ProcessExitMsg, error) {
     return msg, nil
 }
 
+func parseNetFlow(buf []byte) (*NetFlowMsg, error) {
+    const expected = 22 // hdr(4) + pid(4) + daddr(4) + dport(2) + reserved(2) + ts_ns(8)
+    if len(buf) < expected {
+        return nil, fmt.Errorf("net flow: want %d bytes got %d", expected, len(buf))
+    }
+    off := 4 // skip header
+    msg := &NetFlowMsg{}
+    msg.PID   = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.Daddr = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.Dport = binary.LittleEndian.Uint16(buf[off:]); off += 2
+    off += 2 // reserved
+    msg.TsNs  = binary.LittleEndian.Uint64(buf[off:])
+    return msg, nil
+}
+
 type Reader struct{ conn net.Conn; handler MessageHandler }
 
 func NewReader(conn net.Conn, h MessageHandler) *Reader { return &Reader{conn, h} }
@@ -194,6 +222,10 @@ func (r *Reader) ReadLoop() error {
         case MsgTypeProcessExit:
             if msg, err := parseProcessExit(buf); err == nil {
                 r.handler.OnProcessExit(msg)
+            }
+        case WireMsgNetFlow:
+            if msg, err := parseNetFlow(buf); err == nil {
+                r.handler.OnNetFlow(msg)
             }
         }
     }

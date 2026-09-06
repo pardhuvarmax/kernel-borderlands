@@ -24,6 +24,7 @@ async def main():
         cfg["swarm"],
         grpc_socket=cfg.get("control_plane", {}).get("grpc_socket", "/run/kb/kba.sock"),
         jury_pool_size=cfg.get("jury", {}).get("pool_size", 5),
+        patroller_suspicious_threshold=cfg.get("patroller", {}).get("suspicious_threshold", 40.0),
     )
 
 if __name__ == "__main__":

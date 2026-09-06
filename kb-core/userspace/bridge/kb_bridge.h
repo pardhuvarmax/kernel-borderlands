@@ -48,6 +48,23 @@
 // C-side receiver only; kb-control-plane has no sender for this yet
 // (open follow-up, same status as KB_WIRE_MSG_CPM_PROTECTED_EXEC above).
 #define KB_WIRE_MSG_CWP_WORKLOADS  8
+// Per-connection network flow sample (sensor -> kbd), sent from userspace
+// (kbd_sensor.c's handle_event(), NOT the eBPF program) on every
+// KB_EVT_NETWORK_CONNECT event — see docs/development/control-aads/
+// dev-exfiltration-detection.md. Deliberately userspace-only: the guide
+// explicitly recommends doing this analysis "out-of-band... to prevent
+// adding CPU overhead to the Ring 0 sensor", so nothing in the eBPF
+// program (kbd_sensor.bpf.c) changed for this — kb_unified_event already
+// carried daddr/dport/ts_ns to userspace via the existing ring buffer,
+// this just forwards that same connect-event data on to kbd instead of
+// only using it for the local dim_score[KB_DIM_NETWORK] aggregate.
+// Carries no byte-count/payload-size field: connect() events don't carry
+// one, and adding real per-byte accounting would need new write()/
+// sendto() tracepoint telemetry, out of scope here — kb-control-plane's
+// CUSUM detector (internal/detection/exfil.go) uses connection frequency
+// as its volume proxy instead, not real byte volume; see that file's
+// doc comment for the accuracy trade-off this implies.
+#define KB_WIRE_MSG_NET_FLOW  9
 
 #pragma pack(push, 1)
 struct kb_wire_header {
@@ -68,6 +85,15 @@ struct kb_wire_process_exit {
     uint32_t pid;
     uint64_t exit_time_ns;
     uint32_t exit_code;
+};
+
+struct kb_wire_net_flow {
+    struct kb_wire_header hdr;
+    uint32_t pid;
+    uint32_t daddr;  // destination IPv4, network byte order (matches kb_unified_event's e->daddr)
+    uint16_t dport;   // destination port, host byte order (already converted in kb_unified_event)
+    uint16_t _reserved;
+    uint64_t ts_ns;   // clock-monotonic ns, matches e->ts_ns
 };
 #pragma pack(pop)
 
@@ -100,6 +126,8 @@ int kb_bridge_send_zone_transition(int fd, uint32_t pid, uint64_t start_time_ns,
                                     double score, uint64_t ts_ns);
 
 int kb_bridge_send_process_exit(int fd, uint32_t pid, uint64_t exit_time_ns, uint32_t exit_code);
+
+int kb_bridge_send_net_flow(int fd, uint32_t pid, uint32_t daddr, uint16_t dport, uint64_t ts_ns);
 
 #define KB_BRIDGE_DEFAULT_SOCK   "/run/kb/kbd.sock"
 // KB_BRIDGE_CONTROL_SOCK carries every Go -> sensor control push

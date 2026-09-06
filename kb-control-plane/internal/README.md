@@ -92,31 +92,28 @@ Responsibilities:
 - Behavioral event history
 
 ---
- 
-### ssh/
- 
-Hardened operator console SSH service.
- 
-Responsibilities:
- 
-- Setup and run the Wish SSH server
-- Load/validate persistent host keys
-- Validate authorized public keys (no password fallback)
-- Handle pseudo-terminal (PTY) allocation per session
-- Spawn and attach the `kb-tui` dashboard process
- 
+
+**`ssh/` was deleted from `kb-control-plane` in full (2026-08-30).** `kbd`'s
+custom Wish-based SSH server was replaced by a real, independently-managed
+`sshd` instance (`sshd@kb-operator.service`) with `ForceCommand` exec'ing
+`kb-op/kb-tui` directly — `kbd` now has zero SSH code of any kind (no host
+keys, no `authorized_keys` parsing, no PTY plumbing). See
+`docs/development/core-control/control-plane-catalog.md` §2.11 for the
+migration rationale and `docs/architecture/boot_sequence_spec.md` §3 for the
+actual current unit/config.
+
 ---
 
 ## Runtime Flow
 
 ```text
-   Core Plane              Operator
-       │                       │ (SSH)
-       ▼                       ▼
-  IPC Receiver             SSH Server
-       │                       │ (PTY)
-       ▼                       ▼
-  Control Plane Runtime ◄─── kb-tui (gRPC/IPC)
+   Core Plane            Operator
+       │                     │ (SSH, sshd@kb-operator.service)
+       ▼                     ▼
+  IPC Receiver          ForceCommand → kb-tui (Rust)
+       │                     │ (gRPC/IPC over /run/kb/kba.sock)
+       ▼                     ▼
+  Control Plane Runtime ◄────┘
        │
   ┌────┼────┐
   ▼    ▼    ▼
@@ -155,8 +152,9 @@ internal/
 ├── enforcement/     Enforcement coordination
 ├── ipc/             Core ↔ Control IPC transport
 ├── policy/          Behavioral policy engine
-├── ssh/             Hardened SSH server and TUI manager
 └── store/           Runtime behavioral state store
 ```
+
+`ssh/` no longer exists — see the note above the Runtime Flow diagram.
 
 The `internal/` directory forms the operational core of the KB Control Plane, transforming behavioral telemetry from the Core Plane into coordinated runtime decisions, audit records, and enforcement requests while serving as the central orchestration layer between all downstream planes.

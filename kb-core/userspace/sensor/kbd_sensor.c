@@ -1798,6 +1798,15 @@ static int handle_event(void *ctx, void *data, size_t sz)
         case KB_EVT_NETWORK_CONNECT:
             inet_ntop(AF_INET, &e->daddr, dst, sizeof(dst));
             printf("-> %s:%u\n", dst, e->dport);
+            // Forward to kbd for out-of-band beaconing/exfiltration
+            // detection (docs/development/control-aads/
+            // dev-exfiltration-detection.md) — userspace-only, no eBPF
+            // program change; see KB_WIRE_MSG_NET_FLOW's comment in
+            // kb_bridge.h for why this stays off the Ring 0 hot path.
+            bridge_ensure_connected();
+            if (bridge_fd >= 0) {
+                kb_bridge_send_net_flow(bridge_fd, e->pid, e->daddr, e->dport, e->ts_ns);
+            }
             break;
 
         case KB_EVT_NETWORK_BIND:

@@ -157,9 +157,9 @@ Contributes backend integration, frontend implementation, API connectivity, and 
 
 **Primary Maintainer**
 
-**Tejaswini** — **Golang & TUI Design**
+**Tejaswini** — **TUI Design**
 
-Responsible for the Go implementation, Bubble Tea architecture, Wish SSH integration, operator workflows, terminal interface implementation, and long-term maintenance of the KB Terminal User Interface.
+Responsible for the Rust/ratatui implementation, operator workflows, terminal interface implementation, and long-term maintenance of the KB Terminal User Interface. `kb-tui` has no SSH code of its own — remote access is via an independent `sshd@kb-operator.service` with `ForceCommand` exec'ing the binary directly (see `docs/architecture/boot_sequence_spec.md` §3).
 
 **Collaborator**
 

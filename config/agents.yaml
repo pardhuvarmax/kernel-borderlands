@@ -25,5 +25,12 @@ swarm:
 jury:
   pool_size: 5
 
+# suspicious_threshold: score at which Patroller escalates a PID to
+# Hunter (agents/patroller.py). Deliberately separate from
+# kb-control-plane's config/policy.yaml `defaults.suspicious` (also 40.0
+# by default) — the two systems can reasonably be tuned independently.
+patroller:
+  suspicious_threshold: 40.0
+
 control_plane:
   grpc_socket: /run/kb/kba.sock

@@ -323,7 +323,7 @@ func TestReloadWorkloads_ValidFileReturnsCount(t *testing.T) {
 		t.Fatalf("write workloads.yaml: %v", err)
 	}
 
-	cp, err := New(":memory:", "", "", workloadsPath)
+	cp, err := New(":memory:", "", "", workloadsPath, "")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestReloadWorkloads_InvalidFileFails(t *testing.T) {
 		t.Fatalf("write workloads.yaml: %v", err)
 	}
 
-	cp, err := New(":memory:", "", "", "") // empty at construction time — loadWorkloadsOrEmpty tolerates the bad file
+	cp, err := New(":memory:", "", "", "", "") // empty at construction time — loadWorkloadsOrEmpty tolerates the bad file
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

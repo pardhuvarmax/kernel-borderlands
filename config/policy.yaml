@@ -17,6 +17,13 @@ defaults:
 sensitive_paths:
   - /tmp/kb-pipeline-test-secret.txt
 
+# auto_namespace_on_exfil_beacon (per-comm, default false): opt a process
+# into automatic NAMESPACE containment when internal/detection's
+# beaconing/exfiltration detector (docs/development/control-aads/
+# dev-exfiltration-detection.md) flags it. Off by default — a statistical
+# timing/frequency heuristic has real false-positive risk, so
+# auto-enforcement stays an explicit per-comm choice, same posture as
+# auto_terminate below.
 policies:
   - comm: nginx
     suspicious:   55.0

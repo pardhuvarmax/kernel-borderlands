@@ -13,12 +13,13 @@ import (
 )
 
 var (
-	dbPath        string
-	policyPath    string
-	rulesPath     string
-	workloadsPath string
-	httpAddr      string
-	grpcSocket    string
+	dbPath              string
+	policyPath          string
+	rulesPath           string
+	workloadsPath       string
+	workloadsPubKeyPath string
+	httpAddr            string
+	grpcSocket          string
 )
 
 var rootCmd = &cobra.Command{
@@ -39,6 +40,8 @@ func init() {
 		"path to rules.yaml (dynamic attack-chain rules pushed to the sensor at connect time); empty disables the push, sensor falls back to compiled-in default rules")
 	rootCmd.Flags().StringVar(&workloadsPath, "workloads", "config/workloads.yaml",
 		"path to workloads.yaml (CWP protected-workload registry, docs/features/CWP.md); empty disables CWP entirely. A missing file is not an error — CWP just has nothing registered")
+	rootCmd.Flags().StringVar(&workloadsPubKeyPath, "workloads-pubkey", "",
+		"path to an Ed25519 public key (hex/base64/raw) that --workloads must be validly signed against (CWP.md §4.3/§11.4, see `kbctl workload sign`); empty (default) keeps CWP unsigned/opt-in")
 
 	// §2.7: --http-addr/--grpc-socket now get real --help text and cobra
 	// flags, matching --db/--policy above, instead of requiring an operator
@@ -66,7 +69,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	fmt.Println("║   kbd v0.1.0                              ║")
 	fmt.Println("╚══════════════════════════════════════════╝")
 
-	cp, err := controlplane.New(dbPath, policyPath, rulesPath, workloadsPath)
+	cp, err := controlplane.New(dbPath, policyPath, rulesPath, workloadsPath, workloadsPubKeyPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize control plane: %v", err)
 	}

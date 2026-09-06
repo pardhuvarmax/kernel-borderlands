@@ -1,25 +1,43 @@
-# Default behavioral policies for the KB Policy Engine.
+defaults:
+  suspicious:   40.0
+  borderlands:  75.0
+
+# Additional paths tracked by the kernel LSM hook (lsm/file_open), on top
+# of the compiled-in floor (/etc/shadow, /etc/sudoers, /root/.ssh/) in
+# kb-core/userspace/sensor/kbd_sensor.c. Entries here are ADDITIVE ONLY —
+# they can never remove or replace the compiled-in floor. Must be
+# absolute paths, <= 63 bytes (fixed-size BPF map key), not bare "/".
+# Takes effect on kbd_sensor (re)connect — not a live reload.
 #
-# NOTE: The Policy Engine itself (the code that loads and evaluates this
-# file) hasn't been implemented in internal/controlplane yet — this file
-# documents the intended schema so policy authoring can start in parallel.
-# See Technical Design Doc, Sec 6.4 for the worked examples below.
+# NOTE: reads of these paths are always flagged for behavioral scoring,
+# for every process. The hard -EACCES block only applies to a process
+# already under operator containment at level >= 2 (Seccomp) — it is not
+# a blanket block on normal system operation (sudo/PAM reading
+# /etc/sudoers, /etc/shadow, etc. are unaffected unless already contained).
+sensitive_paths:
+  - /tmp/kb-pipeline-test-secret.txt
 
+# auto_namespace_on_exfil_beacon (per-comm, default false): opt a process
+# into automatic NAMESPACE containment when internal/detection's
+# beaconing/exfiltration detector (docs/development/control-aads/
+# dev-exfiltration-detection.md) flags it. Off by default — a statistical
+# timing/frequency heuristic has real false-positive risk, so
+# auto-enforcement stays an explicit per-comm choice, same posture as
+# auto_terminate below.
 policies:
-  - name: web_server_baseline
-    match:
-      comm: nginx
-      parent_comm: systemd
-    allow:
-      syscalls: [accept, read, write, close, sendfile]
-      network: [bind, listen, accept]
-    thresholds:
-      suspicious: 55   # higher tolerance for nginx
-      borderlands: 85
+  - comm: nginx
+    suspicious:   55.0
+    borderlands:  85.0
+    allow_network: true
+    auto_terminate: false
 
-  - name: strict_database
-    match:
-      comm: postgres
-    deny:
-      network_outbound: true        # no outbound connections
-      auto_terminate_on_exec: true  # kill if it execves
+  - comm: postgres
+    suspicious:   50.0
+    borderlands:  80.0
+    allow_network: false
+    auto_terminate: true
+
+  - comm: bash
+    suspicious:   45.0
+    borderlands:  70.0
+    auto_terminate: false

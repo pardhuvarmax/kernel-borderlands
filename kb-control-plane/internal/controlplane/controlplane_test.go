@@ -31,7 +31,7 @@ import (
 // socket listener spins up.
 func newTestControlPlane(t *testing.T) *ControlPlane {
 	t.Helper()
-	cp, err := New(":memory:", "", "", "")
+	cp, err := New(":memory:", "", "", "", "")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

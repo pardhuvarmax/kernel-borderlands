@@ -38,17 +38,21 @@ class RaySwarmOrchestrator:
         self.judge = None
         self.executor = None
 
-    def spawn_agent(self, role: AgentRole):
+    def spawn_agent(self, role: AgentRole, **extra_kwargs):
         self.agent_counter += 1
         agent_id = f"agent-{self.agent_counter}"
 
         agent_cls = ROLE_CLASSES.get(role)
-        agent_actor = agent_cls.remote(agent_id) if agent_cls else RemoteBaseAgent.remote(agent_id, role)
+        agent_actor = (
+            agent_cls.remote(agent_id, **extra_kwargs) if agent_cls
+            else RemoteBaseAgent.remote(agent_id, role)
+        )
 
         self.agents[agent_id] = agent_actor
         return agent_actor
 
-    async def start_swarm(self, config: dict, grpc_socket: str = "/run/kb/kba.sock", jury_pool_size: int = 5):
+    async def start_swarm(self, config: dict, grpc_socket: str = "/run/kb/kba.sock", jury_pool_size: int = 5,
+                           patroller_suspicious_threshold: float = 40.0):
         # Executor and Judge are singletons — JJE consensus routes through
         # one gateway back to kb-control-plane. Jury actors are spawned
         # dynamically per round by JudgeAgent.coordinate_consensus (see
@@ -58,7 +62,24 @@ class RaySwarmOrchestrator:
         self.agents["executor-1"] = self.executor
         self.agents["judge-1"] = self.judge
 
-        for role_name, count in config.items():
+        # Hunters must exist before Patrollers so Patroller's escalation
+        # target (agents/patroller.py's hunter_pool) can be wired at
+        # construction — same "spawn dependency first" shape as
+        # Executor/Judge above, just for a non-singleton role. Config
+        # dict iteration order (from agents.yaml) is not trusted for this.
+        remaining = dict(config)
+        hunter_count = remaining.pop("hunter", 0)
+        hunter_pool = [self.spawn_agent(AgentRole.HUNTER) for _ in range(hunter_count)]
+
+        patroller_count = remaining.pop("patroller", 0)
+        for _ in range(patroller_count):
+            self.spawn_agent(
+                AgentRole.PATROLLER,
+                hunter_pool=hunter_pool,
+                suspicious_threshold=patroller_suspicious_threshold,
+            )
+
+        for role_name, count in remaining.items():
             role = AgentRole(role_name)
             for _ in range(count):
                 self.spawn_agent(role)

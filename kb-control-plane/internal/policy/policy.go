@@ -31,6 +31,15 @@ type ProcessPolicy struct {
 	BorderlandsThresh float64 `yaml:"borderlands"`
 	AllowNetwork      bool    `yaml:"allow_network"`
 	AutoTerminate     bool    `yaml:"auto_terminate"`
+	// AutoNamespaceOnExfilBeacon opts a comm into automatic NAMESPACE
+	// containment when internal/detection's beaconing detector (docs/
+	// development/control-aads/dev-exfiltration-detection.md) flags it —
+	// off by default, mirroring AutoTerminate's opt-in posture. A
+	// statistical timing/frequency heuristic has real false-positive
+	// risk (see internal/detection/exfil.go's fidelity-limitation
+	// comment), so auto-enforcement stays behind an explicit per-comm
+	// choice rather than a global default-on behavior.
+	AutoNamespaceOnExfilBeacon bool `yaml:"auto_namespace_on_exfil_beacon"`
 }
 
 type PolicyFile struct {
@@ -99,6 +108,13 @@ func New(path string) (*Engine, error) {
 func (e *Engine) AutoTerminate(comm string) bool {
 	if p, ok := e.byComm[comm]; ok {
 		return p.AutoTerminate
+	}
+	return false
+}
+
+func (e *Engine) AutoNamespaceOnExfilBeacon(comm string) bool {
+	if p, ok := e.byComm[comm]; ok {
+		return p.AutoNamespaceOnExfilBeacon
 	}
 	return false
 }

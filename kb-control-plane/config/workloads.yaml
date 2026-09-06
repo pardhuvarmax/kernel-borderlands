@@ -17,6 +17,13 @@
 #   re-running `kbctl workload reload` after every legitimate binary
 #   upgrade, or the entry will start rejecting the new (correct) binary.
 #
+# Signing (optional, CWP.md §4.3/§11.4): if kbd is started with
+# --workloads-pubkey <path>, this file MUST carry a valid policy_metadata
+# block (version/signed_by/signature) or it is rejected outright — see
+# `kbctl workload keygen` and `kbctl workload sign`. Unsigned (no
+# policy_metadata.signature) is the default and stays valid as long as
+# --workloads-pubkey is not set.
+#
 # Empty by default — CWP is opt-in. Uncomment/add entries for your own
 # mission-critical applications.
 
