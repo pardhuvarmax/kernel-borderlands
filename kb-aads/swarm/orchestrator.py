@@ -6,6 +6,8 @@ from agents.patroller import PatrollerAgent
 from agents.healer import HealerAgent
 from agents.containment import ContainmentAgent
 from agents.executor import ExecutorAgent
+from agents.militia import MilitiaSquadLeadAgent
+from agents.signal_relay import SignalRelayAgent
 from consensus.jje import JudgeAgent
 
 ROLE_CLASSES = {
@@ -13,6 +15,7 @@ ROLE_CLASSES = {
     AgentRole.PATROLLER: PatrollerAgent,
     AgentRole.HEALER: HealerAgent,
     AgentRole.CONTAINMENT: ContainmentAgent,
+    AgentRole.SIGNAL_RELAY: SignalRelayAgent,
 }
 
 

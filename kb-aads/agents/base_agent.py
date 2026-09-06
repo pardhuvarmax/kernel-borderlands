@@ -11,6 +11,9 @@ class AgentRole(Enum):
     JUDGE = "judge"
     JURY = "jury"
     EXECUTOR = "executor"
+    MILITIA_LEAD = "militia_lead"
+    MILITIA_MEMBER = "militia_member"
+    SIGNAL_RELAY = "signal_relay"
     IDLE = "idle"
 
 class AgentStatus(Enum):
