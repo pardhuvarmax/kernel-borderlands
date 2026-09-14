@@ -2,6 +2,7 @@ import asyncio
 import os
 import yaml
 from swarm.orchestrator import RaySwarmOrchestrator
+from api.status_server import start_status_server
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "agents.yaml")
 
@@ -19,6 +20,16 @@ async def main():
 
     cfg = load_config()
     orchestrator = RaySwarmOrchestrator(ray_mode=cfg.get("ray", {}).get("mode", "local"))
+
+    # Started before start_swarm (which blocks forever driving agent tick
+    # loops) — see api/status_server.py for why this exists. Address/port
+    # overridable via env so a dev box running multiple swarms doesn't
+    # collide; kbd's proxy handler (KB_AADS_API_ADDR) must point at the
+    # same address.
+    status_addr = os.environ.get("KB_AADS_STATUS_HOST", "127.0.0.1")
+    status_port = int(os.environ.get("KB_AADS_STATUS_PORT", "8601"))
+    start_status_server(orchestrator.registry, addr=status_addr, port=status_port)
+    print(f"[AADS] Agent status server listening on {status_addr}:{status_port}")
 
     await orchestrator.start_swarm(
         cfg["swarm"],

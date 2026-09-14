@@ -95,7 +95,8 @@ class JuryAgent(BaseAgent):
 @ray.remote
 class JudgeAgent(BaseAgent):
     """Orchestrates consensus rounds when Patrollers raise anomaly alerts."""
-    def __init__(self, agent_id: str, executor_ref, jury_pool_size: int = 5, jury_agent_cls=None):
+    def __init__(self, agent_id: str, executor_ref, jury_pool_size: int = 5, jury_agent_cls=None, registry=None,
+                 error_count_threshold: int = 5, liveness_check_seconds: float = 3.0):
         super().__init__(agent_id, AgentRole.JUDGE)
         self.executor = executor_ref
         self.jury_pool_size = jury_pool_size
@@ -103,11 +104,34 @@ class JudgeAgent(BaseAgent):
         # deterministically) without changing production behavior — real
         # callers never pass this, so it defaults to the real JuryAgent.
         self.jury_agent_cls = jury_agent_cls or JuryAgent
+        # Optional swarm/registry.py SwarmRegistry handle — backs both
+        # registering this round's dynamically-spawned Jury pool (so JJE
+        # courthouse oversight can reach them later) and the courthouse
+        # methods below (assess_severity/enforce_verdict), which look up
+        # OTHER agents' handles through it. None in tests that don't
+        # exercise either path.
+        self.registry = registry
+        self._round_counter = 0
+        # Placeholders, not calibrated — see assess_severity's docstring.
+        # Constructor-configurable (rather than hardcoded class constants)
+        # purely so tests don't need a real multi-second sleep to exercise
+        # the liveness-check path.
+        self.error_count_threshold = error_count_threshold
+        self.liveness_check_seconds = liveness_check_seconds
 
     async def coordinate_consensus(self, alert_payload: dict):
         # Dynamically spawn a Jury pool sized from config/agents.yaml's
         # jury.pool_size (defaults to 5 if not configured, BUG-006).
+        self._round_counter += 1
         jury_pool = [self.jury_agent_cls.remote(f"jury-{i}") for i in range(self.jury_pool_size)]
+        if self.registry is not None:
+            # Registry keys carry a round suffix (unlike the jury actors'
+            # own internal agent_id above, kept as plain "jury-{i}" to
+            # match test_jje_consensus.py's existing per-index
+            # assertions) so consecutive rounds' registrations don't
+            # collide/overwrite each other in the registry.
+            for i, jury in enumerate(jury_pool):
+                self.registry.register.remote(f"jury-round{self._round_counter}-{i}", AgentRole.JURY.value, jury)
 
         # Broadcast evaluation tasks. Each juror is awaited individually so
         # one crashed/misbehaving actor doesn't take down the whole round —
@@ -129,3 +153,102 @@ class JudgeAgent(BaseAgent):
         if quorum_reached(votes):
             # Trigger containment via the Executor
             await self.executor.execute_quarantine.remote(alert_payload)
+
+    # ---- JJE courthouse oversight -----------------------------------
+    # Per docs/development/control-aads/aads-intelligence-roadmap.md's
+    # "JJE's second role" section: JJE has real authority to stop a rogue
+    # sub-agent (Patroller/Hunter/Healer/Containment militia/signal
+    # relay), via a restart/revoke/terminate severity ladder, reusing this
+    # same JudgeAgent rather than inventing new authority elsewhere.
+    #
+    # Severity classification below covers ONLY the "restart" tier
+    # (liveness/error-count) with a real, computable signal — this
+    # codebase has no output-drift-from-peer-baseline detector (the
+    # "revoke" trigger) or authorization-boundary-violation detector (the
+    # "terminate" trigger) anywhere, so assess_severity never returns
+    # those tiers on its own. This is a real, stated gap (same posture as
+    # HealerAgent's documented RL gap) — call enforce_verdict directly
+    # with "revoke"/"terminate" once some other detector (not yet built)
+    # determines one applies. The numeric thresholds below are
+    # placeholders, not calibrated — the roadmap doc explicitly says real
+    # cutoffs need labeled rogue-agent-behavior data from a Phase-0-style
+    # scenario that doesn't exist yet (self.error_count_threshold /
+    # self.liveness_check_seconds, set in __init__ above — same posture
+    # as HealerAgent's DEFAULT_SAFE_SCORE_THRESHOLD).
+
+    async def assess_severity(self, agent_id: str) -> str:
+        """
+        Returns "healthy", "restart", or "terminate" (only if agent_id is
+        already gone from the registry — nothing to restart/revoke).
+        Never returns "revoke" — see the class-level note above.
+        """
+        if self.registry is None:
+            raise RuntimeError("assess_severity requires this JudgeAgent to have been constructed with a registry")
+
+        handle = await self.registry.get_handle.remote(agent_id)
+        if handle is None:
+            return "terminate"
+
+        status_before = await handle.get_status.remote()
+        if status_before["status"] != "active":
+            return "restart"
+        if status_before["error_count"] >= self.error_count_threshold:
+            return "restart"
+
+        await asyncio.sleep(self.liveness_check_seconds)
+        status_after = await handle.get_status.remote()
+        if status_after["uptime"] <= status_before["uptime"]:
+            return "restart"
+
+        return "healthy"
+
+    async def enforce_verdict(self, agent_id: str, tier: str) -> dict:
+        """
+        Applies the roadmap's graduated response. Quorum-vs-unilateral
+        gating (per the roadmap: low/mid tiers go through Judge->Jury
+        quorum first, "terminate" acts immediately with post-hoc review)
+        is deliberately NOT implemented here — see this method's own
+        docstring note below. This method is the mechanism only; callers
+        decide when it's appropriate to invoke it.
+
+        - "restart": stop() then re-issue start() on the SAME actor —
+          resumes its own tick loop without killing the underlying Ray
+          process. For a stuck/unresponsive actor with no evidence of
+          compromise (the roadmap's own "restart" example).
+        - "revoke": stop() the actor AND mark it revoked in the registry
+          (pulls it out of active rotation/lookup) without killing the
+          process — e.g. an out-of-pool Jury member.
+        - "terminate": ray.kill() the actor and remove it from the
+          registry entirely — for behavior consistent with compromise.
+
+        NOT implemented, and stated honestly rather than guessed: the
+        roadmap's quorum-gating for restart/revoke (route the verdict
+        through Judge->Jury before acting) needs Jury to vote on "is this
+        sub-agent's behavior actually rogue," a structurally different
+        question from JuryAgent.evaluate_and_vote's existing CONTAIN/ALLOW
+        threat vote. Reusing that vote for this would mean feeding it a
+        fabricated confidence score to force an outcome — not a real
+        vote. Building a genuine verdict-vote path needs its own design
+        (what does Jury actually evaluate for a sub-agent verdict?), which
+        this session doesn't have a real signal to base on yet.
+        """
+        if self.registry is None:
+            raise RuntimeError("enforce_verdict requires this JudgeAgent to have been constructed with a registry")
+
+        handle = await self.registry.get_handle.remote(agent_id)
+        if handle is None:
+            return {"agent_id": agent_id, "tier": tier, "applied": False, "reason": "not registered"}
+
+        if tier == "restart":
+            await handle.stop.remote()
+            handle.start.remote()
+            return {"agent_id": agent_id, "tier": tier, "applied": True}
+        if tier == "revoke":
+            await handle.stop.remote()
+            await self.registry.revoke.remote(agent_id)
+            return {"agent_id": agent_id, "tier": tier, "applied": True}
+        if tier == "terminate":
+            ray.kill(handle)
+            await self.registry.unregister.remote(agent_id)
+            return {"agent_id": agent_id, "tier": tier, "applied": True}
+        raise ValueError(f"enforce_verdict: unknown severity tier {tier!r}")

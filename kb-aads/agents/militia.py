@@ -72,13 +72,18 @@ class MilitiaSquadLeadAgent(BaseAgent):
     report list either way and can decide what a partial escalation means.
     """
 
-    def __init__(self, agent_id: str, socket_path: str = "/run/kb/kba.sock", squad_member_cls=None):
+    def __init__(self, agent_id: str, socket_path: str = "/run/kb/kba.sock", squad_member_cls=None, registry=None):
         super().__init__(agent_id, AgentRole.MILITIA_LEAD)
         self.socket_path = socket_path
         # Injectable for testing (a fake member class with deterministic
         # execute() results) without touching production wiring — mirrors
         # JudgeAgent's jury_agent_cls parameter.
         self.squad_member_cls = squad_member_cls or MilitiaSquadMemberAgent
+        # Optional swarm/registry.py SwarmRegistry handle — if given, each
+        # dynamically-spawned member is registered so JJE courthouse
+        # oversight (consensus/jje.py) can reach it later. None in tests
+        # that don't need registry lookups.
+        self.registry = registry
 
     async def command_squad(self, pid: int, target_level: int, reason: str) -> dict:
         """
@@ -94,7 +99,10 @@ class MilitiaSquadLeadAgent(BaseAgent):
 
         reports = []
         for i, stage in enumerate(stages):
-            member = self.squad_member_cls.remote(f"{self.state.agent_id}-member-{i}-{stage.lower()}", stage, self.socket_path)
+            member_id = f"{self.state.agent_id}-member-{i}-{stage.lower()}"
+            member = self.squad_member_cls.remote(member_id, stage, self.socket_path)
+            if self.registry is not None:
+                self.registry.register.remote(member_id, AgentRole.MILITIA_MEMBER.value, member)
             result = await member.execute.remote(pid, reason)
             reports.append(result)
             if not result["success"]:

@@ -10,6 +10,17 @@ use crate::grpc_health_v1::HealthCheckRequest;
 const DEFAULT_UDS_PATH: &str = "/run/kb/kba.sock";
 const RAY_API_URL: &str = "http://localhost:8265/api/jobs";
 
+// Must match kb-control-plane/internal/controlplane/controlplane.go's
+// ServiceName exactly — kbd registers its grpc_health_v1 service under
+// this plain string (not a fully-qualified proto service name). Found
+// via a real boot test: this was previously "kb.KernelBorderlands" here,
+// which matched nothing kbd ever registers, so this check returned
+// NotFound on every single run, forever — not a boot-timing artifact,
+// a permanent mismatch that (once the startup grace period in main.rs
+// was added) would otherwise still trigger a restart/critical escalation
+// cycle every 5s indefinitely.
+const CONTROL_PLANE_SERVICE_NAME: &str = "kernel-borderlands";
+
 // Connect helper to gRPC server over Unix Domain Socket
 pub async fn connect_uds_grpc() -> Result<Channel, tonic::transport::Error> {
     Endpoint::try_from("http://[::]:50051")?
@@ -38,7 +49,7 @@ pub async fn check_control_plane_health_at(uds_path: &str) -> Result<(), Box<dyn
     let mut client = HealthClient::new(channel);
 
     let request = HealthCheckRequest {
-        service: "kb.KernelBorderlands".to_string(),
+        service: CONTROL_PLANE_SERVICE_NAME.to_string(),
     };
 
     // Enforce a strict 100ms deadline

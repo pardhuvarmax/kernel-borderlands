@@ -1,0 +1,28 @@
+[Unit]
+Description=Kernel Borderlands SSH Operator Console (dedicated sshd instance, port 2222)
+After=network.target
+DefaultDependencies=no
+
+[Service]
+Type=notify
+ExecStart=/usr/sbin/sshd -D -f /etc/ssh/sshd_config.d/kb-operator.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+
+# Full hardening — this is the system's real, battle-tested sshd binary,
+# not application code owned by this repo, so unlike kbd/kb-checker above
+# there's no risk of a wrong capability enumeration silently breaking a
+# tampering-response code path. Standard privilege-separation model:
+# sshd itself needs CAP_NET_BIND_SERVICE-equivalent only if Port <1024
+# (2222 is not), so this can be locked down fully.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+MemoryDenyWriteExecute=true
+ProtectSystem=strict
+ReadWritePaths=/run/kb
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

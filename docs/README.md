@@ -81,13 +81,16 @@ Implementation documents describing individual Kernel Borderlands features.
 
 These documents describe feature architecture, implementation details, workflows, runtime behavior, design rationale, and future enhancements.
 
-### `docs/features/hardware-ext/`
-
-Documentation-only proposals (not implemented) for NOMAD (Node Out-of-Band Module for
-Attestation & Defense) — a physically independent hardware appliance for host attestation
-and fencing outside the software trust boundary — plus its fleet-management service, a
-cost-reduced bill-of-materials variant, an expense breakdown, and rootkit-resistance design
-notes tied to it.
+NOMAD (Node Out-of-Band Module for Attestation & Defense) — a physically
+independent hardware appliance for host attestation and fencing outside the
+software trust boundary — is no longer documented in this repository.
+Development moved to its own separate repository
+(`github.com/pardhuvarmax/the-nomad`), owned by a dedicated hardware
+sub-team; see the LaTeX paper (`latex/paper/main.tex`, §"Extended Feature:
+NOMAD Hardware Trust Module") for a brief pointer, not the design docs
+themselves. The `docs/features/hardware-ext/` directory that previously held
+NOMAD's design-proposal markdown (hardware appliance, FMS, cost variants,
+rootkit-resistance notes) has been removed for the same reason.
 
 ---
 

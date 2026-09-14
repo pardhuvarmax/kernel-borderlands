@@ -93,6 +93,10 @@ async fn run(tx: UnboundedSender<AppEvent>) {
                     format!("syscall trace matched rule {alert_type}"),
                     format!("zone={}", crate::app::zone_label(p.zone)),
                 ],
+                protected_workload: false,
+                owner_team: String::new(),
+                justification: String::new(),
+                policy_id: 0,
             };
             if tx.send(AppEvent::Alert(alert)).is_err() {
                 return;

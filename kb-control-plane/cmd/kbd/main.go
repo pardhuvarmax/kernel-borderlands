@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/controlplane"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 	"github.com/spf13/cobra"
@@ -78,6 +80,8 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		log.Fatalf("Failed to start control plane: %v", err)
 	}
 
+	notifySystemdReady()
+
 	// Wait for shutdown signal.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -85,6 +89,45 @@ func runDaemon(cmd *cobra.Command, args []string) {
 
 	log.Println("Shutting down KB Control Plane...")
 	cp.Stop(grpcSocket)
+}
+
+// notifySystemdReady implements kbd.service's Type=notify contract
+// (packaging/systemd/kbd.service) and docs/architecture/boot_sequence_spec.md
+// §2 Phase 1 step 4 ("kbd verifies its local sockets are listening and
+// sends a ready signal back to systemd") — found missing entirely by
+// actually booting the real unit in a container: without ANY sd_notify
+// call, systemd left kbd.service stuck in "activating (start)" forever,
+// which meant kb-checker.service/kb-sensor.service's After=/Requires=
+// on it could never resolve either. `systemd-analyze verify` never
+// catches this — it doesn't run ExecStart, only checks the file's syntax.
+//
+// cp.Start() returns once the gRPC UDS listener is synchronously bound,
+// but internal/ipc's two telemetry/control listeners bind inside their
+// own goroutines (internal/ipc/listener.go's Listen()), so there's a
+// short, unsynchronized window where Start() has returned but kbd.sock/
+// kbct.sock may not exist on disk yet. Rather than refactor that
+// listener's API under this change, poll for both socket files (typically
+// sub-millisecond in practice) before notifying — bounded so a genuine
+// startup problem still surfaces as a systemd timeout instead of hanging
+// silently forever.
+func notifySystemdReady() {
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		_, errIPC := os.Stat(ipc.SocketIPC)
+		_, errCtl := os.Stat(ipc.SocketControl)
+		if errIPC == nil && errCtl == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	sent, err := daemon.SdNotify(false, daemon.SdNotifyReady)
+	if err != nil {
+		log.Printf("[KB] sd_notify failed: %v", err)
+	} else if sent {
+		log.Println("[KB] sd_notify(READY=1) sent")
+	}
+	// sent == false, err == nil means NOTIFY_SOCKET wasn't set — the
+	// normal case when kbd isn't running under systemd (dev/manual runs).
 }
 
 func main() {

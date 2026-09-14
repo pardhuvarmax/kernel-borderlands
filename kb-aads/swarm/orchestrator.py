@@ -9,6 +9,7 @@ from agents.executor import ExecutorAgent
 from agents.militia import MilitiaSquadLeadAgent
 from agents.signal_relay import SignalRelayAgent
 from consensus.jje import JudgeAgent
+from swarm.registry import SwarmRegistry
 
 ROLE_CLASSES = {
     AgentRole.HUNTER: HunterAgent,
@@ -40,6 +41,16 @@ class RaySwarmOrchestrator:
         self.agent_counter = 0
         self.judge = None
         self.executor = None
+        self.grpc_socket = None
+        # SwarmRegistry backs JJE's courthouse oversight (see
+        # consensus/jje.py's JudgeAgent.assess_severity/enforce_verdict) —
+        # a lookup Judge can use to reach ANY agent's handle, including
+        # ones spawned dynamically after swarm start (Jury pools,
+        # militia squads), which a one-time snapshot handed to Judge at
+        # boot would miss. See registry.py's docstring for why
+        # registration happens at each spawn site instead of via
+        # self-registration in BaseAgent.
+        self.registry = SwarmRegistry.remote()
 
     def spawn_agent(self, role: AgentRole, **extra_kwargs):
         self.agent_counter += 1
@@ -52,6 +63,7 @@ class RaySwarmOrchestrator:
         )
 
         self.agents[agent_id] = agent_actor
+        self.registry.register.remote(agent_id, role.value, agent_actor)
         return agent_actor
 
     async def start_swarm(self, config: dict, grpc_socket: str = "/run/kb/kba.sock", jury_pool_size: int = 5,
@@ -61,9 +73,12 @@ class RaySwarmOrchestrator:
         # dynamically per round by JudgeAgent.coordinate_consensus (see
         # consensus/jje.py), not here.
         self.executor = ExecutorAgent.remote("executor-1", socket_path=grpc_socket)
-        self.judge = JudgeAgent.remote("judge-1", self.executor, jury_pool_size=jury_pool_size)
+        self.judge = JudgeAgent.remote("judge-1", self.executor, jury_pool_size=jury_pool_size, registry=self.registry)
         self.agents["executor-1"] = self.executor
         self.agents["judge-1"] = self.judge
+        self.registry.register.remote("executor-1", AgentRole.EXECUTOR.value, self.executor)
+        self.registry.register.remote("judge-1", AgentRole.JUDGE.value, self.judge)
+        self.grpc_socket = grpc_socket
 
         # Hunters must exist before Patrollers so Patroller's escalation
         # target (agents/patroller.py's hunter_pool) can be wired at
@@ -82,6 +97,16 @@ class RaySwarmOrchestrator:
                 suspicious_threshold=patroller_suspicious_threshold,
             )
 
+        # Signal relays route to the hunter pool by name — the one
+        # concrete route wired up today (see agents/signal_relay.py's
+        # scoping note: which other agent-pairs go through a relay
+        # instead of a direct call is still an open Phase-4 decision, not
+        # decided here). Also needs the hunter pool to exist first, same
+        # "spawn dependency first" ordering as Patroller above.
+        relay_count = remaining.pop("signal_relay", 0)
+        for _ in range(relay_count):
+            self.spawn_agent(AgentRole.SIGNAL_RELAY, routes={"hunter": hunter_pool})
+
         for role_name, count in remaining.items():
             role = AgentRole(role_name)
             for _ in range(count):
@@ -90,6 +115,34 @@ class RaySwarmOrchestrator:
         await asyncio.gather(*[
             agent.start.remote() for agent in self.agents.values()
         ])
+
+    def spawn_militia_squad(self, pid: int, target_level: int, reason: str = ""):
+        """
+        Commands a containment militia squad against one PID.
+
+        Per the roadmap's spawn-lifecycle note (mirroring Jury's dynamic
+        per-incident spawn, see consensus/jje.py's coordinate_consensus),
+        a squad lead is spawned fresh per incident rather than kept as a
+        standing pool — squad members are then spawned by the lead itself,
+        one per stage, only for the stages actually needed (see
+        agents/militia.py's MilitiaSquadLeadAgent.command_squad).
+
+        Not wired into JudgeAgent.coordinate_consensus automatically —
+        that would require Judge to also carry a containment-level
+        decision (from agents/containment.py's ContainmentAgent), which is
+        a separate, undecided integration question the roadmap leaves open
+        for Phase 4. Call this directly (or from a caller that already has
+        both a quorum decision and a containment level) until that's
+        resolved.
+        """
+        self.agent_counter += 1
+        lead_id = f"militia-lead-{self.agent_counter}"
+        lead = MilitiaSquadLeadAgent.remote(
+            lead_id, socket_path=self.grpc_socket or "/run/kb/kba.sock", registry=self.registry,
+        )
+        self.agents[lead_id] = lead
+        self.registry.register.remote(lead_id, AgentRole.MILITIA_LEAD.value, lead)
+        return lead.command_squad.remote(pid, target_level, reason)
 
     def get_status(self) -> dict:
         status_refs = [agent.get_status.remote() for agent in self.agents.values()]

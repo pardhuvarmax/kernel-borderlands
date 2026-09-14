@@ -1,0 +1,30 @@
+[Unit]
+Description=Kernel Borderlands Operator Dashboard
+After=kbd.service
+Requires=kbd.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+# NOT YET FUNCTIONAL: kb-op/kb-dashboard runs today only as a Vite
+# dev-server (`npm run dev`), no compiled binary. This unit documents the
+# target packaging convention from docs/architecture/boot_sequence_spec.md,
+# not a build that exists. Producing a real production build/serving story
+# for /usr/local/bin/kbopd is deferred follow-up work.
+ExecStart=/usr/local/bin/kbopd --config /etc/kb/config.yaml
+Restart=always
+RestartSec=5
+
+# Full hardening — safe here, same reasoning as kbagents above: not deployed
+# yet, and a web dashboard's actual runtime need is a network listener plus
+# a UDS/gRPC client connection to kbd, nothing privileged.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+MemoryDenyWriteExecute=true
+ProtectSystem=strict
+ReadWritePaths=/run/kb
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

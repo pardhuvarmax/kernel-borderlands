@@ -80,5 +80,16 @@ func (a *Logger) VerifyChain() (bool, int, error) {
         prev = entryH
         count++
     }
+    // rows.Next() returns false both on ordinary exhaustion AND on an
+    // underlying driver/I/O error mid-cursor — the real error in the
+    // latter case is stashed on rows.Err(), not returned by Next()
+    // itself. Without this check, a genuine I/O error partway through
+    // verification was silently indistinguishable from a clean, complete
+    // scan, and this function would report the chain valid (true) with a
+    // row count lower than the true total instead of surfacing the
+    // error — a false-confidence bug, not a false-alarm one (BUG-005).
+    if err := rows.Err(); err != nil {
+        return false, count, err
+    }
     return true, count, nil
 }

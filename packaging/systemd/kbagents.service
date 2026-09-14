@@ -1,0 +1,34 @@
+[Unit]
+Description=Kernel Borderlands Ray Swarm Node Agent (AADS)
+After=kb-checker.service
+Requires=kb-checker.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+# NOT YET FUNCTIONAL: kb-aads (kb-aads/main.py) has no compiled-binary
+# build/install step anywhere in this repo today — it runs as
+# `python3 main.py`. This unit documents the target packaging convention
+# from docs/architecture/boot_sequence_spec.md, not a build that exists.
+# Producing /usr/local/bin/kbagents (wrapper script or PyInstaller/similar)
+# is deferred follow-up work, not part of this pass.
+ExecStart=/usr/local/bin/kbagents --config /etc/kb/config.yaml --grpc-socket /run/kb/kba.sock
+Restart=always
+RestartSec=5
+
+# Full hardening — safe here (unlike kbd/kb-checker above) since this unit
+# isn't deployed anywhere yet and its actual runtime need is a UDS client
+# connection to kba.sock, nothing privileged. CapabilityBoundingSet= empty
+# drops every capability; adjust only if the real kbagents build (once it
+# exists — see note above) turns out to need something specific (e.g. a
+# Ray-internal requirement not visible from this repo's Python source).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+MemoryDenyWriteExecute=true
+ProtectSystem=strict
+ReadWritePaths=/run/kb
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

@@ -105,6 +105,16 @@ func New(path string) (*Engine, error) {
 	return e, nil
 }
 
+// DefaultSuspiciousThreshold and DefaultBorderlandsThreshold expose the
+// parsed defaults.suspicious/defaults.borderlands values for read-only
+// display (e.g. kb-dashboard's Settings page, GET /api/policy) — purely
+// informational. Per this type's own comment above, these are NOT
+// consulted anywhere in Go's own zone-classification logic (that moved to
+// kb_scoring.c); do not add enforcement behavior against these values
+// without first confirming nothing on the C side would double-apply it.
+func (e *Engine) DefaultSuspiciousThreshold() float64  { return e.defSus }
+func (e *Engine) DefaultBorderlandsThreshold() float64 { return e.defBor }
+
 func (e *Engine) AutoTerminate(comm string) bool {
 	if p, ok := e.byComm[comm]; ok {
 		return p.AutoTerminate

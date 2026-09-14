@@ -1,0 +1,34 @@
+[Unit]
+Description=Kernel Borderlands eBPF Sensor (kbd_sensor) - Ring 0 Telemetry Loader
+# NEW in this pass — docs/architecture/boot_sequence_spec.md never defined a
+# unit for kbd_sensor itself, even though its own §5 Scenario A already
+# refers to stopping "kb-sensor.service" during the Tampering Containment
+# Protocol. Source inspection (kb-control-plane/internal/ipc/listener.go:134,
+# kb-core/userspace/bridge/kb_bridge.c:83) confirms kbd_sensor (C, eBPF) and
+# kbd (Go) are two fully independent OS processes — kbd never exec/spawns
+# kbd_sensor, it just binds kbd.sock first so kbd_sensor has something to
+# connect to. This unit is what actually loads the eBPF hooks into the
+# kernel; without it, "the boot sequence" never runs the sensor at all.
+After=kbd.service
+Requires=kbd.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kbd_sensor
+Restart=always
+RestartSec=3
+
+# No hardening beyond the universally-safe directives below: loading eBPF
+# programs and attaching LSM hooks needs CAP_BPF/CAP_PERFMON/CAP_SYS_ADMIN
+# (exact set is kernel-version dependent — see
+# docs/architecture/cross-kernel-portability.md), so this runs as root,
+# consistent with kb-core/README.md's `sudo ./build/kbd_sensor`. Revisit
+# CapabilityBoundingSet= only alongside an actual capability audit of
+# kb-core's loader code, not as a systemd-only change.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

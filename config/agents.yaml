@@ -14,6 +14,9 @@ ray:
 # Executor are spawned as long-lived actors; the Jury pool is spawned
 # dynamically per consensus round (see docs/development/control-aads/
 # ray-integration-walkthrough.md §5B) and is not configured here.
+# Containment militia squads are likewise not a count — a squad lead is
+# spawned on demand per incident via RaySwarmOrchestrator.spawn_militia_squad
+# (see agents/militia.py), not at swarm startup.
 # Keys must match agents.base_agent.AgentRole values exactly (singular) —
 # they're passed straight to AgentRole(role_name).
 swarm:
@@ -21,6 +24,9 @@ swarm:
   hunter: 2
   healer: 1
   containment: 1
+  # signal_relay routes to the hunter pool today (see
+  # agents/signal_relay.py's scoping note on which routes exist).
+  signal_relay: 1
 
 jury:
   pool_size: 5

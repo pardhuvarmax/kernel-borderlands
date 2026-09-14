@@ -372,10 +372,16 @@ int kb_handle_exit(struct trace_event_raw_sched_process_template *ctx)
     bpf_map_delete_elem(&protected_workloads_map, &pid);
 
     // kb_syscall_totals and kb_cred_prev are PID-keyed like the two maps
-    // above but were never cleaned up here — on a long-running host with
-    // normal PID churn they'd fill permanently, after which new-PID
-    // inserts silently fail and syscall-volume telemetry / privilege-
-    // escalation UID-diffing stop updating for any new process (BUG-008).
+    // above (BUG-008, now fixed by these two lines) — without this, a
+    // long-running host with normal PID churn would fill both maps
+    // permanently, after which new-PID inserts silently fail and
+    // syscall-volume telemetry / privilege-escalation UID-diffing stop
+    // updating for any new process. kb_syscall_counts is NOT cleaned up
+    // here on purpose — see its own map definition's comment: it's
+    // composite-keyed (pid<<32|syscall_nr), so kb_handle_exit can't target
+    // one PID's entries without iterating the whole map; it uses
+    // BPF_MAP_TYPE_LRU_HASH instead, which ages out old entries under
+    // normal churn rather than filling permanently.
     bpf_map_delete_elem(&kb_syscall_totals, &pid);
     bpf_map_delete_elem(&kb_cred_prev, &pid);
     return 0;

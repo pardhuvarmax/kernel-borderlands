@@ -30,6 +30,7 @@ class AgentState:
     uptime: int = 0
     anomaly_score: float = 0.0
     last_action: str = ""
+    error_count: int = 0
 
 class BaseAgent:
     """
@@ -73,6 +74,7 @@ class BaseAgent:
             try:
                 await self.handle_message(msg)
             except Exception as e:
+                self.state.error_count += 1
                 print(f"[{self.state.agent_id}] Message handling failed: {e}")
             self.message_queue.task_done()
 
@@ -83,7 +85,8 @@ class BaseAgent:
             "status": self.state.status.value,
             "uptime": self.state.uptime,
             "anomaly_score": self.state.anomaly_score,
-            "last_action": self.state.last_action
+            "last_action": self.state.last_action,
+            "error_count": self.state.error_count
         }
 
 

@@ -1,0 +1,35 @@
+[Unit]
+Description=Kernel Borderlands Safety and Integrity Watchdog Daemon
+# Dependency updated in this pass to also require kb-sensor.service: the
+# checker's Phase 2 boot audits (eBPF bytecode integrity, hook liveness) are
+# meaningless before the sensor has actually loaded its hooks into the
+# kernel — see docs/architecture/boot_sequence_spec.md §2 Phase 2 step 4.
+After=kbd.service kb-sensor.service
+Requires=kbd.service kb-sensor.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kb-checker monitor --all --grpc-socket /run/kb/kbc.sock
+Restart=always
+RestartSec=5
+PIDFile=/run/kb/kb-checker.pid
+
+# Conservative hardening only — deliberately NO CapabilityBoundingSet= and
+# NO ProtectSystem=strict here. kb-checker's Tampering Containment Protocol
+# (Scenario A, §4) shells out to `pkill -9`, `rm -rf /sys/fs/bpf/*`, and
+# `iptables -P ... DROP` as a last-resort lockdown when tampering is
+# actually detected — that needs root/CAP_KILL/CAP_NET_ADMIN/bpffs-delete
+# rights, none of which are dropped anywhere in kb-checker's own code today.
+# That path is only ever exercised during a real attack, not by routine
+# tests, so getting a capability enumeration wrong here would fail exactly
+# when it matters most and go unnoticed until then. Revisit only alongside
+# actual privilege-dropping code changes in kb-checker itself, not as a
+# systemd-only change.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

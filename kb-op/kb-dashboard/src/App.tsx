@@ -5,7 +5,7 @@ import {
 import {
   Shield, AlertTriangle, Activity, Lock, Unlock,
   Search, RefreshCw, Cpu, Layers, Terminal, Bell, Settings,
-  Server, Wifi, WifiOff
+  Server, Wifi, WifiOff, Map, Users, ShieldAlert
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -87,6 +87,19 @@ export default function App() {
     events_per_second: 0
   });
 
+  // Rogue Management — real data from kbd's /api/agents proxy (see
+  // kb-control-plane/internal/controlplane/http.go's handleAgents), which
+  // itself proxies kb-aads/api/status_server.py. `agentsError` distinguishes
+  // "swarm not running" (a routine dev state) from a genuinely empty roster.
+  const [agents, setAgents] = useState<{ agent_id: string; role: string; registry_status: string; uptime: number; error_count: number; last_action: string }[]>([]);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
+
+  // Settings — real data from kbd's /api/policy (see policy.Engine's
+  // DefaultSuspiciousThreshold/DefaultBorderlandsThreshold, display-only).
+  const [policyInfo, setPolicyInfo] = useState<{ suspicious_threshold: number; borderlands_threshold: number; sensitive_paths_count: number; policy_path: string } | null>(null);
+  const [policyError, setPolicyError] = useState<string | null>(null);
+  const [reloadStatus, setReloadStatus] = useState<string | null>(null);
+
   const termRef = useRef<HTMLDivElement>(null);
   const alertKeySet = useRef<Set<string>>(new Set());
 
@@ -125,6 +138,56 @@ export default function App() {
   useEffect(() => {
     termRef.current?.scrollTo({ top: termRef.current.scrollHeight, behavior: 'smooth' });
   }, [log]);
+
+  // Fetch agent roster when Rogue Management is opened — real data via
+  // kbd's /api/agents proxy, not gated on the simulated/live toggle since
+  // it reflects kb-aads's actual process state independent of whether the
+  // rest of the dashboard is showing simulated process/alert data.
+  useEffect(() => {
+    if (activeNav !== 'Rogue Management') return;
+    let active = true;
+    fetch(`${API_BASE}/api/agents`)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        if (!active) return;
+        if (data.error) { setAgentsError(data.error); setAgents([]); }
+        else { setAgents(data.agents || []); setAgentsError(null); }
+      })
+      .catch(err => { if (active) { setAgentsError(`AADS swarm status unreachable: ${err.message}`); setAgents([]); } });
+    return () => { active = false; };
+  }, [activeNav]);
+
+  // Fetch policy defaults when Settings is opened.
+  const fetchPolicy = useCallback(() => {
+    fetch(`${API_BASE}/api/policy`)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(data => { setPolicyInfo(data); setPolicyError(null); })
+      .catch(err => { setPolicyError(`kbd unreachable: ${err.message}`); setPolicyInfo(null); });
+  }, []);
+
+  useEffect(() => {
+    if (activeNav === 'Settings') fetchPolicy();
+  }, [activeNav, fetchPolicy]);
+
+  const reloadPolicy = () => {
+    setReloadStatus('Reloading…');
+    fetch(`${API_BASE}/api/policy/reload`, {
+      method: 'POST',
+      headers: API_TOKEN ? { 'Authorization': `Bearer ${API_TOKEN}` } : {},
+    })
+      .then(res => res.json().then(data => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        setReloadStatus(ok ? `${data.message}` : `Failed: ${data.message || 'unknown error'}`);
+        if (ok) fetchPolicy();
+      })
+      .catch(err => setReloadStatus(`Failed: ${err.message}`));
+  };
 
   // Simulation loop
   useEffect(() => {
@@ -477,14 +540,57 @@ export default function App() {
     }
   };
 
-  // Nav items
-  const NAV = [
-    { label: 'Processes', icon: <Cpu size={14} />,      badge: metrics.danger > 0 ? metrics.danger : null },
-    { label: 'Alerts',    icon: <Bell size={14} />,      badge: metrics.alerts > 0 ? metrics.alerts : null },
-    { label: 'Services',  icon: <Server size={14} />,    badge: null },
-    { label: 'Telemetry', icon: <Activity size={14} />,  badge: null },
-    { label: 'Console',   icon: <Terminal size={14} />,  badge: null },
+  // Nav items, grouped by platform area — expanded so the sidebar reads as
+  // a full multi-section control panel rather than 5 flat items. Every
+  // group still maps to real app state (processes/alerts/services/log);
+  // Rogue Management and Settings are the two pages with no live backend
+  // yet and are explicitly labeled as such in their own view, rather than
+  // silently presenting placeholder data as if it were real.
+  const NAV_GROUPS = [
+    {
+      label: 'Core Monitoring',
+      items: [
+        { label: 'Processes',     icon: <Cpu size={14} />,      badge: metrics.danger > 0 ? metrics.danger : null },
+        { label: 'Zone Topology', icon: <Map size={14} />,      badge: null },
+        { label: 'Alerts',        icon: <Bell size={14} />,     badge: metrics.alerts > 0 ? metrics.alerts : null },
+        { label: 'Telemetry',     icon: <Activity size={14} />, badge: null },
+      ],
+    },
+    {
+      label: 'Platform Management',
+      items: [
+        { label: 'Services',    icon: <Server size={14} />, badge: null },
+        { label: 'Containment', icon: <Lock size={14} />,   badge: metrics.danger > 0 ? metrics.danger : null },
+      ],
+    },
+    {
+      label: 'Intelligence & Consensus',
+      items: [
+        { label: 'Consensus Log',      icon: <Users size={14} />,       badge: null },
+        { label: 'Rogue Management',   icon: <ShieldAlert size={14} />, badge: null },
+      ],
+    },
+    {
+      label: 'System & Governance',
+      items: [
+        { label: 'Console',  icon: <Terminal size={14} />, badge: null },
+        { label: 'Settings', icon: <Settings size={14} />, badge: null },
+      ],
+    },
   ];
+
+  const SECTION_TITLES: Record<string, string> = {
+    Processes:         'System Overview',
+    'Zone Topology':    'Zone Topology',
+    Alerts:             'Threat & Alert Center',
+    Telemetry:          'Telemetry & Performance',
+    Services:           'Platform Services',
+    Containment:         'Containment Actions',
+    'Consensus Log':     'AADS Consensus Log',
+    'Rogue Management':  'Rogue Agent Management',
+    Console:             'Audit Console',
+    Settings:            'Settings',
+  };
 
   return (
     <div className="shell">
@@ -493,40 +599,21 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-brand">
           <div className="brand-icon">
-            <div className="brand-icon-inner" />
+            <Shield size={16} />
           </div>
           <div>
             <div className="brand-name">Kernel Borderlands</div>
-            <div className="brand-sub">Security Operations Console · v1.2.0</div>
+            <div className="brand-sub">Kernel-Level Runtime Defense Platform</div>
           </div>
         </div>
 
-        <div className="topbar-center" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--tx-dim)' }}>
-          {new Date().toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
-          &nbsp;·&nbsp; codename <span style={{ color: 'var(--accent)' }}>kestrel</span>
+        <div className="topbar-center">
+          codename&nbsp;<span style={{ color: 'var(--accent)' }}>kryo</span>
         </div>
 
         <div className="topbar-right">
-          <div className="topbar-stat">
-            <span className="topbar-stat-label">Tracked PIDs</span>
-            <span className="topbar-stat-val">{metrics.total}</span>
-          </div>
-          <div className="topbar-sep" />
-          <div className="topbar-stat">
-            <span className="topbar-stat-label">Intercept Latency</span>
-            <span className="topbar-stat-val ok">{simulated ? '430 ns' : `${metricsData.ebpf_latency_ns} ns`}</span>
-          </div>
-          <div className="topbar-sep" />
-          <div className="topbar-stat">
-            <span className="topbar-stat-label">Event Rate</span>
-            <span className="topbar-stat-val" style={{ color: 'var(--accent)' }}>
-              {simulated ? '0.0/s' : `${metricsData.events_per_second.toFixed(1)}/s`}
-            </span>
-          </div>
-          <div className="topbar-sep" />
-          <div className="topbar-stat">
-            <span className="topbar-stat-label">Active Alerts</span>
-            <span className={`topbar-stat-val ${metrics.alerts > 0 ? 'alert' : 'ok'}`}>{metrics.alerts}</span>
+          <div className="role-tag">
+            Role: <span className="role-tag-val">Operator</span>
           </div>
           <div className="topbar-sep" />
 
@@ -547,37 +634,45 @@ export default function App() {
 
       {/* ── Sidebar ─────────────────────────────────────────────── */}
       <aside className="sidebar">
-        <div className="nav-section-label">Navigation</div>
-        {NAV.map(n => (
-          <div
-            key={n.label}
-            className={`nav-item ${activeNav === n.label ? 'active' : ''}`}
-            onClick={() => setActiveNav(n.label)}
-          >
-            {n.icon} {n.label}
-            {n.badge != null && (
-              <span className={`nav-badge ${n.badge === 0 ? 'ok' : ''}`}>{n.badge}</span>
-            )}
+        {NAV_GROUPS.map(group => (
+          <div className="nav-group" key={group.label}>
+            <div className="nav-section-label">{group.label}</div>
+            {group.items.map(n => (
+              <div
+                key={n.label}
+                className={`nav-item ${activeNav === n.label ? 'active' : ''}`}
+                onClick={() => setActiveNav(n.label)}
+              >
+                {n.icon} {n.label}
+                {n.badge != null && (
+                  <span className={`nav-badge ${n.badge === 0 ? 'ok' : ''}`}>{n.badge}</span>
+                )}
+              </div>
+            ))}
           </div>
         ))}
 
         <div className="sidebar-footer">
-          <div className="nav-section-label" style={{ padding: '0 0 8px' }}>System</div>
+          <div className="nav-section-label" style={{ padding: '0 0 10px' }}>System</div>
           <div className="system-summary-row">
-            <span className="system-summary-label">Zone: SAFE</span>
+            <span className="summary-dot ok" />
+            <span className="system-summary-label">Zone: Safe</span>
             <span className="system-summary-val ok">{metrics.safe}</span>
           </div>
           <div className="system-summary-row">
-            <span className="system-summary-label">Zone: SUSPICIOUS</span>
-            <span className="system-summary-val" style={{ color: metrics.sus > 0 ? 'var(--warn)' : undefined }}>{metrics.sus}</span>
+            <span className={`summary-dot ${metrics.sus > 0 ? 'warn' : ''}`} />
+            <span className="system-summary-label">Zone: Suspicious</span>
+            <span className="system-summary-val">{metrics.sus}</span>
           </div>
           <div className="system-summary-row">
-            <span className="system-summary-label">Zone: CRITICAL</span>
-            <span className={`system-summary-val ${metrics.danger > 0 ? 'bad' : 'ok'}`}>{metrics.danger}</span>
+            <span className={`summary-dot ${metrics.danger > 0 ? 'bad' : ''}`} />
+            <span className="system-summary-label">Zone: Critical</span>
+            <span className={`system-summary-val ${metrics.danger > 0 ? 'bad' : ''}`}>{metrics.danger}</span>
           </div>
           <div className="system-summary-row">
+            <span className="summary-dot ok" />
             <span className="system-summary-label">L1 Cache</span>
-            <span className="system-summary-val ok">RESTORED</span>
+            <span className="system-summary-val ok">OK</span>
           </div>
         </div>
       </aside>
@@ -585,36 +680,51 @@ export default function App() {
       {/* ── Main ─────────────────────────────────────────────────── */}
       <main className="main">
 
+        <h1 className="section-heading">{SECTION_TITLES[activeNav]}</h1>
+
         {/* Persistent stat cards — visible in all views */}
         <div className="stat-row">
           <div className="stat-card">
-            <div className="stat-icon blue"><Cpu size={16} /></div>
-            <div className="stat-info">
+            <div className="stat-top">
               <div className="stat-label">Tracked Processes</div>
-              <div className="stat-value blue">{metrics.total}</div>
+              <div className="stat-icon"><Cpu size={15} /></div>
+            </div>
+            <div className="stat-info">
+              <div className="stat-value">{metrics.total}</div>
               <div className="stat-sub">L1 in-memory cache</div>
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-icon green"><Shield size={16} /></div>
-            <div className="stat-info">
+            <div className="stat-top">
               <div className="stat-label">Safe Zone</div>
-              <div className="stat-value green">{metrics.safe}</div>
-              <div className="stat-sub">Nominal processes</div>
+              <div className="stat-icon"><Shield size={15} /></div>
+            </div>
+            <div className="stat-info">
+              <div className="stat-value">{metrics.safe}</div>
+              <div className="stat-sub">
+                {metrics.total > 0 ? `${Math.round((metrics.safe / metrics.total) * 100)}% of tracked` : 'Nominal processes'}
+              </div>
+              <div className="stat-bar-bg">
+                <div className="stat-bar-fill" style={{ width: `${metrics.total > 0 ? (metrics.safe / metrics.total) * 100 : 0}%` }} />
+              </div>
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-icon yellow"><AlertTriangle size={16} /></div>
-            <div className="stat-info">
+            <div className="stat-top">
               <div className="stat-label">Suspicious</div>
+              <div className="stat-icon"><AlertTriangle size={15} /></div>
+            </div>
+            <div className="stat-info">
               <div className="stat-value yellow">{metrics.sus}</div>
               <div className="stat-sub">Elevated EMA score</div>
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-icon red"><Layers size={16} /></div>
-            <div className="stat-info">
+            <div className="stat-top">
               <div className="stat-label">Borderlands / Quarantine</div>
+              <div className="stat-icon"><Layers size={15} /></div>
+            </div>
+            <div className="stat-info">
               <div className="stat-value red">{metrics.danger}</div>
               <div className="stat-sub">Active containment</div>
             </div>
@@ -698,7 +808,7 @@ export default function App() {
                             <td><span className={`zone-badge ${zoneClass(p.zone)}`}>{p.zone}</span></td>
                             <td>
                               <div className="score-bar-wrap">
-                                <div className="score-bar-bg"><div className="score-bar-fill" style={{ width: `${p.score * 100}%`, background: fill }} /></div>
+                                <div className="score-bar-bg"><div className="score-bar-fill" style={{ width: `${p.score * 100}%`, background: fill, color: fill }} /></div>
                                 <span className="score-val" style={{ color: fill }}>{p.score.toFixed(2)}</span>
                               </div>
                             </td>
@@ -718,7 +828,7 @@ export default function App() {
             </div>
 
             <div className="col-right">
-              {/* Right sidebar always: services + alert feed + terminal */}
+              {/* Right sidebar: services + terminal only now */}
               <div className="panel" style={{ flexShrink: 0 }}>
                 <div className="panel-head">
                   <div className="panel-title"><span className="panel-title-dot green" />Service Health</div>
@@ -738,29 +848,10 @@ export default function App() {
               </div>
               <div className="panel" style={{ flex: 1, minHeight: 0 }}>
                 <div className="panel-head">
-                  <div className="panel-title"><span className="panel-title-dot red" />Threat Feed</div>
-                  <span className="panel-tag">{alerts.length} events</span>
-                </div>
-                <div className="alert-feed">
-                  {alerts.length === 0 && <div className="empty-state"><Shield size={24} style={{ color: 'var(--tx-dim)' }} />No active threats</div>}
-                  {alerts.map(a => (
-                    <div key={a.id} className={`alert-item ${a.severity.toLowerCase()}`}>
-                      <div className="alert-top">
-                        <span className={`alert-type ${a.severity.toLowerCase()}`}>{a.type}</span>
-                        <span className="alert-ts">{a.ts}</span>
-                      </div>
-                      <div className="alert-body">PID <strong>{a.pid}</strong> (<strong>{a.comm}</strong>) — {a.severity}</div>
-                      <div className="alert-tags">{a.evidence.map((e, i) => <span key={i} className="alert-tag">{e}</span>)}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="panel" style={{ flexShrink: 0 }}>
-                <div className="panel-head">
                   <div className="panel-title"><span className="panel-title-dot" />Audit Console</div>
                   <span className="panel-tag">live journal</span>
                 </div>
-                <div className="terminal" ref={termRef} style={{ maxHeight: 170 }}>
+                <div className="terminal" ref={termRef} style={{ flex: 1 }}>
                   {log.map((l, i) => <div key={i} className={`t-line ${l.cls}`}>{l.text}</div>)}
                 </div>
               </div>
@@ -768,9 +859,64 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ VIEW: Zone Topology ═══════════════════════════════════════ */}
+        {activeNav === 'Zone Topology' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, flex: 1, minHeight: 0 }}>
+            {([
+              ['SAFE', 'safe', 'Nominal — no elevated behavioral signal'],
+              ['SUSPICIOUS', 'suspicious', 'Elevated EMA score, under active watch'],
+              ['BORDERLANDS', 'borderlands', 'Quorum-flagged, pending containment decision'],
+              ['QUARANTINED', 'quarantined', 'Manually or automatically isolated'],
+            ] as const).map(([zone, cls, desc]) => {
+              const inZone = processes.filter(p => p.zone === zone);
+              return (
+                <div className="panel" key={zone} style={{ minHeight: 0 }}>
+                  <div className="panel-head">
+                    <div className="panel-title"><span className={`panel-title-dot ${cls === 'safe' ? 'green' : cls === 'suspicious' ? 'yellow' : 'red'}`} />{zone}</div>
+                    <span className="panel-tag">{inZone.length} processes</span>
+                  </div>
+                  <div style={{ padding: '0 20px 12px', fontSize: 11, color: 'var(--tx-secondary)' }}>{desc}</div>
+                  <div className="table-scroll">
+                    {inZone.length === 0 && <div className="empty-state">No processes in this zone</div>}
+                    {inZone.map(p => (
+                      <div className="health-item" key={p.pid}>
+                        <div className="health-left">
+                          <div className="health-name">{p.comm}</div>
+                          <div className="health-desc">PID {p.pid} · UID {p.uid}</div>
+                        </div>
+                        <span className={`zone-badge ${zoneClass(p.zone)}`}>{p.score.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* ══ VIEW: Alerts ════════════════════════════════════════════ */}
         {activeNav === 'Alerts' && (
-          <div className="content-grid">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, flex: 1, minHeight: 0 }}>
+            <div className="panel" style={{ flexShrink: 0 }}>
+              <div className="panel-head">
+                <div className="panel-title"><span className="panel-title-dot" />Severity Breakdown</div>
+                <span className="panel-tag">{alerts.length} tracked</span>
+              </div>
+              <div style={{ padding: '4px 20px 18px', display: 'flex', flexDirection: 'column' }}>
+                {[
+                  { label: 'Critical', dot: 'bad',  count: alerts.filter(a => a.severity === 'CRITICAL').length },
+                  { label: 'Warning',  dot: 'warn', count: alerts.filter(a => a.severity === 'WARNING').length },
+                  { label: 'Info',     dot: '',     count: alerts.filter(a => a.severity === 'INFO').length },
+                ].map(r => (
+                  <div className="system-summary-row" key={r.label}>
+                    <span className={`summary-dot ${r.dot}`} />
+                    <span className="system-summary-label">{r.label}</span>
+                    <span className={`system-summary-val ${r.dot}`}>{r.count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="content-grid" style={{ flex: 1, minHeight: 0 }}>
             <div className="col-left">
               <div className="panel" style={{ flex: 1, minHeight: 0 }}>
                 <div className="panel-head">
@@ -818,6 +964,7 @@ export default function App() {
                 </div>
               </div>
             </div>
+            </div>
           </div>
         )}
 
@@ -860,6 +1007,37 @@ export default function App() {
               </div>
             </div>
             <div className="col-right">
+              <div className="panel" style={{ flexShrink: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot" />Platform Composition</div>
+                  <span className="panel-tag">7 services</span>
+                </div>
+                <div style={{ padding: '2px 20px 14px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {[
+                    ['kb-core', 'C / eBPF'], ['kbd', 'Go'], ['kb-checker', 'Rust'],
+                    ['AADS Swarm', 'Python'], ['gRPC Health', 'Go'], ['SQLite L2', 'Go'], ['kbctl', 'Go'],
+                  ].map(([name, lang]) => (
+                    <span className="alert-tag" key={name}>{name} · {lang}</span>
+                  ))}
+                </div>
+                <div style={{ padding: '4px 20px 16px', display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--border)' }}>
+                  {(() => {
+                    const names = ['kb-core (eBPF Sensor)', 'kbd (Go Control Plane)', 'kb-checker (Rust Watchdog)', 'AADS Agent Swarm', 'gRPC Health Service', 'SQLite L2 Store', 'kbctl CLI'];
+                    const activeCount = names.filter(n => services.find(s => s.name === n)?.status === 'ok').length;
+                    const downCount = names.length - activeCount;
+                    return [
+                      { label: 'Active', dot: 'ok',  count: activeCount },
+                      { label: 'Down',   dot: downCount > 0 ? 'bad' : '', count: downCount },
+                    ].map(r => (
+                      <div className="system-summary-row" key={r.label} style={{ paddingTop: 10 }}>
+                        <span className={`summary-dot ${r.dot}`} />
+                        <span className="system-summary-label">{r.label}</span>
+                        <span className={`system-summary-val ${r.dot}`}>{r.count}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
               <div className="panel" style={{ flex: 1, minHeight: 0 }}>
                 <div className="panel-head">
                   <div className="panel-title"><span className="panel-title-dot" />Audit Console</div>
@@ -873,10 +1051,73 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ VIEW: Containment ═══════════════════════════════════════ */}
+        {activeNav === 'Containment' && (
+          <div className="content-grid">
+            <div className="col-left">
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot red" />Active Containment</div>
+                  <span className="panel-tag">{metrics.danger} isolated / flagged</span>
+                </div>
+                <div className="table-scroll">
+                  <table className="proc-table">
+                    <thead><tr><th>Process</th><th>PID</th><th>UID</th><th>Zone</th><th>Risk Index</th><th>Action</th></tr></thead>
+                    <tbody>
+                      {processes.filter(p => p.zone === 'BORDERLANDS' || p.zone === 'QUARANTINED').length === 0 && (
+                        <tr><td colSpan={6}><div className="empty-state"><Shield size={22} style={{ color: 'var(--tx-dim)' }} />No active containment — all processes nominal</div></td></tr>
+                      )}
+                      {processes.filter(p => p.zone === 'BORDERLANDS' || p.zone === 'QUARANTINED').map(p => {
+                        const fill = scoreColor(p.score);
+                        return (
+                          <tr key={p.pid}>
+                            <td><span className="proc-comm">{p.comm}</span></td>
+                            <td><span className="proc-pid">{p.pid}</span></td>
+                            <td><span className="proc-pid">{p.uid}</span></td>
+                            <td><span className={`zone-badge ${zoneClass(p.zone)}`}>{p.zone}</span></td>
+                            <td>
+                              <div className="score-bar-wrap">
+                                <div className="score-bar-bg"><div className="score-bar-fill" style={{ width: `${p.score * 100}%`, background: fill, color: fill }} /></div>
+                                <span className="score-val" style={{ color: fill }}>{p.score.toFixed(2)}</span>
+                              </div>
+                            </td>
+                            <td>
+                              {p.zone === 'QUARANTINED'
+                                ? <button className="act-btn restore" onClick={() => restore(p.pid, p.comm)}><Unlock size={10} />Restore</button>
+                                : <button className="act-btn isolate" onClick={() => isolate(p.pid, p.comm)}><Lock size={10} />Isolate</button>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div className="col-right">
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot red" />Containment History</div>
+                  <span className="panel-tag">recent</span>
+                </div>
+                <div className="terminal" ref={termRef} style={{ flex: 1 }}>
+                  {log.filter(l => /isolate|restore|quarantine|WATCHDOG|SIGKILL/i.test(l.text)).map((l, i) => (
+                    <div key={i} className={`t-line ${l.cls}`}>{l.text}</div>
+                  ))}
+                  {log.filter(l => /isolate|restore|quarantine|WATCHDOG|SIGKILL/i.test(l.text)).length === 0 && (
+                    <div className="empty-state">No containment actions logged yet</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ══ VIEW: Telemetry ═════════════════════════════════════════ */}
         {activeNav === 'Telemetry' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
-            <div className="panel" style={{ flex: 1 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, flex: 1, minHeight: 0 }}>
+            <div className="panel">
               <div className="panel-head">
                 <div className="panel-title"><span className="panel-title-dot" />Zone Distribution — Extended</div>
                 <span className="panel-tag">rolling window</span>
@@ -909,25 +1150,50 @@ export default function App() {
                 </ResponsiveContainer>
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+            <div className="panel">
+              <div className="panel-head">
+                <div className="panel-title"><span className="panel-title-dot" />Zone Summary</div>
+              </div>
+              <div style={{ padding: '4px 20px 16px', display: 'flex', flexDirection: 'column' }}>
+                {[
+                  { label: 'Safe',        dot: 'ok',   count: metrics.safe },
+                  { label: 'Suspicious',  dot: metrics.sus > 0 ? 'warn' : '',    count: metrics.sus },
+                  { label: 'Danger',      dot: metrics.danger > 0 ? 'bad' : '',  count: metrics.danger },
+                ].map(r => (
+                  <div className="system-summary-row" key={r.label}>
+                    <span className={`summary-dot ${r.dot}`} />
+                    <span className="system-summary-label">{r.label}</span>
+                    <span className={`system-summary-val ${r.dot}`}>{r.count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16 }}>
               {[
-                { 
-                  label: 'eBPF Intercept Latency',  
-                  val: simulated ? '430 ns' : `${metricsData.ebpf_latency_ns} ns`, 
-                  sub: 'avg over last 1000 events', 
-                  color: !simulated && metricsData.ebpf_latency_ns > 450 ? 'var(--warn)' : 'var(--safe)' 
+                {
+                  label: 'eBPF Intercept Latency',
+                  val: simulated ? '430 ns' : `${metricsData.ebpf_latency_ns} ns`,
+                  sub: 'avg over last 1000 events',
+                  color: !simulated && metricsData.ebpf_latency_ns > 450 ? 'var(--warn)' : 'var(--tx-primary)'
                 },
-                { 
-                  label: 'gRPC Health Probe RTT',   
-                  val: simulated ? '< 100ms' : (metricsData.grpc_rtt_ms >= 0 ? `${metricsData.grpc_rtt_ms.toFixed(2)} ms` : 'OFFLINE'), 
-                  sub: 'kba.sock timeout threshold', 
-                  color: !simulated && metricsData.grpc_rtt_ms < 0 ? 'var(--danger)' : 'var(--accent)' 
+                {
+                  label: 'gRPC Health Probe RTT',
+                  val: simulated ? '< 100ms' : (metricsData.grpc_rtt_ms >= 0 ? `${metricsData.grpc_rtt_ms.toFixed(2)} ms` : 'OFFLINE'),
+                  sub: 'kba.sock timeout threshold',
+                  color: !simulated && metricsData.grpc_rtt_ms < 0 ? 'var(--danger)' : 'var(--tx-primary)'
                 },
-                { 
-                  label: 'AADS Consensus Latency',  
-                  val: simulated ? '< 1ms' : (metricsData.aads_latency_ms > 0 ? `${metricsData.aads_latency_ms.toFixed(2)} ms` : 'OFFLINE'), 
-                  sub: 'shared memory Arrow IPC',   
-                  color: !simulated && metricsData.aads_latency_ms === 0 ? 'var(--danger)' : 'var(--warn)' 
+                {
+                  label: 'AADS Consensus Latency',
+                  val: simulated ? '< 1ms' : (metricsData.aads_latency_ms > 0 ? `${metricsData.aads_latency_ms.toFixed(2)} ms` : 'OFFLINE'),
+                  sub: 'shared memory Arrow IPC',
+                  color: !simulated && metricsData.aads_latency_ms === 0 ? 'var(--danger)' : 'var(--tx-primary)'
+                },
+                {
+                  label: 'Event Rate',
+                  val: simulated ? '0.0/s' : `${metricsData.events_per_second.toFixed(1)}/s`,
+                  sub: 'ingested telemetry events',
+                  color: 'var(--tx-primary)'
                 },
               ].map(m => (
                 <div key={m.label} className="panel">
@@ -942,9 +1208,209 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ VIEW: Consensus Log ═════════════════════════════════════ */}
+        {activeNav === 'Consensus Log' && (
+          <div className="content-grid">
+            <div className="col-left">
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot" />AADS Quorum Feed</div>
+                  <span className="panel-tag">Judge / Jury / Executor</span>
+                </div>
+                <div className="terminal" ref={termRef} style={{ flex: 1 }}>
+                  {log.filter(l => /\[AADS\]/.test(l.text)).map((l, i) => (
+                    <div key={i} className={`t-line ${l.cls}`}>{l.text}</div>
+                  ))}
+                  {log.filter(l => /\[AADS\]/.test(l.text)).length === 0 && (
+                    <div className="empty-state">No quorum votes logged yet — appears when a process is escalated to BORDERLANDS</div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="col-right">
+              <div className="panel" style={{ flexShrink: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot" />Verdict Summary</div>
+                </div>
+                <div style={{ padding: '4px 20px 16px', display: 'flex', flexDirection: 'column' }}>
+                  {[
+                    { label: 'ISOLATE verdicts', dot: 'bad', count: log.filter(l => /VERDICT: ISOLATE/.test(l.text)).length },
+                    { label: 'Quorum requests',  dot: '',    count: log.filter(l => /Quorum vote requested/.test(l.text)).length },
+                  ].map(r => (
+                    <div className="system-summary-row" key={r.label}>
+                      <span className={`summary-dot ${r.dot}`} />
+                      <span className="system-summary-label">{r.label}</span>
+                      <span className={`system-summary-val ${r.dot}`}>{r.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div style={{ padding: 20, fontSize: 12, color: 'var(--tx-secondary)', lineHeight: 1.7 }}>
+                  Reflects <code style={{ color: 'var(--tx-primary)' }}>kb-aads</code>'s Judge/Jury consensus
+                  round each time a process crosses into BORDERLANDS — Patroller and Hunter votes feed the
+                  Judge's verdict, which either escalates to isolation or returns the process to monitoring.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══ VIEW: Rogue Management ══════════════════════════════════ */}
+        {activeNav === 'Rogue Management' && (
+          <div className="content-grid">
+            <div className="col-left">
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className={`panel-title-dot ${agentsError ? 'red' : 'green'}`} />Live Agent Roster</div>
+                  <span className="panel-tag">{agentsError ? 'unreachable' : `${agents.length} registered`}</span>
+                </div>
+                <div style={{ padding: '4px 20px 8px', fontSize: 11, color: 'var(--tx-secondary)', lineHeight: 1.6 }}>
+                  Raw <code style={{ color: 'var(--tx-primary)' }}>SwarmRegistry</code> status via kbd's{' '}
+                  <code style={{ color: 'var(--tx-primary)' }}>/api/agents</code> proxy. Does not call{' '}
+                  <code style={{ color: 'var(--tx-primary)' }}>JudgeAgent.assess_severity</code> per agent
+                  (its liveness check sleeps per-agent — too slow for a page load), so no computed health tier
+                  is shown here, only registry status/uptime/error_count.
+                </div>
+                {agentsError && (
+                  <div className="empty-state"><ShieldAlert size={22} style={{ color: 'var(--tx-dim)' }} />{agentsError}<br />Start kb-aads (`python3 main.py`) to populate this.</div>
+                )}
+                {!agentsError && (
+                  <div className="health-list">
+                    {agents.length === 0 && <div className="empty-state">No agents registered</div>}
+                    {agents.map(a => (
+                      <div key={a.agent_id} className="health-item">
+                        <div className="health-left">
+                          <div className="health-name">{a.agent_id}</div>
+                          <div className="health-desc">{a.role} · uptime {a.uptime} · errors {a.error_count}</div>
+                        </div>
+                        <span className={`health-badge ${a.registry_status === 'active' ? 'ok' : 'offline'}`}>{a.registry_status?.toUpperCase()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="col-right">
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot yellow" />Health Ladder (reference)</div>
+                </div>
+                <div className="health-list">
+                  {[
+                    { name: 'healthy',   desc: 'Normal error-count and liveness window',      status: 'ok' },
+                    { name: 'restart',   desc: 'Elevated error_count — stop then re-start()',  status: 'warn' },
+                    { name: 'terminate', desc: 'ray.kill + unregister — last resort',           status: 'offline' },
+                  ].map(t => (
+                    <div key={t.name} className="health-item">
+                      <div className="health-left">
+                        <div className="health-name">{t.name}</div>
+                        <div className="health-desc">{t.desc}</div>
+                      </div>
+                      <span className={`health-badge ${t.status}`}>TIER</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ padding: 16, fontSize: 11, color: 'var(--tx-dim)', borderTop: '1px solid var(--border)' }}>
+                  These tiers are computed by `enforce_verdict`, not shown live above — see panel note.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══ VIEW: Settings ══════════════════════════════════════════ */}
+        {activeNav === 'Settings' && (
+          <div className="content-grid">
+            <div className="col-left">
+              <div className="panel" style={{ flexShrink: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className="panel-title-dot" />Connection</div>
+                </div>
+                <div className="health-list">
+                  <div className="health-item">
+                    <div className="health-left"><div className="health-name">Data source</div><div className="health-desc">{API_BASE}</div></div>
+                    <span
+                      className={`live-indicator ${simulated ? 'sim' : 'live'}`}
+                      onClick={() => { setSimulated(!simulated); addLog(`[CONSOLE] Backend mode toggled → ${simulated ? 'LIVE' : 'SIMULATION'}`, 'info'); }}
+                    >
+                      {simulated ? <WifiOff size={11} /> : <Wifi size={11} />}
+                      <span className="live-dot" />
+                      {simulated ? 'SIMULATION' : 'LIVE FEED'}
+                    </span>
+                  </div>
+                  <div className="health-item">
+                    <div className="health-left"><div className="health-name">Operator role</div><div className="health-desc">Fixed for this build — no RBAC yet</div></div>
+                    <span className="health-badge ok">OPERATOR</span>
+                  </div>
+                  <div className="health-item">
+                    <div className="health-left"><div className="health-name">Codename</div><div className="health-desc">Build identifier</div></div>
+                    <span className="health-badge ok">KRYO</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="panel" style={{ flexShrink: 0 }}>
+                <div className="panel-head">
+                  <div className="panel-title"><span className={`panel-title-dot ${policyError ? 'red' : 'green'}`} />Policy Configuration</div>
+                  <span className="panel-tag">{policyError ? 'unreachable' : 'live from kbd'}</span>
+                </div>
+                {policyError && <div className="empty-state">{policyError}</div>}
+                {!policyError && policyInfo && (
+                  <div className="health-list">
+                    <div className="health-item">
+                      <div className="health-left"><div className="health-name">Suspicious threshold</div><div className="health-desc">defaults.suspicious — informational only, see policy.go</div></div>
+                      <span className="proc-pid">{policyInfo.suspicious_threshold}</span>
+                    </div>
+                    <div className="health-item">
+                      <div className="health-left"><div className="health-name">Borderlands threshold</div><div className="health-desc">defaults.borderlands — informational only</div></div>
+                      <span className="proc-pid">{policyInfo.borderlands_threshold}</span>
+                    </div>
+                    <div className="health-item">
+                      <div className="health-left"><div className="health-name">Sensitive paths (operator-added)</div><div className="health-desc">{policyInfo.policy_path}</div></div>
+                      <span className="proc-pid">{policyInfo.sensitive_paths_count}</span>
+                    </div>
+                  </div>
+                )}
+                <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12, borderTop: '1px solid var(--border)' }}>
+                  <button className="act-btn restore" onClick={reloadPolicy}><RefreshCw size={10} />Reload from disk</button>
+                  {reloadStatus && <span style={{ fontSize: 11, color: 'var(--tx-secondary)' }}>{reloadStatus}</span>}
+                </div>
+              </div>
+            </div>
+            <div className="col-right">
+              <div className="panel" style={{ flex: 1, minHeight: 0 }}>
+                <div style={{ padding: 20, fontSize: 12, color: 'var(--tx-secondary)', lineHeight: 1.7 }}>
+                  Reload calls kbd's <code style={{ color: 'var(--tx-primary)' }}>POST /api/policy/reload</code>,
+                  the HTTP-facing equivalent of the existing <code style={{ color: 'var(--tx-primary)' }}>ReloadPolicy</code> gRPC
+                  RPC — it re-reads <code style={{ color: 'var(--tx-primary)' }}>policy.yaml</code> from the path
+                  kbd was started with and swaps it in atomically. No other settings are persisted or
+                  configurable yet — alert thresholds, theme, and notification routing remain unbuilt.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ══ VIEW: Console ═══════════════════════════════════════════ */}
         {activeNav === 'Console' && (
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, flex: 1, minHeight: 0 }}>
+            <div className="stat-row" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+              {[
+                { label: 'Total Lines', count: log.length,                                dot: '' },
+                { label: 'Errors',      count: log.filter(l => l.cls === 'err').length,     dot: 'bad' },
+                { label: 'Warnings',    count: log.filter(l => l.cls === 'warn').length,    dot: 'warn' },
+                { label: 'Confirmed OK',count: log.filter(l => l.cls === 'success').length, dot: 'ok' },
+              ].map(s => (
+                <div className="stat-card" key={s.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <span className={`summary-dot ${s.dot}`} />
+                  <div>
+                    <div className="stat-label">{s.label}</div>
+                    <div className="stat-value" style={{ fontSize: 20 }}>{s.count}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
             <div className="panel" style={{ flex: 1, minHeight: 0 }}>
               <div className="panel-head">
                 <div className="panel-title"><span className="panel-title-dot" />Audit Console — Full Feed</div>

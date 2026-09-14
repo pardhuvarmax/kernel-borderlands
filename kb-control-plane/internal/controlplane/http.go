@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -48,6 +49,9 @@ func (cp *ControlPlane) StartHTTPServer(addr string) error {
 	mux.HandleFunc("/api/restore", server.requireAPIToken(server.handleRestore))
 	mux.HandleFunc("/api/events", server.handleEvents)
 	mux.HandleFunc("/api/metrics", server.handleMetrics)
+	mux.HandleFunc("/api/agents", server.handleAgents)
+	mux.HandleFunc("/api/policy", server.handlePolicy)
+	mux.HandleFunc("/api/policy/reload", server.requireAPIToken(server.handlePolicyReload))
 
 	log.Printf("[KB] HTTP API and SSE server listening on %s", addr)
 	return http.ListenAndServe(addr, server.corsHandler(mux))
@@ -320,6 +324,81 @@ func (s *HTTPServer) handleAuditVerify(w http.ResponseWriter, r *http.Request) {
 		resp["error"] = err.Error()
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// aadsStatusAddr returns kb-aads's read-only agent status server address
+// (kb-aads/api/status_server.py), overridable via KB_AADS_API_ADDR for
+// dev boxes running multiple swarms. Defaults to the port that server's
+// own default (KB_AADS_STATUS_PORT=8601) listens on.
+func aadsStatusAddr() string {
+	if v := os.Getenv("KB_AADS_API_ADDR"); v != "" {
+		return v
+	}
+	return "http://127.0.0.1:8601"
+}
+
+// handleAgents proxies kb-aads's SwarmRegistry contents (agent_id, role,
+// registry status, uptime, error_count) to the dashboard's Rogue
+// Management page. Added alongside kb-aads/api/status_server.py — before
+// this, kbd had no channel into the Ray process at all (kb-aads only
+// ever dials OUT to kbd over gRPC). A short client timeout keeps this
+// from hanging the dashboard when the swarm isn't running, which is a
+// routine dev-time state, not an error worth logging loudly.
+func (s *HTTPServer) handleAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(aadsStatusAddr() + "/agents")
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "AADS swarm status server unreachable — is main.py running?",
+		})
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+// handlePolicy returns the currently-loaded policy.yaml's parsed
+// defaults, for display only (see policy.Engine's DefaultSuspiciousThreshold/
+// DefaultBorderlandsThreshold doc comment — these are not consulted by
+// Go's own enforcement logic today).
+func (s *HTTPServer) handlePolicy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.cp.policyMu.RLock()
+	resp := map[string]any{
+		"suspicious_threshold":  s.cp.policy.DefaultSuspiciousThreshold(),
+		"borderlands_threshold": s.cp.policy.DefaultBorderlandsThreshold(),
+		"sensitive_paths_count": len(s.cp.policy.SensitivePaths()),
+		"policy_path":           s.cp.policyPath,
+	}
+	s.cp.policyMu.RUnlock()
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handlePolicyReload re-reads policy.yaml from disk — the HTTP-facing
+// equivalent of the existing ReloadPolicy gRPC RPC (grpc.go), added so
+// the dashboard's Settings page can trigger it without a gRPC client.
+// Gated behind requireAPIToken like isolate/restore: it's a state change,
+// not a passive read.
+func (s *HTTPServer) handlePolicyReload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ok, msg, err := s.cp.reloadPolicyFromDisk()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": ok, "message": msg})
 }
 
 // System environment helpers for real service checks

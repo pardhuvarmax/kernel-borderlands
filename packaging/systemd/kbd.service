@@ -1,0 +1,38 @@
+[Unit]
+Description=Kernel Borderlands Go Control Plane Daemon
+Before=kb-checker.service
+DefaultDependencies=no
+After=local-fs.target
+
+[Service]
+Type=notify
+# Corrected from docs/architecture/boot_sequence_spec.md's `--config
+# /etc/kb/config.yaml` — kbd (kb-control-plane/cmd/kbd/main.go) has no
+# --config flag; it takes --db/--policy/--rules/--workloads separately.
+# Pointed at /etc/kb/ so the provisioning story matches kb-checker's own
+# real /etc/kb usage (kb-checker/src/integrity/mod.rs:21).
+ExecStart=/usr/local/bin/kbd --db /var/lib/kbd/state.db --policy /etc/kb/policy.yaml --rules /etc/kb/rules.yaml --workloads /etc/kb/workloads.yaml
+Restart=always
+RestartSec=3
+RuntimeDirectory=kb
+RuntimeDirectoryMode=0775
+# Found by actually booting this unit in a container (not just
+# systemd-analyze verify, which never runs ExecStart) — without this, kbd
+# crash-loops immediately: "unable to open database file: no such file or
+# directory", because /var/lib/kbd/ never gets created by anything.
+# StateDirectory= is systemd's answer to exactly this — same mechanism as
+# RuntimeDirectory=kb above for /run/kb, but persistent across reboots
+# and owned by root here since no User= is set on this unit.
+StateDirectory=kbd
+
+# Conservative hardening only (no CapabilityBoundingSet=/ProtectSystem=strict
+# — see kb-checker.service below for why): kbd is the Go control plane, no
+# BPF/LSM loading, no capability-dropping code exists in it today, so this
+# stays limited to directives that are universally safe regardless.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

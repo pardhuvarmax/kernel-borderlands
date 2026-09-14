@@ -20,11 +20,14 @@ The Kernel Borderlands system relies on Unix Domain Sockets (UDS) located in the
 
 ## 2. Boot Timeline Sequence
 
+**Corrected** — the previous version of this diagram had `KBD` itself loading the eBPF hooks, before its own readiness notification. Both were wrong: `kbd_sensor` is a separate process, running as its own unit (`kb-sensor.service`) that systemd cannot even start until *after* `KBD`'s readiness notification (`Requires=kbd.service`) — confirmed by actually booting these units in a container, not just read from source.
+
 ```mermaid
 sequenceDiagram
     autonumber
     participant Systemd as Linux Boot / Systemd
     participant KBD as Go Control Plane (kbd)
+    participant Sensor as eBPF Sensor (kbd_sensor)
     participant Kernel as eBPF Kernel Hooks
     participant KBC as Rust Safety Daemon (kb-checker)
     participant AADS as Ray Swarm / AADS Node
@@ -33,12 +36,18 @@ sequenceDiagram
     Systemd->>KBD: Start kbd.service
     activate KBD
     KBD->>KBD: Create /run/kb/kbd.sock, kbct.sock & kba.sock
-    KBD->>Kernel: Load & attach unified eBPF sensors (kbd_sensor)
-    activate Kernel
     KBD-->>Systemd: Notify readiness (sd_notify)
     deactivate KBD
 
-    Note over Systemd, AADS: Phase 2: Safety Layer Activation
+    Note over Systemd, AADS: Phase 1b: eBPF Sensor Boot (kb-sensor.service, Requires=kbd.service)
+    Systemd->>Sensor: Start kb-sensor.service
+    activate Sensor
+    Sensor->>Kernel: Load & attach unified eBPF sensors
+    activate Kernel
+    Sensor->>KBD: Connect to kbd.sock/kbct.sock as client
+    deactivate Sensor
+
+    Note over Systemd, AADS: Phase 2: Safety Layer Activation (kb-checker.service, Requires=kbd.service AND kb-sensor.service)
     Systemd->>KBC: Start kb-checker.service
     activate KBC
     KBC->>KBC: Create /run/kb/kbc.sock & lock kb-checker.pid
@@ -58,11 +67,11 @@ sequenceDiagram
 ### Phase 1: Core Control Plane Boot
 1. **Service Launch**: Systemd starts the Go control plane daemon (`kbd.service`).
 2. **Socket Setup**: `kbd` creates the `/run/kb/` directory (if not present) and binds the `kbd.sock`, `kbct.sock`, and `kba.sock` UNIX domain sockets.
-3. **eBPF Loading**: `kbd` invokes `kb-core-loader` to compile, load, and attach `kbd_sensor.bpf.c` tracepoints and LSM hooks to the kernel.
-4. **Readiness Signal**: `kbd` sends a readiness notification (`sd_notify`) back to Systemd, indicating that the IPC sockets are fully open and ready.
+3. **Readiness Signal**: `kbd` sends a readiness notification (`sd_notify`) back to Systemd, indicating that the IPC sockets are fully open and ready.
+4. **eBPF Loading**: **Corrected, and reordered** — this step previously came *before* the readiness signal above and was attributed to `kbd` itself ("`kbd` invokes `kb-core-loader`..."). Both were wrong: `kbd_sensor` (`kb-sensor.service` — see [`packaging/systemd/kb-sensor.service`](../../packaging/systemd/kb-sensor.service)) is a fully independent C process that systemd cannot even start until *after* step 3 (`kb-sensor.service`'s `Requires=kbd.service`) — confirmed by actually booting these units in a container. Once started, `kbd_sensor` compiles, loads, and attaches its own tracepoints and LSM hooks to the kernel; `kbd` never `exec`s or loads it.
 
 ### Phase 2: Safety Layer Activation
-1. **Safety Launch**: Systemd starts the Rust Safety Daemon (`kb-checker.service`). This service is configured to run strictly `After=kbd.service`.
+1. **Safety Launch**: Systemd starts the Rust Safety Daemon (`kb-checker.service`). This service is configured to run strictly `After=kbd.service kb-sensor.service` (**corrected** — previously listed as depending on `kbd.service` alone; it also `Requires=kb-sensor.service` now, since auditing the sensor's bytecode/liveness is meaningless before the sensor has loaded).
 2. **Single-Instance Protection**: `kb-checker` acquires an exclusive POSIX `flock` on `/run/kb/kb-checker.pid`. If blocked, the service aborts.
 3. **Diagnostic Socket binding**: `kb-checker` binds `/run/kb/kbc.sock` to expose the diagnostic endpoint.
 4. **Initial Verification**: `kb-checker` executes immediate blocking checks for:
@@ -92,11 +101,12 @@ sequenceDiagram
 *   **`T+4.50s` — Phase 1: Go Control Plane (`kbd.service`) Spawns**:
     *   Systemd starts the Go Control Plane daemon (`kbd`).
     *   `kbd` creates the `/run/kb/` directory and binds `/run/kb/kbd.sock` (telemetry loop, sensor → Go), `/run/kb/kbct.sock` (control push channel, Go → sensor), and `/run/kb/kba.sock` (client gRPC gateway).
-*   **`T+5.00s` — eBPF Hook Deployment**:
-    *   `kbd` compiles and loads `kbd_sensor.bpf.o` into kernel memory.
-    *   LSM file open hooks (`lsm/file_open`) and process event tracepoints (`tp/sched/sched_process_exec`, `tp/sched/sched_process_exit`) attach to their respective kernel probes.
-*   **`T+5.50s` — Readiness Notification**:
+*   **`T+5.00s` — Readiness Notification**:
     *   `kbd` verifies its local sockets are listening and sends a `ready` signal (`sd_notify`) back to systemd.
+*   **`T+5.50s` — eBPF Hook Deployment (`kb-sensor.service` spawns)**:
+    *   **Corrected, and reordered**: earlier revisions placed this step *before* the readiness notification and attributed it to `kbd` itself. Both were wrong: `kbd_sensor` is a separate process running as its own unit (`kb-sensor.service`, `After=kbd.service`/`Requires=kbd.service` — see [`packaging/systemd/kb-sensor.service`](../../packaging/systemd/kb-sensor.service)), so systemd cannot even start it until *after* `kbd`'s `T+5.00s` readiness signal above — confirmed by actually booting these units in a container: with `kbd` stuck pre-ready, `kb-sensor.service` sat in "Dependency failed," never attempted.
+    *   Once started, `kbd_sensor` compiles and loads `kbd_sensor.bpf.o` into kernel memory.
+    *   LSM file open hooks (`lsm/file_open`) and process event tracepoints (`tp/sched/sched_process_exec`, `tp/sched/sched_process_exit`) attach to their respective kernel probes.
 *   **`T+6.00s` — Phase 2: Safety Watchdog (`kb-checker.service`) Spawns**:
     *   Having received the readiness notification from `kbd`, systemd spawns `kb-checker`.
 *   **`T+6.10s` — PID Lock & Socket Binding**:
@@ -123,7 +133,25 @@ sequenceDiagram
 
 ## 3. Production Systemd Service Unit Files
 
-These unit files define the exact dependencies required to establish the boot sequence:
+These unit files define the exact dependencies required to establish the boot sequence.
+
+**The real, installable copies of every unit file below now live in
+[`packaging/systemd/`](../../packaging/systemd/), with two corrections made
+there but not retrofitted into the historical text below**: `kbd.service`'s
+`ExecStart` uses `kbd`'s real flags (`--db`/`--policy`/`--rules`/
+`--workloads`) instead of the `--config` flag shown here, which does not
+exist in `kb-control-plane/cmd/kbd/main.go`; and a new unit,
+`kb-sensor.service` (`After=kbd.service`, `Requires=kbd.service`), was added
+for `kbd_sensor` itself — this document's own narrative below already
+assumed that unit existed (§5 Scenario A refers to stopping
+"`kb-sensor.service`") without ever defining it, because `kbd_sensor` (C,
+eBPF) and `kbd` (Go) are two fully independent OS processes, not one
+supervising the other (`kbd` binds `kbd.sock` first; `kbd_sensor` connects to
+it as a client — see `kb-control-plane/internal/ipc/listener.go:134` and
+`kb-core/userspace/bridge/kb_bridge.c:83`). `kb-checker.service`'s dependency
+line was updated accordingly to also require `kb-sensor.service`. See
+[`packaging/README.md`](../../packaging/README.md) for the full real/
+aspirational breakdown and install steps.
 
 ### `/etc/systemd/system/kbd.service`
 ```ini
@@ -383,8 +411,8 @@ tracked there, not here.
 ## 4. Race Conditions & Fail-Safe Paths
 
 ### eBPF Hook Loading Failure
-* **Scenario**: The kernel lacks LSM support or `kbd` fails to attach `kbd_sensor`.
-* **Behavior**: `kbd.service` fails to send the readiness signal to Systemd and terminates. `kb-checker.service` (which requires `kbd.service`) will not start, preventing the node from registering as functional.
+* **Scenario**: The kernel lacks LSM support, or `kbd_sensor` (`kb-sensor.service`) fails to load/attach its eBPF hooks.
+* **Behavior**: **Corrected** — previously described as `kbd` itself failing to attach the sensor and failing its own readiness signal; that's not how the two processes' dependency actually works. `kb-sensor.service` fails and, with `Restart=always`, enters a restart loop — this does **not** affect `kbd.service`, which has no dependency on the sensor and stays up regardless. What it does block: `kb-checker.service` (`Requires=kbd.service kb-sensor.service`) never starts, and therefore `kbagents.service` (`Requires=kb-checker.service`) never starts either. Net effect: the node ends up in a control-plane-only state — `kbd` reachable, safety watchdog and AADS swarm both offline — not the full-node failure this section previously implied.
 
 ### UDS Socket Connection Loss
 * **Scenario**: `kbd` is restarted, temporarily deleting `/run/kb/kba.sock`.

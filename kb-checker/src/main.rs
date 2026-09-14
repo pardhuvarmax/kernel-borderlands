@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use clap::{Parser, Subcommand};
 use tokio::time::sleep;
 
@@ -13,6 +13,42 @@ use kb_checker::grpc::{start_grpc_server, CheckerState};
 
 const CONTROL_PLANE_UDS: &str = "/run/kb/kba.sock";
 const PID_PATH: &str = "/run/kb/kb-checker.pid";
+
+// Found by actually booting the real systemd unit chain in a container:
+// every one of the 6 audit tasks below runs its FIRST check at T+0 with no
+// warm-up, and any single failure — even a completely expected transient
+// one, like the containment map not being pinned in the kernel yet a few
+// hundred milliseconds after kb-sensor.service reports "hooks attached,"
+// or the AADS/Ray swarm simply not being up yet during an ordinary cold
+// boot — immediately fired the exact same 3-layer Lockdown Protocol
+// (kill kbd_sensor, detach eBPF links, iptables-quarantine the host)
+// reserved for genuine tampering. This happened on every single boot in
+// testing, with nothing actually wrong. STARTUP_GRACE_PERIOD suppresses
+// escalation to trigger_auto_recovery (NOT the check itself, which still
+// runs and still logs failures) for this long after the daemon starts —
+// purely an in-memory Instant comparison, no persistent state, no
+// network, so it doesn't touch kb-checker's KISS/no-state/no-network
+// design invariant (see kb-checker/README.md). 15s is chosen to clear
+// kb-sensor's map-pinning window with margin; genuine tampering that
+// starts within the first 15s of a cold boot is a real, accepted
+// trade-off against guaranteed self-lockout on every normal boot.
+const STARTUP_GRACE_PERIOD: Duration = Duration::from_secs(15);
+
+/// Gates trigger_auto_recovery behind STARTUP_GRACE_PERIOD — see its doc
+/// comment above. The failure itself is still recorded via update_state
+/// (called by every task's caller before this), only the escalation is
+/// suppressed during warm-up.
+async fn maybe_trigger_recovery(daemon_start: Instant, reason: &str, is_integrity_violation: bool) {
+    if daemon_start.elapsed() < STARTUP_GRACE_PERIOD {
+        println!(
+            "[RECOVERY] Suppressing escalation during startup grace period ({:.1}s remaining) — reason: {}",
+            (STARTUP_GRACE_PERIOD - daemon_start.elapsed()).as_secs_f32(),
+            reason
+        );
+        return;
+    }
+    trigger_auto_recovery(reason, is_integrity_violation).await;
+}
 
 #[derive(Parser)]
 #[command(name = "kb-checker")]
@@ -122,6 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 println!("[DAEMON] Starting kb-checker Safety Daemon validation loops...");
+                let daemon_start = Instant::now();
 
                 // Start optional gRPC server if socket path is provided
                 if let Some(ref socket_path) = grpc_socket {
@@ -150,7 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         };
                         if let Some(reason) = err_str {
-                            trigger_auto_recovery(&reason, true).await;
+                            maybe_trigger_recovery(daemon_start, &reason, true).await;
                         }
                         sleep(Duration::from_secs(60)).await;
                     }
@@ -172,7 +209,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         };
                         if let Some(reason) = err_str {
-                            trigger_auto_recovery(&reason, false).await;
+                            maybe_trigger_recovery(daemon_start, &reason, false).await;
                         }
                         sleep(Duration::from_secs(5)).await;
                     }
@@ -194,7 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         };
                         if let Some(reason) = err_str {
-                            trigger_auto_recovery(&reason, false).await;
+                            maybe_trigger_recovery(daemon_start, &reason, false).await;
                         }
                         sleep(Duration::from_secs(30)).await;
                     }
@@ -216,7 +253,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         };
                         if let Some(reason) = err_str {
-                            trigger_auto_recovery(&reason, true).await; // Critical Hook Bypass!
+                            maybe_trigger_recovery(daemon_start, &reason, true).await; // Critical Hook Bypass!
                         }
                         sleep(Duration::from_secs(60)).await;
                     }
@@ -238,7 +275,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         };
                         if let Some(reason) = err_str {
-                            trigger_auto_recovery(&reason, true).await; // Critical Map Tampering!
+                            maybe_trigger_recovery(daemon_start, &reason, true).await; // Critical Map Tampering!
                         }
                         sleep(Duration::from_secs(60)).await;
                     }
@@ -260,7 +297,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         };
                         if let Some(reason) = err_str {
-                            trigger_auto_recovery(&reason, false).await; // Latency Warning Alert
+                            maybe_trigger_recovery(daemon_start, &reason, false).await; // Latency Warning Alert
                         }
                         sleep(Duration::from_secs(60)).await;
                     }
