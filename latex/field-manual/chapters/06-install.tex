@@ -64,7 +64,7 @@ install that live in \file{/etc/systemd/system} are retired by the same step, so
 \begin{kbnote}[WHY THE OPERATOR ACCOUNT HAS A REAL SHELL]
 OpenSSH runs a \texttt{ForceCommand} as \texttt{\$SHELL -c ...}, and a \texttt{nologin} shell refuses it (``This account is
 currently not available''). \file{provision.sh} therefore creates \texttt{operator} with \file{/bin/sh}, and the migration step switches
-an existing \texttt{operator} that has a \texttt{nologin} or \texttt{false} shell. The account stays locked down by the operator
+an existing \texttt{operator} that has a \texttt{nologin} or \texttt{false} shell. It also sets the account's shadow password to \texttt{*}: \texttt{useradd} leaves it as \texttt{!} (locked), and OpenSSH without PAM refuses a locked account even for key logins. The account stays locked down by the operator
 \cmd{sshd} config: key-only, the wrapper forced, no forwarding, no password. Chapter~\ref{ch:ssh} has the one-command check.
 \end{kbnote}
 

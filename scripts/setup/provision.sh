@@ -32,7 +32,13 @@ if ! getent passwd operator >/dev/null 2>&1; then
     # nologin shell refuses ("This account is currently not available"). The account stays
     # locked down by the operator sshd config: key-only, ForceCommand wrapper, no forwarding,
     # no password.
-    useradd --system --no-create-home --shell /bin/sh --gid kb operator
+    # Home is / (not /home/operator): the account has no home, sshd chdirs to it on every login
+    # and warns "Could not chdir to home directory" because the unit hides /home (ProtectHome).
+    useradd --system --no-create-home --home-dir / --shell /bin/sh --gid kb operator
+    # useradd leaves the shadow password as "!" (locked). With UsePAM no (our standalone sshd
+    # config) OpenSSH refuses a locked account even for public-key logins ("User operator not
+    # allowed because account is locked"). "*" = no usable password, but not locked.
+    usermod -p '*' operator
     echo "created user: operator (member of kb)"
 else
     echo "user operator already exists, skipping"

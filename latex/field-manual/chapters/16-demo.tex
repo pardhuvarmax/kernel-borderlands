@@ -75,7 +75,7 @@ sessions could \textbf{not} verify (no root); do not skip them before a demonstr
 \midrule
 \chk & \texttt{sudo kbctl ssh add-key \textasciitilde/.ssh/id\_ed25519.pub} & ``key authorized for operator''\\
 \chk & \texttt{kbctl ssh status; echo \$?} & active, listening, exit 0 (no \texttt{Address already in use} in \texttt{journalctl -u sshd@kb-operator})\\
-\chk \kbstar{} & \texttt{kbctl ssh connect} & the TUI appears. \textbf{(ForceCommand with the \texttt{/bin/sh} shell is untested)} If refused: Section~\ref{sec:nologin}\\
+\chk \kbstar{} & \texttt{kbctl ssh connect} & the TUI appears. \textbf{(verified on the Ubuntu VM; confirm on your host)} If refused: Section~\ref{sec:nologin}\\
 \chk & in the TUI: \texttt{Tab} through four tabs, \texttt{q} & clean exit, shell returns\\
 \chk & \texttt{ssh -p 2222 operator@HOST id} from another machine & does \textbf{not} run \texttt{id}; shows the TUI (ForceCommand wins)\\
 \chk & \texttt{ssh -p 2222 -L 9999:127.0.0.1:8080 operator@HOST} & forwarding refused (\texttt{AllowTcpForwarding no})\\

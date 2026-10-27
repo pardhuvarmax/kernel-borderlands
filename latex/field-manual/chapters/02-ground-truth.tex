@@ -13,7 +13,7 @@ removed by systemd when \cmd{kbd} stops.
 \midrule
 \file{kbd.sock} & \texttt{kbd\_sensor} $\to$ \cmd{kbd} & packed structs & Telemetry only, one direction.\\
 \file{kbct.sock} & \cmd{kbd} $\to$ \texttt{kbd\_sensor} & packed structs & Containment and sensitive-path pushes. Split from \file{kbd.sock} so a telemetry burst cannot stall containment.\\
-\file{kba.sock} & clients $\to$ \cmd{kbd} & gRPC & Enforcement IPC used by \cmd{kbctl}, \cmd{kbopd}, \cmd{mcp-server}, \cmd{kb-aads}.\\
+\file{kba.sock} & clients $\to$ \cmd{kbd} & gRPC, \texttt{root:kb} 0660 & Enforcement IPC. Group \texttt{kb} so the \texttt{operator} SSH account and \texttt{kb} members can use it (\unit{kbd.service} runs \texttt{chgrp kb} after start); this is full control-plane access. Used by \cmd{kbctl}, \cmd{kbopd}, \cmd{mcp-server}, \cmd{kb-aads}.\\
 \file{kbc.sock} & \cmd{kb-checker} diagnostics & gRPC & Watchdog diagnostics (unused while the checker is down).\\
 \bottomrule
 \end{tabularx}

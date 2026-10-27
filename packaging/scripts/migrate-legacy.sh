@@ -17,6 +17,9 @@
 #    switched to /bin/sh (the operator sshd config already forces the wrapper, is
 #    key-only and forbids forwarding).
 #
+# (The operator account is also unlocked, shadow '!' -> '*': sshd without PAM refuses a locked
+#    account even for public-key logins.)
+#
 # 3. Legacy dev install. The old install put the operator sshd config in
 #    /etc/ssh/sshd_config.d/ (the HOST's sshd includes that directory, bound port 2222
 #    itself, and sshd@kb-operator died with "Address already in use") and units in
@@ -67,6 +70,26 @@ if [ -z "$R" ] && command -v getent >/dev/null 2>&1; then
     esac
 fi
 
+# A locked account (shadow "!") is refused by sshd without PAM even for key logins; "*" means
+# no usable password but not locked. Real hosts only (reading shadow needs root).
+if [ -z "$R" ] && command -v getent >/dev/null 2>&1; then
+    op_pw=$(getent shadow operator 2>/dev/null | cut -d: -f2)
+    case "$op_pw" in
+        '!'*)
+            if usermod -p '*' operator 2>/dev/null; then
+                echo "kb: operator account was locked (shadow '!'); set to '*' so sshd accepts key logins"
+            fi ;;
+    esac
+fi
+
+# Home dir /home/operator does not exist (and the unit hides /home): sshd warned on every login.
+if [ -z "$R" ] && command -v getent >/dev/null 2>&1; then
+    op_home=$(getent passwd operator | cut -d: -f6)
+    if [ -n "$op_home" ] && [ "$op_home" != / ] && [ ! -d "$op_home" ]; then
+        usermod -d / operator 2>/dev/null && echo "kb: operator home $op_home (missing) -> /"
+    fi
+fi
+
 # ---- 3. legacy dev install -------------------------------------------------------
 if [ -f "$OLD_CONF" ]; then
     mkdir -p "$R/etc/kb"
@@ -83,7 +106,8 @@ for u in kbd kb-sensor kb-checker kbopd kbagents sshd@kb-operator; do
         mv -f "$f" "$f.pre-migration"
         echo "kb: legacy dev unit $u.service moved aside ($f.pre-migration); the packaged unit now applies"
         changed=1
-        if [ "$u" != sshd@kb-operator ]; then need_restart="$need_restart $u.service"; fi
+        # sshd@kb-operator is restarted below; kb-checker is deliberately left down
+        case "$u" in sshd@kb-operator|kb-checker) ;; *) need_restart="$need_restart $u.service" ;; esac
     fi
 done
 

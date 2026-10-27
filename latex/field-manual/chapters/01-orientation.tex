@@ -129,10 +129,10 @@ Unit files rewritten to \file{/usr/bin} & Verified & \texttt{grep ExecStart} on 
 SSH TUI path (wrapper, PTY, tabs, quit) & Verified & Unprivileged \cmd{sshd} with the packaged wrapper; exit status 0.\\
 Offline banner when \cmd{kbd} is down & Verified & \texttt{[OFFLINE]} and \texttt{[DEMO DATA]} rendered in the TUI.\\
 \cmd{kbagents} launcher and \cmd{kb-aads} swarm (Ubuntu) & Verified & Ran on the VM with its venv: status server up, nine agents active, 0 errors, checkpoint loaded. Not run under \cmd{systemd}.\\
-\texttt{apt install} / \texttt{pacman -U} on a live host & \textbf{Not tested} & No root in the build session.\\
-Units booting under real \cmd{systemd}, eBPF sensor under the package & \textbf{Not tested} & Needs root and a BPF-LSM kernel.\\
-\cmd{kbd} HTTP + CORS for the packaged dashboard & \textbf{Source-verified only} & \cmd{kbd} needs a writable \file{/run/kb}.\\
-\texttt{operator} account with a \texttt{/bin/sh} shell and \texttt{ForceCommand} (replaces the \texttt{nologin} default) & \textbf{Not tested} & Fix made on the known OpenSSH behaviour; see Chapter~\ref{ch:ssh}.\\
+\texttt{apt install} of the \texttt{.deb} on the Ubuntu 24.04 VM & Verified & Installed over a live dev install: user/shell, token file (640 \texttt{root:kb}), legacy conf and units migrated, \cmd{kb-checker} left stopped and disabled. \texttt{pacman -U} on Arch: \textbf{not tested}.\\
+Units under real \cmd{systemd}, eBPF sensor under the package (Ubuntu VM) & Verified & \cmd{kbctl up}: \cmd{kbd}, sensor, \cmd{kbopd}, operator \cmd{sshd} active; sensor logging events, behavior-engine and zone transitions recorded, audit chain intact (1701 entries). Reboot persistence: \textbf{not tested}.\\
+\cmd{kbd} HTTP, CORS and API token on the VM & Verified & Dashboard origin allowed, foreign origin not; \texttt{policy/reload} gave 401 (no token), 401 (wrong), 200 (right).\\
+\texttt{operator} account with a \texttt{/bin/sh} shell and \texttt{ForceCommand} (replaces the \texttt{nologin} default) & Verified & On the Ubuntu VM: publickey accepted, TUI rendered with a live link to \cmd{kbd} (no \texttt{[OFFLINE]}), session audit callback reached \cmd{kbd}, clean exit. Three bugs were found and fixed on the way (sshd capabilities, locked account, \texttt{kba.sock} group). Final run: 34 of 34 checks passed. See Chapter~\ref{ch:ssh}.\\
 Dashboard action buttons with the runtime token & \textbf{Not tested in a browser} & Build, served bundle, fragment parsing and \cmd{kbctl} hand-off tested; see Chapter~\ref{ch:dash}.\\
 \bottomrule
 \end{tabularx}

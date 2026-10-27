@@ -23,6 +23,11 @@ Environment=KB_HTTP_CORS_ORIGIN=http://127.0.0.1:8082,http://localhost:8082
 # install by migrate-legacy.sh into /etc/kb/api.env (KB_HTTP_API_TOKEN=..., root:kb 0640).
 # The leading '-' keeps kbd startable without it (the routes then fail closed).
 EnvironmentFile=-/etc/kb/api.env
+# kbd creates kba.sock as root:root 0660, so the `operator` account (group kb) could not
+# reach it: the SSH TUI showed [OFFLINE] and the audit callback failed (found on a real
+# host). Give ONLY the gRPC socket to group kb once kbd has signalled ready (Type=notify, so
+# the socket exists). kbd.sock/kbct.sock stay root-only. '-' tolerates a missing kb group.
+ExecStartPost=-/usr/bin/chgrp kb /run/kb/kba.sock
 ExecStart=/usr/local/bin/kbd --db /var/lib/kbd/state.db --policy /etc/kb/policy.yaml --rules /etc/kb/rules.yaml --workloads /etc/kb/workloads.yaml
 Restart=always
 RestartSec=3

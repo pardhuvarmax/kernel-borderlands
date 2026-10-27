@@ -14,12 +14,19 @@ RestartSec=5
 RuntimeDirectory=sshd
 RuntimeDirectoryMode=0755
 
-# Full hardening — this is the system's real, battle-tested sshd binary,
-# not application code owned by this repo, so unlike kbd/kb-checker above
-# there's no risk of a wrong capability enumeration silently breaking a
-# tampering-response code path. Standard privilege-separation model:
-# sshd itself needs CAP_NET_BIND_SERVICE-equivalent only if Port <1024
-# (2222 is not), so this can be locked down fully.
+# Hardening, but NOT an empty capability set. The earlier "lock it down fully"
+# (CapabilityBoundingSet= empty) was wrong: found on a real host once the port-2222
+# conflict stopped hiding it, every connection died pre-auth with
+#   sshd: fatal: chroot("/run/sshd"): Operation not permitted [preauth]
+# because sshd's privilege separation chroots and switches users. The bounding set is
+# the minimum for that model, nothing for binding ports (2222 is unprivileged):
+#   CAP_SYS_CHROOT          privsep chroot to /run/sshd
+#   CAP_SETUID CAP_SETGID   drop to the privsep user and to `operator` (incl. initgroups)
+#   CAP_CHOWN               hand the allocated PTY to the user
+#   CAP_KILL                end the session's processes (they run as another uid)
+#   CAP_AUDIT_WRITE         audit record on login when sshd is built with audit support
+# The PID file is disabled in the sshd config (PidFile none) because ProtectSystem=strict
+# makes /run read-only; systemd already tracks the main PID (Type=notify, -D).
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
@@ -28,7 +35,7 @@ ProtectSystem=strict
 
 # Expanded allowed write paths to include the newly mapped runtime space
 ReadWritePaths=/run/kb /run/sshd
-CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_CHOWN CAP_KILL CAP_AUDIT_WRITE
 
 [Install]
 WantedBy=multi-user.target

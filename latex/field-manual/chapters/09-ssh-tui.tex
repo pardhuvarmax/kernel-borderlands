@@ -82,8 +82,7 @@ key-only. Edit \file{/etc/kb/sshd_kb-operator.conf}; it is a protected config fi
 \label{sec:nologin}
 OpenSSH runs a \texttt{ForceCommand} through the account's login shell, which a \texttt{nologin} shell refuses.
 \file{provision.sh} therefore creates \texttt{operator} with \file{/bin/sh}, and the package's migration step fixes an
-existing account that still has \texttt{nologin} or \texttt{false}. This has \textbf{not} been exercised on a live host (no root in
-the build sessions), so run this check once after \cmd{kbctl up}:
+existing account that still has \texttt{nologin} or \texttt{false}. This was verified on the Ubuntu 24.04 VM (key accepted, TUI rendered, live link to \cmd{kbd}); run the same check once on your own host after \cmd{kbctl up}:
 \resetsteps
 \step{Connect}
 \begin{lstlisting}[style=console]

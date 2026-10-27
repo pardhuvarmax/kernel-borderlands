@@ -12,7 +12,7 @@ The Kernel Borderlands system relies on Unix Domain Sockets (UDS) located in the
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `/run/kb/kbd.sock` | `root` | `root` | `0660` | `kbd` (Go Control Plane) | Binary telemetry pipe for eBPF events from `kbd_sensor` to Go. One direction — Go never writes back on this connection. |
 | `/run/kb/kbct.sock` | `root` | `root` | `0660` | `kbd` (Go Control Plane) | Control push channel, Go → `kbd_sensor`: containment commands, sensitive-path pushes. Split from `kbd.sock` so a telemetry-volume burst can never stall or kill containment delivery. |
-| `/run/kb/kba.sock` | `root` | `root` | `0660` | `kbd` (Go Control Plane) | gRPC IPC socket for client registrations and enforcer directives. |
+| `/run/kb/kba.sock` | `root` | `kb` | `0660` | `kbd` (Go Control Plane) | gRPC IPC socket for client registrations and enforcer directives. **Corrected, 2026-10-27**: this row said group `root`, contradicting §3's SSH-console design (the `operator` account, member of group `kb`, must reach this socket); `kbd` creates it `root:root`, so the console showed `[OFFLINE]`. `kbd.service` now runs `chgrp kb /run/kb/kba.sock` after readiness. Members of `kb` therefore have full control-plane access (containment, policy). |
 | `/run/kb/kbc.sock` | `root` | `root` | `0660` | `kb-checker` (Rust) | gRPC IPC socket for health diagnostic reporting to TUIs/CLIs. |
 | `/run/kb/kb-checker.pid` | `root` | `root` | `0600` | `kb-checker` (Rust) | File lock preventing duplicate active safety daemons. |
 
