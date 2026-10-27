@@ -808,6 +808,24 @@ static void populate_protected_exec_paths(struct kbd_sensor_bpf *skel)
         "/usr/local/bin/kbagents",
         "/usr/local/bin/kbopd",
         "/usr/local/bin/kbopt",
+        "/usr/local/bin/kbd_sensor",
+        /* Packaged install (make install-pkg PREFIX=/usr): the .deb and the
+         * Arch package put the binaries in /usr/bin, and /usr/sbin is a
+         * symlink to it on those distros. Without these the exec-path check
+         * would not recognise kbd and the other KB programs on a packaged
+         * host. Keep in step with cpmProtectedExecPaths in
+         * kb-control-plane/internal/enforcement/guard.go. */
+        "/usr/bin/kb-sensor",
+        "/usr/bin/kb-checker",
+        "/usr/bin/kbd",
+        "/usr/bin/kbd_sensor",
+        "/usr/bin/kbagents",
+        "/usr/bin/kbopd",
+        "/usr/bin/kbopt",
+        "/usr/bin/kbctl",
+        "/usr/sbin/kbctl",
+        "/usr/sbin/kbd",
+        "/usr/sbin/kbd_sensor",
     };
     __u8 one = 1;
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
