@@ -51,12 +51,12 @@ stop it by hand or let the package's migration step retire it (Section~\ref{sec:
 \ifarch
 \begin{lstlisting}[style=console]
 $ sha256sum -c SHA256SUMS --ignore-missing
-kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst: OK
+kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst: OK
 \end{lstlisting}
 \else
 \begin{lstlisting}[style=console]
 $ sha256sum -c SHA256SUMS --ignore-missing
-kernel-borderlands_0.1.0_amd64.deb: OK
+kernel-borderlands_1.0.0_amd64.deb: OK
 \end{lstlisting}
 \fi
 \verified
@@ -66,7 +66,7 @@ kernel-borderlands_0.1.0_amd64.deb: OK
 \step{Install the package}
 \ifarch
 \begin{lstlisting}[style=console]
-$ sudo pacman -U kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+$ sudo pacman -U kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst
 \end{lstlisting}
 \notrun\ (not run on Arch; the post-install hook is the same script as on Ubuntu.) Expected tail:
 \begin{lstlisting}[style=console]
@@ -80,11 +80,11 @@ kb: generated the dashboard API token in /etc/kb/api.env
 \end{lstlisting}
 \else
 \begin{lstlisting}[style=console]
-$ sudo apt install ./kernel-borderlands_0.1.0_amd64.deb
+$ sudo apt install ./kernel-borderlands_1.0.0_amd64.deb
 \end{lstlisting}
 \verified\ Expected tail (on a clean host):
 \begin{lstlisting}[style=console]
-Setting up kernel-borderlands (0.1.0) ...
+Setting up kernel-borderlands (1.0.0) ...
 created group: kb
 created user: operator (member of kb)
 generated SSH host key: /etc/kb/ssh/ssh_host_ed25519_key
@@ -356,12 +356,12 @@ uninstall; those are the \notrun\ rows above.
 \ifarch
 \begin{lstlisting}[style=console]
 # --- install ---
-sudo pacman -U kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst
 \end{lstlisting}
 \else
 \begin{lstlisting}[style=console]
 # --- install ---
-sudo apt install ./kernel-borderlands_0.1.0_amd64.deb
+sudo apt install ./kernel-borderlands_1.0.0_amd64.deb
 \end{lstlisting}
 \fi
 \begin{lstlisting}[style=console]
