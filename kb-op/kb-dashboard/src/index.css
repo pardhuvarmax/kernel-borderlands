@@ -615,6 +615,9 @@ html, body, #root {
 }
 .act-btn.isolate:hover { color: var(--danger); border-color: var(--danger-border); }
 .act-btn.restore:hover { color: var(--safe); border-color: var(--safe-border); }
+.act-btn.kill:hover,
+.act-btn.kill.armed { color: var(--danger); border-color: var(--danger-border); }
+.act-btn.kill.armed { background: var(--danger-dim); font-weight: 700; }
 
 /* ── Chart ───────────────────────────────────────────────────────── */
 .chart-wrap {

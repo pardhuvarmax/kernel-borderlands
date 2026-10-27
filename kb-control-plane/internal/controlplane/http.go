@@ -34,7 +34,7 @@ func (cp *ControlPlane) StartHTTPServer(addr string) error {
 		allowedOrigins: corsOrigins(),
 	}
 	if server.apiToken == "" {
-		log.Printf("[KB] WARNING: KB_HTTP_API_TOKEN not set — /api/isolate and /api/restore will refuse all requests until it is configured")
+		log.Printf("[KB] WARNING: KB_HTTP_API_TOKEN not set — /api/isolate, /api/kill and /api/restore will refuse all requests until it is configured")
 	}
 
 	mux := http.NewServeMux()
@@ -46,6 +46,7 @@ func (cp *ControlPlane) StartHTTPServer(addr string) error {
 	mux.HandleFunc("/api/audit/verify", server.handleAuditVerify)
 	mux.HandleFunc("/api/services", server.handleServices)
 	mux.HandleFunc("/api/isolate", server.requireAPIToken(server.handleIsolate))
+	mux.HandleFunc("/api/kill", server.requireAPIToken(server.handleKill))
 	mux.HandleFunc("/api/restore", server.requireAPIToken(server.handleRestore))
 	mux.HandleFunc("/api/events", server.handleEvents)
 	mux.HandleFunc("/api/metrics", server.handleMetrics)
@@ -89,7 +90,7 @@ func (s *HTTPServer) corsHandler(h http.Handler) http.Handler {
 	})
 }
 
-// requireAPIToken gates state-mutating routes (isolate/restore) behind a
+// requireAPIToken gates state-mutating routes (isolate/kill/restore) behind a
 // bearer token configured via KB_HTTP_API_TOKEN. Fails closed: if no token
 // is configured, the route is unusable rather than silently unauthenticated
 // (BUG-001 — these previously had zero auth of any kind).
@@ -138,7 +139,8 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 			{"path": "/api/alerts", "desc": "Recent BORDERLANDS-zone alerts"},
 			{"path": "/api/logs", "desc": "Audit log entries"},
 			{"path": "/api/services", "desc": "Subsystem health (kb-core, kb-checker, AADS, gRPC, DB)"},
-			{"path": "/api/isolate", "desc": "POST — contain a PID"},
+			{"path": "/api/isolate", "desc": "POST — isolate a PID (namespace-level containment, reversible with /api/restore)"},
+			{"path": "/api/kill", "desc": "POST — contain a PID at level 4 and SIGKILL it (not reversible)"},
 			{"path": "/api/restore", "desc": "POST — clear containment for a PID"},
 			{"path": "/api/events", "desc": "SSE — live event stream"},
 			{"path": "/api/metrics", "desc": "Live throughput metrics"},
@@ -536,7 +538,24 @@ func (s *HTTPServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, metrics)
 }
 
+// handleIsolate contains a PID at the NAMESPACE level: the kernel LSM hooks
+// deny network, exec and executable-memory operations, but the process keeps
+// running and /api/restore clears it. Killing is a separate action
+// (handleKill) so an operator can never terminate a process by pressing
+// "Isolate".
 func (s *HTTPServer) handleIsolate(w http.ResponseWriter, r *http.Request) {
+	s.containFromDashboard(w, r, uint32(pb.ContainmentLevel_NAMESPACE),
+		"SET_CONTAINMENT_NAMESPACE", "Manual isolation from dashboard")
+}
+
+// handleKill contains a PID at level 4 and has the enforcer SIGKILL it.
+// Not reversible.
+func (s *HTTPServer) handleKill(w http.ResponseWriter, r *http.Request) {
+	s.containFromDashboard(w, r, uint32(pb.ContainmentLevel_TERMINATE),
+		"KILL_PROCESS", "Manual kill from dashboard")
+}
+
+func (s *HTTPServer) containFromDashboard(w http.ResponseWriter, r *http.Request, level uint32, auditAction, reason string) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -550,15 +569,20 @@ func (s *HTTPServer) handleIsolate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Trigger containment
-	s.cp.enforcer.Contain(req.Pid, uint32(pb.ContainmentLevel_TERMINATE), "Manual isolation from dashboard")
+	// Report a refused or failed containment (protected process, no sensor
+	// connected, SIGKILL failed) instead of claiming success.
+	if err := s.cp.enforcer.Contain(req.Pid, level, reason); err != nil {
+		s.cp.audit.Log(auditAction+"_FAILED", fmt.Sprintf("pid=%d", req.Pid), "OPERATOR", err.Error())
+		writeJSON(w, http.StatusBadGateway, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
 	s.cp.audit.Log(
-		"SET_CONTAINMENT_TERMINATE",
+		auditAction,
 		fmt.Sprintf("pid=%d", req.Pid),
 		"OPERATOR",
-		"Manual isolation from dashboard",
+		reason,
 	)
-	s.cp.store.SetContainment(req.Pid, int32(pb.ContainmentLevel_TERMINATE))
+	s.cp.store.SetContainment(req.Pid, int32(level))
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }

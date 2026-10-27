@@ -5,12 +5,34 @@ import (
 	"net"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 )
+
+// TestMain replaces killProcess for the whole package so no test can ever
+// SIGKILL a real PID (several tests contain made-up PIDs at level 4).
+func TestMain(m *testing.M) {
+	killProcess = func(int) error { return nil }
+	os.Exit(m.Run())
+}
+
+// stubKill swaps killProcess for the duration of one test and returns the
+// PIDs it was asked to kill.
+func stubKill(t *testing.T, result error) *[]int {
+	t.Helper()
+	var killed []int
+	prev := killProcess
+	killProcess = func(pid int) error {
+		killed = append(killed, pid)
+		return result
+	}
+	t.Cleanup(func() { killProcess = prev })
+	return &killed
+}
 
 // newListenerWithConn builds an *ipc.Listener wired to a net.Pipe() server
 // end, so tests can both trigger a real SendContainmentCmd call and read
@@ -311,5 +333,85 @@ func TestContain_RestoreExemptFromProtectedPidGate(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Contain did not return in time")
+	}
+}
+
+// --- Level 4 also SIGKILLs the process ---
+
+// containAndDrain runs Contain on a connected listener and consumes the frame
+// the sensor would receive, so the send completes.
+func containAndDrain(t *testing.T, pid, level uint32) error {
+	t.Helper()
+	l, clientConn, cleanup := newListenerWithConn(t)
+	defer cleanup()
+	e := NewEnforcer(l, nil)
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- e.Contain(pid, level, "test") }()
+
+	var length uint32
+	if err := binary.Read(clientConn, binary.LittleEndian, &length); err != nil {
+		t.Fatalf("reading length prefix: %v", err)
+	}
+	if _, err := readFull(clientConn, make([]byte, length)); err != nil {
+		t.Fatalf("reading frame: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		return err
+	case <-time.After(2 * time.Second):
+		t.Fatal("Contain did not return in time")
+		return nil
+	}
+}
+
+func TestContain_TerminateSendsSIGKILL(t *testing.T) {
+	killed := stubKill(t, nil)
+	if err := containAndDrain(t, 4321, ipc.ContainmentTerminate); err != nil {
+		t.Fatalf("Contain(Terminate): %v", err)
+	}
+	if len(*killed) != 1 || (*killed)[0] != 4321 {
+		t.Fatalf("killed = %v, want [4321]", *killed)
+	}
+}
+
+func TestContain_NonTerminateLevelsDoNotKill(t *testing.T) {
+	for _, level := range []uint32{ipc.ContainmentNone, ipc.ContainmentCgroup, ipc.ContainmentSeccomp, ipc.ContainmentNamespace} {
+		killed := stubKill(t, nil)
+		if err := containAndDrain(t, 4321, level); err != nil {
+			t.Fatalf("Contain(level %d): %v", level, err)
+		}
+		if len(*killed) != 0 {
+			t.Errorf("level %d killed %v, want no kill", level, *killed)
+		}
+	}
+}
+
+func TestContain_TerminateDoesNotKillWhenSendFails(t *testing.T) {
+	killed := stubKill(t, nil)
+	l, err := ipc.NewTestListener() // no sensor connected
+	if err != nil {
+		t.Fatalf("ipc.NewTestListener: %v", err)
+	}
+	if err := NewEnforcer(l, nil).Contain(4321, ipc.ContainmentTerminate, "test"); err == nil {
+		t.Fatal("want the no-sensor error, got nil")
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("killed %v after a failed send, want none", *killed)
+	}
+}
+
+func TestContain_TerminateAlreadyExitedIsNotAnError(t *testing.T) {
+	stubKill(t, syscall.ESRCH)
+	if err := containAndDrain(t, 4321, ipc.ContainmentTerminate); err != nil {
+		t.Fatalf("ESRCH should count as success, got %v", err)
+	}
+}
+
+func TestContain_TerminateKillFailureIsReported(t *testing.T) {
+	stubKill(t, syscall.EPERM)
+	err := containAndDrain(t, 4321, ipc.ContainmentTerminate)
+	if err == nil || !strings.Contains(err.Error(), "SIGKILL") {
+		t.Fatalf("got %v, want an error mentioning SIGKILL", err)
 	}
 }

@@ -5,7 +5,7 @@ import {
 import {
   Shield, AlertTriangle, Activity, Lock, Unlock,
   Search, RefreshCw, Cpu, Layers, Terminal, Bell, Settings,
-  Server, Wifi, WifiOff, Map, Users, ShieldAlert
+  Server, Wifi, WifiOff, Map, Users, ShieldAlert, Skull
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ interface ChartPoint { t: string; safe: number; sus: number; bl: number; }
 const API_BASE = import.meta.env.VITE_KB_API_BASE || `http://${window.location.hostname}:8080`;
 
 // Bearer token sent as Authorization on state-mutating requests
-// (/api/isolate, /api/restore, /api/policy/reload) — kbd refuses those routes
+// (/api/isolate, /api/kill, /api/restore, /api/policy/reload) — kbd refuses those routes
 // without one (KB_HTTP_API_TOKEN on the server side, see BUG-001).
 //
 // The token is resolved at RUNTIME, never baked into the shipped bundle (a
@@ -95,6 +95,8 @@ const HEALTH_SERVICES = [
 export default function App() {
   const [simulated, setSimulated]   = useState(true);
   const [processes,  setProcesses]  = useState<Process[]>(SEED);
+  // PID whose Kill button was clicked once; a second click within 4 s sends it.
+  const [killArmed,  setKillArmed]  = useState<number | null>(null);
   const [alerts,     setAlerts]     = useState<KBAlert[]>([]);
   const [log,        setLog]        = useState<{ text: string; cls: string }[]>([]);
   const [chart,      setChart]      = useState<ChartPoint[]>([]);
@@ -524,7 +526,7 @@ export default function App() {
     if (simulated) {
       setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'QUARANTINED', score: 1.0 } : p));
       const id = `al-${pid}-${Date.now()}`;
-      addAlert({ id, type: 'MANUAL_QUARANTINE', pid, comm, severity: 'CRITICAL', ts: ts(), evidence: ['manual_operator_action', 'containment_level_4'] });
+      addAlert({ id, type: 'MANUAL_QUARANTINE', pid, comm, severity: 'CRITICAL', ts: ts(), evidence: ['manual_operator_action', 'containment_level_3'] });
       addLog(`[OPERATOR] Manual quarantine — PID ${pid} (${comm})`, 'err');
     } else {
       fetch(`${API_BASE}/api/isolate`, {
@@ -540,6 +542,37 @@ export default function App() {
         }
       }).catch(err => {
         addLog(`[OPERATOR] isolation error: ${err.message}`, 'err');
+      });
+    }
+  };
+
+  // Operator: kill. Separate from isolate: isolate is reversible containment,
+  // kill makes kbd contain the PID at level 4 and SIGKILL it. Two clicks:
+  // the first arms the button, the second (within 4 s) sends the request.
+  const kill = (pid: number, comm: string) => {
+    if (killArmed !== pid) {
+      setKillArmed(pid);
+      setTimeout(() => setKillArmed(cur => (cur === pid ? null : cur)), 4000);
+      return;
+    }
+    setKillArmed(null);
+    if (simulated) {
+      setProcesses(prev => prev.filter(p => p.pid !== pid));
+      addLog(`[OPERATOR] SIGKILL — PID ${pid} (${comm}) terminated`, 'err');
+    } else {
+      fetch(`${API_BASE}/api/kill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(API_TOKEN ? { 'Authorization': `Bearer ${API_TOKEN}` } : {}) },
+        body: JSON.stringify({ pid })
+      }).then(res => {
+        if (res.ok) {
+          setProcesses(prev => prev.filter(p => p.pid !== pid));
+          addLog(`[OPERATOR] SIGKILL sent for PID ${pid} (${comm})`, 'success');
+        } else {
+          addLog(`[OPERATOR] kill failed for PID ${pid}${needsToken(res.status) ? ' — ' + TOKEN_HINT : ''}`, 'err');
+        }
+      }).catch(err => {
+        addLog(`[OPERATOR] kill error: ${err.message}`, 'err');
       });
     }
   };
@@ -843,6 +876,8 @@ export default function App() {
                               {p.zone === 'QUARANTINED'
                                 ? <button className="act-btn restore" onClick={() => restore(p.pid, p.comm)}><Unlock size={10} />Restore</button>
                                 : <button className="act-btn isolate" onClick={() => isolate(p.pid, p.comm)}><Lock size={10} />Isolate</button>}
+                              {' '}
+                              <button className={`act-btn kill${killArmed === p.pid ? ' armed' : ''}`} onClick={() => kill(p.pid, p.comm)}><Skull size={10} />{killArmed === p.pid ? 'Confirm kill' : 'Kill'}</button>
                             </td>
                           </tr>
                         );
@@ -1112,6 +1147,8 @@ export default function App() {
                               {p.zone === 'QUARANTINED'
                                 ? <button className="act-btn restore" onClick={() => restore(p.pid, p.comm)}><Unlock size={10} />Restore</button>
                                 : <button className="act-btn isolate" onClick={() => isolate(p.pid, p.comm)}><Lock size={10} />Isolate</button>}
+                              {' '}
+                              <button className={`act-btn kill${killArmed === p.pid ? ' armed' : ''}`} onClick={() => kill(p.pid, p.comm)}><Skull size={10} />{killArmed === p.pid ? 'Confirm kill' : 'Kill'}</button>
                             </td>
                           </tr>
                         );

@@ -60,7 +60,8 @@ Forward \emph{both} ports: the page comes from 8082, the data from 8080. Use \te
 \texttt{/api/policy} & none & Current policy.\\
 \texttt{/api/audit/verify} & none & Hash-chain verification.\\
 \texttt{/api/events} & none & Server-Sent Events live stream.\\
-\texttt{/api/isolate}, \texttt{/api/restore} & \textbf{token} & Contain / release a process.\\
+\texttt{/api/isolate}, \texttt{/api/restore} & \textbf{token} & Isolate (namespace level, reversible) / release a process.\\
+\texttt{/api/kill} & \textbf{token} & Contain at level 4 and \texttt{SIGKILL} the process. Not reversible.\\
 \texttt{/api/policy/reload} & \textbf{token} & Reload \file{policy.yaml}.\\
 \bottomrule
 \end{tabularx}

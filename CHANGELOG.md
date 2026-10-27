@@ -4,6 +4,14 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ---
 
+## [Unreleased] - 2026-10-28
+
+### Changed
+- **TERMINATE now really kills the process** (`kb-control-plane/internal/enforcement/enforce.go`): after `Enforcer.Contain` has sent a level-4 command to the sensor (which records level 4 in `contained_pids_map`), `kbd` sends `SIGKILL` to the PID. The sensor's own comment ("combined with the userspace SIGKILL sent by the enforcer") and `internal/enforcement/README.md` already described this; the code never did it. The kill happens only after a successful send, `ESRCH` (already exited) counts as success, any other kill error is returned. The PID-1 / self / protected-comm gate still runs first. This applies to every TERMINATE caller: gRPC `SetContainment`, the AADS executor, `policy:auto_terminate` and `kbctl process isolate --level TERMINATE`. Tests replace the kill function (`killProcess`) for the whole package so no test can signal a real PID.
+- **Dashboard: Kill is separate from Isolate** (`kb-control-plane/internal/controlplane/http.go`, `kb-op/kb-dashboard/src/App.tsx`, `index.css`): `POST /api/isolate` used containment level TERMINATE, so with the change above it would have killed. It now uses NAMESPACE (level 3: network, exec and executable-memory operations denied, reversible with `/api/restore`) and audits `SET_CONTAINMENT_NAMESPACE`. New `POST /api/kill` (same bearer token) contains at level 4 and SIGKILLs, audits `KILL_PROCESS`. The dashboard gets a Kill button next to Isolate/Restore with an inline two-click confirmation (first click arms it for 4 s). Both routes now return 502 with `{"success":false,"error":...}` when containment is refused or fails (protected process, no sensor connected, kill failed); previously the result was ignored and `success:true` was always returned. Not exercised against a live sensor (needs root); unit tests cover the wire level, the failure paths and the method check. Field manual API table updated; the dist PDFs were not rebuilt. [Pardhu, Teju]
+
+---
+
 ## [Unreleased] - 2026-10-27
 
 ### Added
