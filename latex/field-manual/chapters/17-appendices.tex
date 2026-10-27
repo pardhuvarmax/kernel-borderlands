@@ -1,0 +1,138 @@
+\appendix
+\chapter{Wire and Event Contracts}
+\label{app:wire}
+Two independent contracts exist; confusing them is the most common mistake.
+\section{C to Go: \file{kbd.sock}, hand-packed structs}
+Packed little-endian structs, byte-identical in C (\texttt{\_\_attribute\_\_((packed))}) and Go.
+\begin{center}\small
+\begin{tabular}{@{}lr@{}}
+\toprule \textbf{Struct} & \textbf{Size}\\ \midrule
+\texttt{ProcessState} / \texttt{kb\_wire\_process\_state} & 128 bytes\\
+\texttt{ZoneTransition} / \texttt{kb\_wire\_zone\_transition} & 40 bytes\\
+\texttt{kb\_wire\_attack\_rule} & 220 bytes\\
+\bottomrule
+\end{tabular}
+\end{center}
+None carries an \texttt{event\_type} field. The sensor's own \texttt{kb\_unified\_event.event\_type} enum
+(\texttt{KB\_EVT\_PROCESS\_EXEC}=0 through \texttt{KB\_EVT\_DROPPED\_TELEMETRY}=10) never crosses the wire as a named
+field. Sources of truth: \file{kb-core/userspace/bridge/kb_bridge.h}, \file{docs/development/core-control/wire-protocol.md}.
+\begin{kbwarn}
+Change a wire struct in C and Go \emph{together}, and verify against \file{docs/architecture/kbd-contracts.md}.
+A one-byte mismatch silently corrupts every later field.
+\end{kbwarn}
+\section{Go to clients: \file{kba.sock}, \texttt{pb.KBEvent}}
+Exactly two live \texttt{event\_type} strings:
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3.3cm}Y@{}}
+\toprule \textbf{event\_type} & \textbf{Metadata keys}\\ \midrule
+\texttt{process\_state} & \texttt{zone}, \texttt{composite}, \texttt{dim\_syscall}, \texttt{dim\_privilege}, \texttt{uid}\\
+\texttt{zone\_transition} & \texttt{from\_zone}, \texttt{to\_zone}\\
+\bottomrule
+\end{tabularx}
+\end{center}
+Both carry \texttt{Pid}, \texttt{Comm}, \texttt{ScoreDelta}, \texttt{Timestamp} (and \texttt{Ppid} for state). Alerts are a separate
+\texttt{pb.Alert} stream, currently only \texttt{BORDERLANDS\_ENTRY}. Scoring is entirely the sensor's job; \cmd{kbd}
+forwards the pre-computed \texttt{ScoreDelta}.
+
+\chapter{Kernel Hook Points}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{4.6cm}Y@{}}
+\toprule \textbf{Hook} & \textbf{Watches}\\ \midrule
+\texttt{tracepoint:syscalls} & Every syscall entry and exit.\\
+\texttt{tracepoint:sched} & fork, exec, exit.\\
+\texttt{kprobe:commit\_creds} & Privilege (credential) changes.\\
+\texttt{bpf\_lsm} (\texttt{file\_open}) & Sensitive file access; the only hook that can block.\\
+\texttt{tracepoint:net} & Network connections.\\
+\texttt{kprobe:mmap\_region} & Executable memory mappings.\\
+uprobes on \texttt{libssl}, \texttt{libgnutls}, Go TLS & Plaintext of TLS writes.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+Events travel to userland over a ring buffer. The roadmap in \file{docs/architecture/hookpoints.md} proposes
+further hooks (\texttt{process\_vm\_writev}, \texttt{security\_capable}, \texttt{do\_execveat\_common}, writes to
+\file{/proc/*/mem}); they are \emph{proposals}, not shipped.
+
+\chapter{Condensed Cross-Distribution Recipe}
+\label{app:cross}
+\section{Build the Arch package}
+\begin{lstlisting}[style=console]
+arch$ sudo pacman -S --needed base-devel go rust clang bpf libbpf nodejs npm libelf zlib
+arch$ cd packaging/arch && makepkg -f
+arch$ sudo pacman -U kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+\end{lstlisting}
+\section{Build the Ubuntu package}
+\begin{lstlisting}[style=console]
+ubuntu$ sudo apt install -y build-essential clang llvm libelf-dev zlib1g-dev libbpf-dev \
+          nodejs npm golang-go linux-tools-common linux-tools-$(uname -r)
+ubuntu$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh && . ~/.cargo/env
+ubuntu$ make build && packaging/deb/build-deb.sh
+ubuntu$ sudo apt install ./dist/kernel-borderlands_0.1.0_amd64.deb
+\end{lstlisting}
+\section{Differences in one table}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3.3cm}L{4cm}Y@{}}
+\toprule \textbf{Item} & \textbf{Arch} & \textbf{Ubuntu 24.04}\\ \midrule
+Package tool & \texttt{makepkg} / \texttt{pacman -U} & \texttt{dpkg-deb} / \texttt{apt install ./}\\
+Go & system \texttt{go} (new enough) & \texttt{golang-go} 1.22 bootstraps 1.25 via toolchain download\\
+Rust & \texttt{rust} package & \texttt{rustup}\\
+bpftool & package \texttt{bpf} & \texttt{linux-tools-\$(uname -r)}\\
+Boot param tool & \texttt{grub-mkconfig -o /boot/grub/grub.cfg} & \texttt{update-grub}\\
+Config preservation & \texttt{backup=()} $\to$ \texttt{.pacnew} & \texttt{conffiles} $\to$ prompt\\
+glibc of the build host & 2.44 & 2.39\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\chapter{Complete systemd Unit Files}
+\label{app:units}
+These are the \emph{source} units from \file{packaging/systemd/}. The packages install them with
+\file{/usr/local/bin} rewritten to \file{/usr/bin} and the \cmd{sshd} config path rewritten to
+\file{/etc/kb/sshd_kb-operator.conf}. Comments are the maintainers' own reasoning and are worth reading.
+
+\section{kbd.service}\lstinputlisting[style=conf]{../../packaging/systemd/kbd.service}
+\section{kb-sensor.service}\lstinputlisting[style=conf]{../../packaging/systemd/kb-sensor.service}
+\section{kb-checker.service (held down)}\lstinputlisting[style=conf]{../../packaging/systemd/kb-checker.service}
+\section{kbopd.service}\lstinputlisting[style=conf]{../../packaging/systemd/kbopd.service}
+\section{sshd@kb-operator.service}\lstinputlisting[style=conf]{../../packaging/systemd/sshd@kb-operator.service}
+\section{kbagents.service}\lstinputlisting[style=conf]{../../packaging/systemd/kbagents.service}
+\section{kb-tui-session-wrapper.sh}\lstinputlisting[style=conf]{../../packaging/ssh/kb-tui-session-wrapper.sh}
+\section{provision.sh}\lstinputlisting[style=conf]{../../scripts/setup/provision.sh}
+
+\chapter{Glossary}
+\begin{description}[style=nextline,leftmargin=0pt]
+\item[BTF] BPF Type Format: kernel type information that lets compiled eBPF relocate itself.
+\item[CO-RE] Compile Once, Run Everywhere: eBPF built once and adapted to each kernel via BTF.
+\item[BPF LSM] A Linux Security Module whose hooks are eBPF programs; the only mechanism here that can \emph{block}.
+\item[Zone] \texttt{SAFE}, \texttt{SUSPICIOUS}, \texttt{BORDERLANDS}: a process's score band.
+\item[Behavior state] \texttt{SAFE}, \texttt{OBSERVED}, \texttt{SUSPICIOUS}, \texttt{BORDERLANDS}, \texttt{COMPROMISED}: states in the rules engine.
+\item[Containment level] \texttt{CGROUP}, \texttt{SECCOMP}, \texttt{NAMESPACE}, \texttt{TERMINATE} (TUI also offers \texttt{none} to release).
+\item[CWP] Critical Workload Protection: an optional, signable registry of programs to guard.
+\item[UDS] Unix domain socket.
+\item[Drop-in] A systemd override file in \file{/etc/systemd/system/UNIT.d/} that survives package upgrades.
+\item[Conffile / backup] A config file the package manager will not overwrite without asking.
+\item[ForceCommand] An \cmd{sshd} option that runs a fixed program no matter what the client requests.
+\item[MCP] Model Context Protocol: how AI assistants query \cmd{mcp-server}.
+\end{description}
+
+\chapter{Package File Manifest}
+\begin{center}\footnotesize
+\begin{tabularx}{\textwidth}{@{}L{6.1cm}L{1.6cm}Y@{}}
+\toprule \textbf{Path} & \textbf{Mode} & \textbf{Purpose}\\ \midrule
+\file{/usr/bin/kbd} & 0755 & Control plane daemon\\
+\file{/usr/bin/kbd_sensor} & 0755 & eBPF loader and bridge\\
+\file{/usr/bin/kbctl} & 0755 & Operator CLI\\
+\file{/usr/bin/kbopd} & 0755 & TUI and embedded dashboard\\
+\file{/usr/bin/mcp-server} & 0755 & MCP server\\
+\file{/usr/bin/kb-checker} & 0755 & Watchdog (held down)\\
+\file{/usr/bin/kbagents} & 0755 & Swarm launcher\\
+\file{/usr/bin/kb-tui-session-wrapper.sh} & 0755 & SSH ForceCommand target\\
+\file{/usr/lib/kb/provision.sh} & 0755 & Host provisioning\\
+\file{/usr/lib/kb/aads/**} & 0644 & kb-aads sources and the containment checkpoint (with \file{marl/checkpoints/SHA256SUMS})\\
+\file{/usr/lib/systemd/system/*.service} (6) & 0644 & Unit files\\
+\file{/etc/kb/policy.yaml}, \file{rules.yaml}, \file{workloads.yaml}, \file{agents.yaml} & 0640 & Default configs (protected)\\
+\file{/etc/kb/sshd_kb-operator.conf} & 0644 & Operator sshd config (protected)\\
+\file{/usr/share/doc/kernel-borderlands/*} & 0644 & LICENSE, README\\
+\bottomrule
+\end{tabularx}
+\end{center}
+

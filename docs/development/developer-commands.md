@@ -63,7 +63,7 @@ layout (no `cmd/` directory, no `main.go`; see `kb-op/kb-tui/Cargo.toml`).
   (`docs/development/core-control/control-plane-catalog.md` §2.11), port 2222 is served by a
   real, OS-managed `sshd` instance with `ForceCommand /usr/local/bin/kb-tui` — `kbd` no longer
   hosts an in-process SSH server. See `docs/architecture/boot_sequence_spec.md` §3 for the
-  `sshd_config.d` drop-in and `sshd@kb-operator.service` unit.
+  `/etc/kb/sshd_kb-operator.conf` config (not `sshd_config.d`, see the correction there) and `sshd@kb-operator.service` unit.
   ```bash
   ssh operator@localhost -p 2222
   ```

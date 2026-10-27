@@ -1,0 +1,16 @@
+Inspect the SHA-256 hash-chained audit log
+
+Usage:
+  kbctl audit [command]
+
+Available Commands:
+  export      Export the full hash-chained audit log as JSON
+  verify      Verify the audit log hash chain has not been tampered with
+
+Flags:
+  -h, --help   help for audit
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+
+Use "kbctl audit [command] --help" for more information about a command.

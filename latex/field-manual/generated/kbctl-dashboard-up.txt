@@ -1,0 +1,11 @@
+Enable and start the web dashboard, then print its URL
+
+Usage:
+  kbctl dashboard up [flags]
+
+Flags:
+  -h, --help   help for up
+
+Global Flags:
+      --port int        dashboard port (kbopd's embedded server is fixed at 8082; change only if you rebuilt it) (default 8082)
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

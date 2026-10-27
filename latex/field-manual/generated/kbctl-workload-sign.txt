@@ -1,0 +1,13 @@
+Sign a workloads.yaml file for kbd's --workloads-pubkey verification (CWP.md §4.3/§11.4)
+
+Usage:
+  kbctl workload sign <workloads.yaml> [flags]
+
+Flags:
+  -h, --help               help for sign
+      --key string         path to the Ed25519 private key to sign with (required)
+      --signed-by string   identity recorded in policy_metadata.signed_by (CWP.md §12.1)
+      --version int        policy_metadata.version to record (default 1)
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

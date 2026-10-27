@@ -71,6 +71,8 @@ sequenceDiagram
 4. **eBPF Loading**: **Corrected, and reordered** — this step previously came *before* the readiness signal above and was attributed to `kbd` itself ("`kbd` invokes `kb-core-loader`..."). Both were wrong: `kbd_sensor` (`kb-sensor.service` — see [`packaging/systemd/kb-sensor.service`](../../packaging/systemd/kb-sensor.service)) is a fully independent C process that systemd cannot even start until *after* step 3 (`kb-sensor.service`'s `Requires=kbd.service`) — confirmed by actually booting these units in a container. Once started, `kbd_sensor` compiles, loads, and attaches its own tracepoints and LSM hooks to the kernel; `kbd` never `exec`s or loads it.
 
 ### Phase 2: Safety Layer Activation
+
+> **Operational status, 2026-10-27 — `kb-checker` is under maintenance and repairs and is kept down by decision.** `packaging/systemd/kb-checker.service` has `ConditionPathExists=/etc/kb/checker.enabled` (absent by default), so this whole phase is skipped: `kbctl up` does not start it, `kbctl status` reports it as under maintenance, and `kbagents.service` no longer `Requires=` it (otherwise starting the swarm would start the checker). The text below describes the intended design and applies again once the checker is repaired and the condition and the `maintenanceUnits` entry in `kb-op/kbctl/svc.go` are removed. While it is down there is no automatic tamper response.
 1. **Safety Launch**: Systemd starts the Rust Safety Daemon (`kb-checker.service`). This service is configured to run strictly `After=kbd.service kb-sensor.service` (**corrected** — previously listed as depending on `kbd.service` alone; it also `Requires=kb-sensor.service` now, since auditing the sensor's bytecode/liveness is meaningless before the sensor has loaded).
 2. **Single-Instance Protection**: `kb-checker` acquires an exclusive POSIX `flock` on `/run/kb/kb-checker.pid`. If blocked, the service aborts.
 3. **Diagnostic Socket binding**: `kb-checker` binds `/run/kb/kbc.sock` to expose the diagnostic endpoint.
@@ -296,7 +298,9 @@ CapabilityBoundingSet=
 WantedBy=multi-user.target
 ```
 
-### `/etc/systemd/system/sshd@kb-operator.service` + `/etc/ssh/sshd_config.d/kb-operator.conf`
+### `/etc/systemd/system/sshd@kb-operator.service` + `/etc/kb/sshd_kb-operator.conf`
+
+**Corrected, 2026-10-27**: this section previously placed the config at `/etc/ssh/sshd_config.d/kb-operator.conf`. That directory is `Include`d by the *host's own* `sshd` (Ubuntu's default `sshd_config`), which therefore also reads `Port 2222`, binds it first, and makes `sshd@kb-operator` fail with `Address already in use` and restart forever (observed on the Ubuntu VM). The config now lives at `/etc/kb/sshd_kb-operator.conf`, read only by the dedicated unit (`packaging/ssh/kb-operator.conf` is the source; the `.deb`/Arch packages and `packaging/install.sh` install it there).
 
 **Supersedes the earlier `kbopt.service` design** (a `kbd`-hosted, in-process Go SSH server on
 port 2222, `github.com/charmbracelet/wish`). That approach is retired per the decided migration
@@ -317,7 +321,7 @@ exist at `ForceCommand`'s path, and `kb-tui` itself only needs `/run/kb/kba.sock
 `kbd` starts.
 
 ```ini
-# /etc/ssh/sshd_config.d/kb-operator.conf
+# /etc/kb/sshd_kb-operator.conf
 # Loaded by the dedicated `sshd@kb-operator` instance below, NOT the host's
 # normal admin sshd on port 22 — keeps operator access to kb-tui fully
 # isolated from general host admin access.
@@ -379,7 +383,7 @@ DefaultDependencies=no
 
 [Service]
 Type=notify
-ExecStart=/usr/sbin/sshd -D -f /etc/ssh/sshd_config.d/kb-operator.conf
+ExecStart=/usr/sbin/sshd -D -f /etc/kb/sshd_kb-operator.conf
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5

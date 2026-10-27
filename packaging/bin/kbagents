@@ -1,0 +1,23 @@
+#!/bin/sh
+# kbagents — launcher for kb-aads (the Python/Ray agent swarm), which has no
+# compiled build (see packaging/README.md). Installed as /usr/bin/kbagents;
+# kb-aads/main.py's own comment names this wrapper as the thing that passes
+# --config /etc/kb/agents.yaml.
+#
+# Interpreter order: /opt/kb/venv (python3 -m venv /opt/kb/venv && /opt/kb/venv/bin/pip
+# install -r /usr/lib/kb/aads/requirements.txt) beats the system python3, so
+# the heavy ray/torch dependencies never have to be installed system-wide.
+set -eu
+# Overridable for testing from an unpacked tree or an existing venv:
+#   KB_AADS_DIR, KB_AADS_PYTHON, KB_AADS_CONFIG
+AADS_DIR=${KB_AADS_DIR:-/usr/lib/kb/aads}
+PY=${KB_AADS_PYTHON:-/opt/kb/venv/bin/python3}
+[ -x "$PY" ] || PY=python3
+CONFIG=${KB_AADS_CONFIG:-/etc/kb/agents.yaml}
+if ! "$PY" -c 'import ray, grpc, yaml' 2>/dev/null; then
+    echo "kbagents: missing Python dependencies (ray, grpcio, pyyaml)." >&2
+    echo "  python3 -m venv /opt/kb/venv && /opt/kb/venv/bin/pip install -r $AADS_DIR/requirements.txt" >&2
+    exit 1
+fi
+cd "$AADS_DIR"
+exec "$PY" main.py --config "$CONFIG" "$@"

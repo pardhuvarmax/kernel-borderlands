@@ -1,0 +1,149 @@
+\part{Packaging}
+\chapter{Anatomy of the Package}
+One Makefile target, \cmd{make install-pkg}, defines what ships. Both the \texttt{.deb} and the Arch
+package are thin wrappers around it, so the two distributions cannot drift apart.
+
+\section{From source to artifact}
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,scale=0.86,transform shape]
+  \node[box,minimum width=2.6cm] (src) at (0,0) {source tree\\[-1pt]\scriptsize \texttt{kb-core kb-control-plane}\\[-3pt]\scriptsize \texttt{kb-op kb-checker kb-aads}};
+  \node[box,minimum width=2.6cm] (build) at (4.2,0) {\texttt{make build}\\[-1pt]\scriptsize 5 stages};
+  \node[box,minimum width=2.4cm] (bin) at (8,0) {\texttt{bin/} +\\[-1pt]\scriptsize \texttt{kbd\_sensor}};
+  \node[box,minimum width=2.9cm] (stage) at (11.9,0) {\texttt{make install-pkg}\\[-1pt]\scriptsize \texttt{PREFIX=/usr DESTDIR=stage}};
+  \node[dark,minimum width=3.8cm] (deb) at (11.9,-2.8) {\texttt{build-deb.sh}\\[-1pt]\scriptsize dpkg-deb $\to$ \texttt{.deb}};
+  \node[dark,minimum width=3.8cm] (arch) at (6.6,-2.8) {\texttt{makepkg}\\[-1pt]\scriptsize PKGBUILD $\to$ \texttt{.pkg.tar.zst}};
+  \draw[flow] (src) -- (build); \draw[flow] (build) -- (bin); \draw[flow] (bin) -- (stage);
+  \draw[flow] (stage) -- (deb);
+  \draw[flow] (stage.south west) -- ++(0,-0.9) -| (arch.north);
+  \node[lbl] at (3.2,-1.6) {build on the TARGET distro};
+  \draw[decorate,decoration={brace,mirror,amplitude=5pt},line width=0.8pt] (-1.5,-0.9) -- (9.2,-0.9);
+\end{tikzpicture}
+\caption{The packaging pipeline. The brace marks the part that must run on the distribution you are
+targeting, because the binaries link the build host's C library.}
+\end{figure}
+
+\begin{kbwarn}[BUILD ON THE DISTRIBUTION YOU SHIP TO]
+The Go, Rust and C binaries are dynamically linked against the \emph{build host's} glibc. The Arch host that
+builds the Arch package has glibc 2.44; Ubuntu 24.04 has 2.39. A binary built on the former will not start
+on the latter (``version \texttt{GLIBC\_2.4x} not found''). That is why the \texttt{.deb} is built on the
+Ubuntu machine and the Arch package on Arch. Building on the \emph{older} distribution always works
+forward; the reverse does not.
+\end{kbwarn}
+
+\section{The five build stages}
+\cmd{make build} runs these in order and puts every product into the top-level \file{bin/}
+(the sensor stays in \file{kb-core/build/}).
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{1.2cm}L{3.2cm}Y@{}}
+\toprule
+\textbf{Stage} & \textbf{Output} & \textbf{What happens}\\
+\midrule
+1/5 & \file{kb-core/build/kbd_sensor} & \cmd{clang} compiles the BPF programs and userspace loader, \cmd{bpftool} generates the CO-RE skeletons, the vendored \file{libbpf/src/libbpf.a} is linked statically. Hardened with \texttt{-D\_FORTIFY\_SOURCE=3}, stack protector, \texttt{-fPIE}, full RELRO.\\
+2/5 & \file{bin/kbd} & \texttt{go build -a} of \file{kb-control-plane/cmd/kbd}.\\
+3/5 & \file{bin/kb-checker} & \texttt{cargo build --release} of the watchdog (built even though it is kept down).\\
+4/5 & \file{bin/kbctl} & \texttt{go build -a} of the CLI.\\
+5/5 & \file{bin/mcp-server}, \file{bin/kbopd} & Builds the MCP server; runs \texttt{npm ci} (only if \file{node_modules} is absent) and \texttt{npm run build} for the dashboard; then \texttt{cargo build --release} of \file{kb-tui}, which \emph{embeds} the dashboard's \file{dist/} at compile time and is copied to \file{bin/kbopd}.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+\begin{kbnote}[ORDER MATTERS IN STAGE 5]
+The dashboard must be built \emph{before} \cmd{cargo} compiles \file{kb-tui}. The Rust code embeds
+\file{kb-dashboard/dist/} with \texttt{rust-embed}; if the folder is missing the compile fails with
+``folder ... does not exist''. The Makefile already enforces the order.
+\end{kbnote}
+
+\section{The Makefile contract}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3.3cm}L{3.9cm}Y@{}}
+\toprule
+\textbf{Variable} & \textbf{Default} & \textbf{Meaning}\\
+\midrule
+\texttt{PREFIX} & \texttt{/usr/local} & Packages pass \texttt{/usr}.\\
+\texttt{BINDIR} & \texttt{\$(PREFIX)/bin} & Where binaries land; also substituted into unit files and the SSH wrapper.\\
+\texttt{LIBDIR} & \texttt{\$(PREFIX)/lib} & \file{kb/provision.sh} and \file{kb/aads/}.\\
+\texttt{SYSCONFDIR} & \texttt{/etc} & Config root (\file{/etc/kb}).\\
+\texttt{UNITDIR} & \texttt{/etc/systemd/system} for \texttt{/usr/local}, else \file{$(PREFIX)/lib/systemd/system} & Where unit files go.\\
+\texttt{DESTDIR} & empty & Staging root, prepended to every install path.\\
+\texttt{GOARCH} & \texttt{go env GOARCH} & Target architecture of the Go binaries.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3.3cm}Y@{}}
+\toprule
+\textbf{Target} & \textbf{Effect}\\
+\midrule
+\texttt{make build} & The five stages above.\\
+\texttt{make install} & Installs the six binaries to \texttt{\$(DESTDIR)\$(BINDIR)}. Historical behaviour: \texttt{sudo make install} still goes to \file{/usr/local/bin}.\\
+\texttt{make install-pkg} & \texttt{install} plus the wrapper, \cmd{kbagents}, units (path-rewritten), operator \cmd{sshd} config, default \file{/etc/kb/*.yaml}, \file{provision.sh}, the \cmd{kb-aads} sources, and docs.\\
+\texttt{make clean} & Removes build products.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{kbwarn}[THE PACKAGE USES EXPLICIT FILE LISTS ON PURPOSE]
+The source tree contains development-only \file{ssh_host_ed25519_key} and \file{authorized_keys} files under
+\file{kb-core/} and \file{kb-control-plane/}. They are git-ignored, but they exist on disk. \cmd{install-pkg} names every
+file it ships and never copies a directory wholesale (except the \cmd{kb-aads} Python packages, which are
+listed folder by folder). If you extend the package, keep it that way and re-run the secrets check in
+Section~\ref{sec:secrets}.
+\end{kbwarn}
+
+\section{What the unit files are rewritten to}
+The sources in \file{packaging/systemd/} use the development path \file{/usr/local/bin}. During
+\cmd{install-pkg}, \cmd{sed} rewrites it to \texttt{\$(BINDIR)} (\file{/usr/bin}) in every unit and in the SSH wrapper, and
+rewrites the operator \cmd{sshd} config path from \file{/etc/ssh/sshd_config.d/kb-operator.conf} to
+\file{/etc/kb/sshd_kb-operator.conf}.
+
+\begin{kbnote}[WHY THE SSHD CONFIG MOVED]
+Ubuntu's main \cmd{sshd} reads \texttt{Include /etc/ssh/sshd\_config.d/*.conf}. A file there containing
+\texttt{Port 2222} is therefore also loaded by the \emph{host's own} \cmd{sshd}, which grabs port 2222 first;
+the dedicated \texttt{sshd@kb-operator} instance then dies with \texttt{Address already in use} and restarts
+forever. This was observed on the live Ubuntu VM. The packages avoid it by keeping the file under
+\file{/etc/kb/}, where only the dedicated unit reads it.
+\end{kbnote}
+
+\section{Package metadata and maintainer scripts}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3.1cm}L{3.2cm}Y@{}}
+\toprule
+\textbf{Item} & \textbf{Ubuntu \texttt{.deb}} & \textbf{Arch}\\
+\midrule
+Source of truth & \file{packaging/deb/} & \file{packaging/arch/PKGBUILD}\\
+Runtime deps & \texttt{libc6, systemd, openssh-server, libelf1t64, zlib1g} & \texttt{glibc systemd openssh libelf zlib}\\
+Optional & \texttt{python3, python3-venv} (Recommends) & \texttt{python} (optdepends)\\
+Config preserved on upgrade & \file{conffiles} (five files) & \texttt{backup=(...)} array (five files)\\
+After install & \texttt{postinst} runs \file{provision.sh}, \cmd{systemctl daemon-reload} & \file{.install} \texttt{post\_install} does the same and prints next steps\\
+Before removal & \texttt{prerm} disables and stops the units & \texttt{pre\_remove} does the same\\
+After removal & \texttt{postrm} reloads systemd; keeps \file{/etc/kb}, state, users & \texttt{post\_remove} reloads systemd; same retention\\
+Build flags & plain \texttt{make build} & \texttt{!lto}, neutral \texttt{CFLAGS/LDFLAGS/RUSTFLAGS}\\
+\bottomrule
+\end{tabularx}
+\end{center}
+\textbf{Nothing is enabled or started on install.} \cmd{kb-checker} can legitimately run a network lockdown;
+a package must never arm that by surprise. You start the stack yourself with \cmd{kbctl up}
+(Chapter~\ref{ch:start}).
+
+\section{What is deliberately not in the package}
+\begin{itemize}
+\item \textbf{Development keys and datasets.} No private key, no \file{authorized_keys} from the tree, no \file{scripts/dataset}, no zip bundles.
+\item \textbf{The Python virtualenv.} The \cmd{kb-aads} environment (Ray, PyTorch) is multiple gigabytes and CPU-specific; you create it on the target (Chapter~\ref{ch:aads}).
+\item \textbf{Build outputs of other subsystems} such as \file{target/} directories and \file{node_modules}.
+\end{itemize}
+The \cmd{kb-aads} source tree \emph{does} include one trained policy checkpoint, \file{marl/checkpoints/containment_ppo/}
+(16 \file{.pkl} files, 1.8~MB). It is shipped because the containment agent loads it at runtime
+(\texttt{RLModule.from\_checkpoint} in \file{agents/containment.py}); without it the agent reports
+\texttt{model\_loaded: False} and recommends no containment. Pickle files execute code when loaded, so:
+\begin{itemize}
+\item They ship root-owned and not world-writable, under \file{/usr/lib/kb/aads/}, which only root may modify.
+\item The package carries an integrity manifest. Verify it any time, and before every start if you are cautious:
+\begin{lstlisting}[style=console]
+$ cd /usr/lib/kb/aads/marl/checkpoints && sha256sum -c SHA256SUMS
+containment_ppo/learner_group/state.pkl: OK
+...
+\end{lstlisting}
+\item The unused \texttt{jury\_ppo} checkpoint and the development \file{session.log} are \emph{not} shipped.
+\end{itemize}
+The manifest protects against accidental damage and casual tampering; an attacker with root can replace both
+files, which is why \cmd{kb-checker}'s eventual file-integrity role matters (Chapter~\ref{ch:checker}).

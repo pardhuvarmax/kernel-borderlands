@@ -5,10 +5,14 @@ DefaultDependencies=no
 
 [Service]
 Type=notify
-ExecStart=/usr/sbin/sshd -D -f /etc/ssh/sshd_config.d/kb-operator.conf
+ExecStart=/usr/sbin/sshd -D -f /etc/kb/sshd_kb-operator.conf
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
+
+# Auto-create and manage /run/sshd lifecycle on startup/reboot
+RuntimeDirectory=sshd
+RuntimeDirectoryMode=0755
 
 # Full hardening — this is the system's real, battle-tested sshd binary,
 # not application code owned by this repo, so unlike kbd/kb-checker above
@@ -21,7 +25,9 @@ PrivateTmp=true
 ProtectHome=true
 MemoryDenyWriteExecute=true
 ProtectSystem=strict
-ReadWritePaths=/run/kb
+
+# Expanded allowed write paths to include the newly mapped runtime space
+ReadWritePaths=/run/kb /run/sshd
 CapabilityBoundingSet=
 
 [Install]

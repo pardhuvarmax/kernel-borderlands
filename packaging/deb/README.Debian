@@ -1,0 +1,16 @@
+Kernel Borderlands
+==================
+
+Start:        sudo kbctl up
+Dashboard:    kbctl dashboard open        (http://127.0.0.1:8082)
+SSH TUI:      sudo kbctl ssh add-key ~/.ssh/id_ed25519.pub
+              kbctl ssh connect
+Status/stop:  kbctl status / sudo kbctl down
+
+kb-aads (agent swarm) is optional and not enabled by default:
+  python3 -m venv /opt/kb/venv
+  /opt/kb/venv/bin/pip install -r /usr/lib/kb/aads/requirements.txt
+  sudo systemctl enable --now kbagents
+
+Requires a kernel with BTF and BPF LSM enabled; see
+/usr/share/doc/kernel-borderlands/ and docs/architecture/enabling-bpf-lsm.md.

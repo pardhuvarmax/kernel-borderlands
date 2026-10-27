@@ -1,0 +1,255 @@
+\chapter{Building the Package on \distroname}
+\label{ch:build}\label{ch:anatomy-note}
+This chapter takes you from a source tree to a verified \pkgfile. Every command is shown with the
+result you should see. Run it on \distroname{} itself (Chapter~\ref{ch:anatomy-note}).
+
+\ifarch
+\section{Prerequisites}
+\begin{lstlisting}[style=console]
+$ sudo pacman -S --needed base-devel go rust clang bpf libbpf \
+      nodejs npm libelf zlib
+\end{lstlisting}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{2.4cm}L{3.8cm}Y@{}}
+\toprule
+\textbf{Package} & \textbf{Provides} & \textbf{Why}\\
+\midrule
+\texttt{go} & Go 1.25 or newer & \texttt{kbd}, \texttt{kbctl}, \texttt{mcp-server}. \texttt{go.mod} declares \texttt{go 1.25.0}.\\
+\texttt{rust} & \texttt{cargo}, \texttt{rustc} & \texttt{kb-checker}, \texttt{kb-tui} (becomes \texttt{kbopd}).\\
+\texttt{clang}, \texttt{bpf} & BPF compiler, \texttt{bpftool} & CO-RE skeleton generation for the sensor.\\
+\texttt{libbpf} & \file{/usr/include/bpf/libbpf.h} & Headers the userspace loader includes (the archive itself is vendored).\\
+\texttt{nodejs}, \texttt{npm} & Vite toolchain & Builds the embedded dashboard.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{kbwarn}[CHECK YOUR PATH: ALTERNATE TOOLCHAINS WILL BREAK THE BUILD]
+If a Nix profile, \texttt{asdf}, \texttt{rustup} or similar sits earlier in \texttt{PATH}, it can shadow the system
+tools. A Nix \cmd{clang} wrapper does not search \file{/usr/include}, so the sensor fails with
+\texttt{fatal error: 'bpf/libbpf.h' file not found}. Check with
+\texttt{which -a clang go cargo} and, if needed, build from a clean path:
+\texttt{PATH=/usr/local/bin:/usr/bin make build}. The \texttt{PKGBUILD} pins this for you.
+\end{kbwarn}
+
+\section{Step by step}
+\resetsteps
+\step{Get the source tree onto the Arch machine}
+\begin{lstlisting}[style=console]
+$ cd ~/Desktop/Dev/kbworkspaces/project/kernel-borderlands-vm
+$ ls
+CHANGELOG.md  Makefile  kb-aads  kb-checker  kb-control-plane  kb-core  kb-op  packaging ...
+\end{lstlisting}
+
+\step{Build the package}
+\begin{lstlisting}[style=console]
+$ cd packaging/arch
+$ makepkg -f
+==> Making package: kernel-borderlands 0.1.0-1
+==> Starting build()...
+[Stage-1/5] Build C-based low-level eBPF core library bindings
+[Stage-2/5] Build the main Go system daemon (kbd) into the root bin/
+...
+==> Starting package()...
+==> Creating package "kernel-borderlands"...
+==> Finished making: kernel-borderlands 0.1.0-1
+\end{lstlisting}
+The first build compiles the Go standard library (\texttt{-a}) and every Rust dependency; expect several
+minutes. Later builds are incremental.
+
+\step{Locate and fingerprint the artifact}
+\begin{lstlisting}[style=console]
+$ ls -l kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+-rw-r--r-- 1 you you 25211681 ... kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+$ sha256sum kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+\end{lstlisting}
+
+\subsection{Why the PKGBUILD is unusual}
+\begin{itemize}
+\item It builds from the \emph{surrounding working tree}, not a tarball (\texttt{source=()} is empty and \texttt{\_root()} resolves \texttt{\$startdir/../..}). Run \cmd{makepkg} from \file{packaging/arch/}.
+\item \texttt{options=(!debug !strip !lto)}. Arch's default \texttt{-flto} turns the C objects of Rust's \texttt{ring} crate (used by \cmd{kb-checker}) into LTO bitcode that \cmd{rustc}'s linker cannot resolve; the symptom is a wall of \texttt{undefined symbol: ring\_core\_0\_17\_14\_...}.
+\item It runs \texttt{unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS RUSTFLAGS CC CXX} before \cmd{make build}. Exported makepkg flags (\texttt{-march=native}, \texttt{--as-needed}, frame pointers) break \cmd{kb-checker}'s link against libbpf (\texttt{undefined symbol: bpf\_prog\_get\_next\_id}) and would make the package CPU-specific. The project applies its own hardening in \file{kb-core/Makefile}.
+\item The \texttt{makedepends} line lists \texttt{libbpf} because the sensor's loader includes its headers.
+\end{itemize}
+
+\else
+\section{Prerequisites}
+\begin{lstlisting}[style=console]
+$ sudo apt update
+$ sudo apt install -y build-essential clang llvm make git pkg-config \
+      libelf-dev zlib1g-dev libbpf-dev nodejs npm \
+      linux-tools-common linux-tools-$(uname -r)   # provides bpftool
+\end{lstlisting}
+Go and Rust come from outside \cmd{apt} because Ubuntu 24.04's packaged versions are too old:
+\begin{lstlisting}[style=console]
+$ sudo apt install -y golang-go                       # 1.22 is enough to BOOTSTRAP
+$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+$ . "$HOME/.cargo/env"
+$ go version && cargo --version
+go version go1.22.2 linux/amd64
+cargo 1.96.1 (...)
+\end{lstlisting}
+\begin{kbnote}[GO 1.25 ON A GO 1.22 MACHINE]
+\texttt{go.mod} declares \texttt{go 1.25.0}. The Go 1.22 binary on Ubuntu 24.04 reads that line, sees it is
+too old, and (with the default \texttt{GOTOOLCHAIN=auto}) downloads the 1.25 toolchain on first use. The build
+host therefore needs network access to \texttt{proxy.golang.org} once. This is exactly how the reference
+\texttt{.deb} was produced.
+\end{kbnote}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3.2cm}Y@{}}
+\toprule
+\textbf{Package} & \textbf{Why}\\
+\midrule
+\texttt{clang}, \texttt{llvm}, bpftool & Compile BPF programs, generate CO-RE skeletons.\\
+\texttt{libelf-dev}, \texttt{zlib1g-dev} & Link the sensor (\texttt{-lelf -lz}).\\
+\texttt{libbpf-dev} & Provides \file{/usr/include/bpf/libbpf.h} for the loader.\\
+\texttt{nodejs}, \texttt{npm} & Dashboard build (Node 20 was used).\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{kbwarn}[NON-LOGIN SSH SHELLS DO NOT SEE \file{\~{}/.cargo/bin}]
+\texttt{ssh host 'make build'} runs a non-login shell, so \cmd{cargo} is not on \texttt{PATH} and stage 3 fails
+with \texttt{cargo: command not found}. Export it explicitly:
+\texttt{export PATH=\$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin}.
+\end{kbwarn}
+
+\section{Step by step}
+\resetsteps
+\step{Put the source tree on the Ubuntu machine}
+Use a \emph{separate} directory if the host already runs a live install, so you never overwrite a working tree:
+\begin{lstlisting}[style=console]
+$ rsync -az --exclude='/.git/' --exclude='venv/' --exclude='target/' \
+      --exclude='node_modules/' --exclude='/kb-core/build/' --exclude='/dist/' \
+      --exclude='/bin/' ./ ubuntu-host:kb-pkg-build/
+\end{lstlisting}
+
+\step{Compile everything}
+\begin{lstlisting}[style=console]
+$ cd ~/kb-pkg-build
+$ export PATH=$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+$ make build
+[Stage-1/5] Build C-based low-level eBPF core library bindings
+[Stage-2/5] Build the main Go system daemon (kbd) into the root bin/
+[Stage-3/5] Build the Rust eBPF policy engine ...
+[Stage-4/5] Build the companion Go CLI tool into the root bin/
+[Stage-5/5] Build Vite frontend assets and bundle ... into the root bin/
+\end{lstlisting}
+Stage 5 runs \texttt{npm ci} automatically when \file{kb-op/kb-dashboard/node_modules} is absent.
+
+\step{Assemble and pack the \texttt{.deb}}
+\begin{lstlisting}[style=console]
+$ packaging/deb/build-deb.sh
+make install-pkg PREFIX=/usr DESTDIR=.../dist/deb-stage
+dpkg-deb: building package 'kernel-borderlands' in '.../dist/kernel-borderlands_0.1.0_amd64.deb'.
+built .../dist/kernel-borderlands_0.1.0_amd64.deb
+\end{lstlisting}
+Set \texttt{VERSION=0.1.1 packaging/deb/build-deb.sh} to change the version string.
+
+\step{Fingerprint the artifact}
+\begin{lstlisting}[style=console]
+$ ls -l dist/kernel-borderlands_0.1.0_amd64.deb
+-rw-r--r-- 1 you you 20802812 ... kernel-borderlands_0.1.0_amd64.deb
+$ sha256sum dist/kernel-borderlands_0.1.0_amd64.deb
+\end{lstlisting}
+
+\subsection{What \cmd{build-deb.sh} guards against}
+\begin{itemize}
+\item \textbf{Setgid checkouts.} If the tree lives under a setgid directory, the staging directories inherit mode 2755 and \cmd{dpkg-deb} refuses a \texttt{DEBIAN/} like that (``control directory has bad permissions 2755''). The script clears the bit on every staged directory so it also does not leak into the package.
+\item \textbf{Ownership.} It builds with \texttt{--root-owner-group}, so files are \texttt{root:root} regardless of who ran the build.
+\item \textbf{Installed-Size} is computed from the stage tree.
+\end{itemize}
+\fi
+
+\section{Inspect the artifact before you trust it}
+\label{sec:secrets}
+Never install a package you have not looked inside. These four checks take seconds.
+
+\resetsteps
+\step{List the contents}
+\ifarch
+\begin{lstlisting}[style=console]
+$ pacman -Qlp kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst | grep -v '/aads/'
+kernel-borderlands /etc/kb/agents.yaml
+kernel-borderlands /etc/kb/policy.yaml
+...
+kernel-borderlands /usr/bin/kbctl
+kernel-borderlands /usr/bin/kbd
+kernel-borderlands /usr/lib/systemd/system/kbd.service
+...
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ dpkg-deb -c kernel-borderlands_0.1.0_amd64.deb | grep -v '/aads/'
+-rw-r----- root/root  ./etc/kb/policy.yaml
+-rwxr-xr-x root/root  ./usr/bin/kbctl
+-rwxr-xr-x root/root  ./usr/bin/kbd
+...
+\end{lstlisting}
+\fi
+
+\step{Read the metadata}
+\ifarch
+\begin{lstlisting}[style=console]
+$ pacman -Qip kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+Name            : kernel-borderlands
+Version         : 0.1.0-1
+Depends On      : glibc  systemd  openssh  libelf  zlib
+Installed Size  : 61.10 MiB
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ dpkg-deb -I kernel-borderlands_0.1.0_amd64.deb
+ Package: kernel-borderlands
+ Version: 0.1.0
+ Architecture: amd64
+ Depends: libc6, systemd, openssh-server, libelf1t64 | libelf1, zlib1g
+\end{lstlisting}
+\fi
+
+\step{Prove no key material is inside}
+\ifarch
+\begin{lstlisting}[style=console]
+$ pacman -Qlp kernel-borderlands-*.pkg.tar.zst \
+    | grep -E 'ssh_host|authorized_keys|id_(rsa|ed25519)|\.pem' \
+    || echo "none"
+none
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ dpkg-deb -c kernel-borderlands_*.deb \
+    | grep -E 'ssh_host|authorized_keys|id_(rsa|ed25519)|\.pem' \
+    || echo "none"
+none
+\end{lstlisting}
+\fi
+
+\step{Check every binary resolves its libraries}
+\ifarch
+\begin{lstlisting}[style=console]
+$ mkdir /tmp/kbx && bsdtar -xf kernel-borderlands-*.pkg.tar.zst -C /tmp/kbx
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ mkdir /tmp/kbx && dpkg-deb -x kernel-borderlands_*.deb /tmp/kbx
+\end{lstlisting}
+\fi
+\begin{lstlisting}[style=console]
+$ for b in kbd kbctl kbopd kbd_sensor kb-checker mcp-server; do
+>   ldd /tmp/kbx/usr/bin/$b | grep 'not found'
+> done
+$ echo "(no lines above = all libraries resolved)"
+\end{lstlisting}
+
+\begin{kbtip}
+Keep the \texttt{sha256sum} of each release next to the artifact. When a colleague asks ``is this the
+package you tested?'', the hash answers in one line.
+\end{kbtip}
+
+\section{Cross-distro note}
+\ifarch
+To produce the Ubuntu package you must build on Ubuntu 24.04 (or older); see the Ubuntu edition of this
+manual or Appendix~\ref{app:cross} for the condensed recipe.
+\else
+To produce the Arch package you must build on Arch Linux; see the Arch edition of this manual or
+Appendix~\ref{app:cross} for the condensed recipe.
+\fi

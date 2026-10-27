@@ -1,0 +1,43 @@
+# Maintainer: Kernel Borderlands Team <rushiroyal.k@gmail.com>
+#
+# Builds from the surrounding working tree (no tarball), so run from here:
+#   cd packaging/arch && makepkg -f
+# -> kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+pkgname=kernel-borderlands
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Kernel-level runtime defense framework: eBPF sensor, Go control plane, SSH TUI and web dashboard'
+arch=('x86_64')
+url='https://github.com/pardhuvarmax/kernel-borderlands'
+license=('GPL3')
+depends=('glibc' 'systemd' 'openssh' 'libelf' 'zlib')
+makedepends=('go' 'rust' 'clang' 'bpf' 'libbpf' 'nodejs' 'npm' 'make')
+optdepends=('python: kb-aads agent swarm (also needs a venv, see README.Debian text in /usr/share/doc)')
+backup=(etc/kb/policy.yaml etc/kb/rules.yaml etc/kb/workloads.yaml
+        etc/kb/agents.yaml etc/kb/sshd_kb-operator.conf)
+install=kernel-borderlands.install
+# !lto: makepkg's default -flto turns the C objects of Rust's `ring` crate (kb-checker)
+# into LTO bitcode that rustc's linker cannot resolve (undefined ring_core_* symbols).
+options=(!debug !strip !lto)
+
+_root() { cd "$startdir/../.." && pwd; }
+
+build() {
+    cd "$(_root)"
+    # System toolchains only: a Nix/asdf/etc. profile earlier in PATH ships a
+    # clang wrapper that cannot see /usr/include/bpf and Rust/Go builds that
+    # embed foreign loader paths.
+    export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
+    # makepkg's exported CFLAGS/LDFLAGS/RUSTFLAGS (-march=native, --as-needed,
+    # frame pointers, ...) break kb-checker's link against libbpf (undefined
+    # bpf_* symbols) and make the package CPU-specific. The project applies
+    # its own hardening flags (kb-core/Makefile HARDEN_*), so build neutral.
+    unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS RUSTFLAGS CC CXX
+    make build
+}
+
+package() {
+    cd "$(_root)"
+    make install-pkg PREFIX=/usr DESTDIR="$pkgdir"
+    install -Dm644 packaging/deb/README.Debian "$pkgdir/usr/share/doc/$pkgname/README"
+}

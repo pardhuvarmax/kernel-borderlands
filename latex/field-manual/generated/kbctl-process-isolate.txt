@@ -1,0 +1,15 @@
+Sends a containment command to the kernel sensor via kbd's
+SetContainment RPC. Defaults to NAMESPACE-level isolation; pass --level
+to choose CGROUP, SECCOMP, NAMESPACE, or TERMINATE explicitly.
+
+Usage:
+  kbctl process isolate [flags]
+
+Flags:
+  -h, --help            help for isolate
+      --level string    CGROUP | SECCOMP | NAMESPACE | TERMINATE (default "NAMESPACE")
+      --pid uint32      target process PID (required)
+      --reason string   operator-supplied reason, recorded in the audit log (default "kbctl process isolate")
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

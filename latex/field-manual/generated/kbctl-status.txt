@@ -1,0 +1,10 @@
+Show the state of every Kernel Borderlands unit
+
+Usage:
+  kbctl status [flags]
+
+Flags:
+  -h, --help   help for status
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

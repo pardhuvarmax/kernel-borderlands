@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+# /etc/kb (host key, authorized_keys), /var/lib/kbd and the kb group /
+# operator user are left in place even on purge: they hold audit state and
+# credentials an operator would not expect a package purge to destroy.
+exit 0

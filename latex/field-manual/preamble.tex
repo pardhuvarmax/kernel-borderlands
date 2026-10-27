@@ -1,0 +1,122 @@
+% Preamble for "The How To Kernel Borderlands Book" -- Field Manual.
+% Built with LuaLaTeX; fonts are the Latin Modern OpenType set shipped with
+% TeX Live, so the manual rebuilds anywhere. Pure black and white (grays only).
+\usepackage{fontspec}
+\setmainfont{lmsans10-regular}[Extension=.otf,UprightFont=lmsans10-bold,
+  BoldFont=lmsans10-bold,ItalicFont=lmsans10-boldoblique,BoldItalicFont=lmsans10-boldoblique]
+\setsansfont{lmsans10-regular}[Extension=.otf,UprightFont=lmsans10-bold,
+  BoldFont=lmsans10-bold,ItalicFont=lmsans10-boldoblique,BoldItalicFont=lmsans10-boldoblique]
+\setmonofont{lmmono10-regular}[Extension=.otf,UprightFont=lmmonolt10-bold,
+  BoldFont=lmmonolt10-bold,ItalicFont=lmmonolt10-boldoblique,BoldItalicFont=lmmonolt10-boldoblique,Scale=0.98]
+\usepackage[a4paper,inner=26mm,outer=20mm,top=26mm,bottom=28mm,headheight=15pt]{geometry}
+\usepackage{microtype}
+\usepackage{xcolor}
+\definecolor{ink}{gray}{0}
+\definecolor{ash}{gray}{0.93}
+\definecolor{mist}{gray}{0.80}
+\definecolor{slate}{gray}{0.35}
+\usepackage{graphicx,booktabs,longtable,array,tabularx,enumitem,url,fancyhdr,titlesec,setspace,etoolbox}
+\urlstyle{tt}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\setlist{itemsep=2pt,topsep=4pt,parsep=0pt}
+\usepackage{listings}
+\usepackage[most]{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,fit,calc,backgrounds,decorations.pathreplacing,matrix,patterns}
+\usepackage[pdfusetitle,hidelinks,bookmarksnumbered]{hyperref}
+\usepackage{bookmark}
+\setstretch{1.08}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\emergencystretch=2em
+\raggedbottom
+
+% ---- distro switch ---------------------------------------------------------
+% latexmk -jobname=... -lualatex="lualatex %O '\def\KBDISTRO{ubuntu}\input{%S}'"
+\ifdefined\KBDISTRO\else\def\KBDISTRO{arch}\fi
+\def\kbtmp{arch}
+\newif\ifarch
+\ifx\KBDISTRO\kbtmp\archtrue\else\archfalse\fi
+\newcommand{\distroname}{\ifarch Arch Linux\else Ubuntu 24.04 LTS\fi}
+\newcommand{\distroshort}{\ifarch Arch\else Ubuntu\fi}
+\newcommand{\pkgfile}{\ifarch\path{kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst}\else\path{kernel-borderlands_0.1.0_amd64.deb}\fi}
+\newcommand{\pkgext}{\ifarch\path{.pkg.tar.zst}\else\path{.deb}\fi}
+
+% ---- semantic macros -------------------------------------------------------
+\DeclareRobustCommand{\file}[1]{\path{#1}}
+\DeclareRobustCommand{\cmd}[1]{\texttt{#1}}
+\DeclareRobustCommand{\unit}[1]{\texttt{#1}}
+\newcommand{\kb}{Kernel Borderlands}
+\newcommand{\todo}[1]{}
+
+% ---- listings --------------------------------------------------------------
+\lstdefinestyle{kb}{basicstyle=\ttfamily\footnotesize,columns=fullflexible,keepspaces=true,
+  breaklines=true,breakatwhitespace=false,postbreak=\mbox{\textbullet\space},
+  frame=single,rulecolor=\color{ink},framesep=5pt,framerule=0.8pt,
+  backgroundcolor=\color{ash},xleftmargin=0pt,xrightmargin=0pt,
+  showstringspaces=false,upquote=true,aboveskip=8pt,belowskip=8pt,
+  literate={—}{{--}}1 {§}{{S.}}1 {→}{{->}}2}
+\lstdefinestyle{console}{style=kb,backgroundcolor=\color{white},frame=lines,framerule=1.4pt,
+  moredelim=[is][\underbar]{@@}{@@}}
+\lstdefinestyle{conf}{style=kb,numbers=left,numberstyle=\tiny\ttfamily,numbersep=6pt,
+  stepnumber=5,backgroundcolor=\color{white},frame=single,framerule=1pt,
+  morecomment=[l]{\#},commentstyle=\itshape}
+\lstset{style=kb}
+\newcommand{\lstconf}[3][]{\lstinputlisting[style=conf,caption={#2},label={#3},#1]{../../#2}}
+
+% ---- boxes (black and white) -------------------------------------------------
+\newtcolorbox{kbnote}[1][NOTE]{enhanced,breakable,colback=white,colframe=ink,boxrule=0.9pt,
+  arc=0pt,left=8pt,right=8pt,top=6pt,bottom=6pt,
+  title={#1},fonttitle=\bfseries\sffamily\small,coltitle=white,colbacktitle=ink,
+  attach boxed title to top left={yshift=-2.2mm,xshift=4mm},boxed title style={arc=0pt,boxrule=0pt}}
+\newtcolorbox{kbwarn}[1][WARNING]{enhanced,breakable,colback=ash,colframe=ink,boxrule=2.2pt,
+  arc=0pt,left=10pt,right=8pt,top=8pt,bottom=6pt,
+  title={#1},fonttitle=\bfseries\sffamily\small,coltitle=white,colbacktitle=ink,
+  attach boxed title to top left={yshift=-2.6mm,xshift=4mm},boxed title style={arc=0pt,boxrule=0pt}}
+\newtcolorbox{kbtip}[1][FIELD TIP]{enhanced,breakable,colback=white,colframe=ink,boxrule=0.9pt,
+  arc=0pt,left=8pt,right=8pt,top=6pt,bottom=6pt,
+  borderline west={4pt}{0pt}{ink},
+  title={#1},fonttitle=\bfseries\sffamily\small,coltitle=ink,colbacktitle=mist,
+  attach boxed title to top left={yshift=-2.2mm,xshift=4mm},boxed title style={arc=0pt,boxrule=0.9pt}}
+\newcounter{kbstep}
+\newcommand{\resetsteps}{\setcounter{kbstep}{0}}
+\newcommand{\step}[1]{\refstepcounter{kbstep}\par\vspace{4pt}\noindent
+  \tikz[baseline=(n.base)]\node[circle,fill=ink,text=white,inner sep=2.2pt,font=\bfseries\sffamily\small](n){\thekbstep};%
+  \hspace{6pt}\textbf{#1}\par\vspace{1pt}}
+
+% ---- headings & page style -----------------------------------------------------
+\titleformat{\chapter}[display]{\bfseries\sffamily}
+  {\vspace*{-6pt}\rule{\textwidth}{3pt}\\[4pt]\Large\MakeUppercase{\chaptertitlename}\ \thechapter}
+  {6pt}{\Huge\MakeUppercase}[\vspace{4pt}\rule{\textwidth}{0.8pt}]
+\titlespacing*{\chapter}{0pt}{0pt}{22pt}
+\titleformat{\section}{\bfseries\sffamily\Large}{\thesection}{10pt}{}[\vspace{-4pt}\rule{\textwidth}{1.2pt}]
+\titleformat{\subsection}{\bfseries\sffamily\large}{\thesubsection}{8pt}{}
+\titleformat{\subsubsection}{\bfseries\sffamily\normalsize}{\thesubsubsection}{8pt}{}
+\titleformat{\part}[display]{\bfseries\sffamily\centering}{\vspace*{3cm}\rule{\textwidth}{4pt}\\[10pt]\Large\MakeUppercase{\partname}\ \thepart}{12pt}{\Huge\MakeUppercase}[\vspace{10pt}\rule{\textwidth}{1pt}]
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\bfseries\sffamily\small\thepage\quad\leftmark}
+\fancyhead[RO]{\bfseries\sffamily\small\rightmark\quad\thepage}
+\fancyfoot[C]{\bfseries\sffamily\scriptsize THE HOW TO KERNEL BORDERLANDS BOOK \textbullet\ \MakeUppercase{\distroshort} EDITION}
+\renewcommand{\headrulewidth}{1pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\bfseries\sffamily\small\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+% ---- TikZ house style -----------------------------------------------------------
+\tikzset{
+  >={Stealth[length=2.6mm]},
+  box/.style={draw=ink,line width=1pt,fill=white,rectangle,rounded corners=1.5pt,align=center,
+    font=\bfseries\sffamily\footnotesize,inner sep=5pt,minimum height=8mm},
+  dark/.style={box,fill=ink,text=white},
+  soft/.style={box,fill=ash},
+  dashedbox/.style={box,dashed,fill=white},
+  group/.style={draw=ink,line width=0.8pt,dashed,rounded corners=3pt,inner sep=8pt},
+  flow/.style={->,line width=1pt},
+  flowd/.style={->,line width=1pt,dashed},
+  lbl/.style={font=\bfseries\sffamily\scriptsize,fill=white,inner sep=1.5pt},
+}
+
+% ---- checklist marks ---------------------------------------------------------
+\newcommand{\chk}{\tikz[baseline=-0.7ex]\draw[line width=1pt] (0,0) rectangle (2.4mm,2.4mm);}
+\newcommand{\kbstar}{\tikz[baseline=-0.55ex]\node[star,star points=5,fill=ink,draw=ink,inner sep=1.5pt]{};}

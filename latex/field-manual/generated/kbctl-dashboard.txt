@@ -1,0 +1,23 @@
+Manage the web dashboard served by kbopd, the unified kb-tui binary that
+embeds kb-dashboard's production build. It listens on 127.0.0.1 only; reach it
+from another machine with an SSH local forward or use the SSH TUI
+('kbctl ssh connect') instead.
+
+Usage:
+  kbctl dashboard [command]
+
+Available Commands:
+  down        Stop and disable the web dashboard
+  open        Start the dashboard if needed and open it in the default browser
+  status      Show whether the dashboard unit is running and its port is answering
+  up          Enable and start the web dashboard, then print its URL
+  url         Print the dashboard URL
+
+Flags:
+  -h, --help       help for dashboard
+      --port int   dashboard port (kbopd's embedded server is fixed at 8082; change only if you rebuilt it) (default 8082)
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+
+Use "kbctl dashboard [command] --help" for more information about a command.

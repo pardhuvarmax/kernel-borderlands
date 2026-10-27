@@ -6,18 +6,31 @@ DefaultDependencies=no
 
 [Service]
 Type=simple
-# NOT YET FUNCTIONAL: kb-op/kb-dashboard runs today only as a Vite
-# dev-server (`npm run dev`), no compiled binary. This unit documents the
-# target packaging convention from docs/architecture/boot_sequence_spec.md,
-# not a build that exists. Producing a real production build/serving story
-# for /usr/local/bin/kbopd is deferred follow-up work.
-ExecStart=/usr/local/bin/kbopd --config /etc/kb/config.yaml
+# REAL as of this pass: kb-op/kb-tui was extended (axum + rust-embed) into
+# a unified binary — the same compiled kb-tui binary, installed here as
+# kbopd, embeds kb-dashboard's production build (npm run build's dist/)
+# and serves it over HTTP when run without a controlling TTY (see
+# kb-op/kb-tui/src/main.rs's is_terminal() check + run_headless(), and
+# src/dash.rs for the embedded-asset server). The Makefile's `build`/
+# `install` targets copy the compiled kb-tui binary to bin/kbopd and
+# install it as /usr/local/bin/kbopd.
+#
+# ExecStart was previously /opt/kb/bin/kbopd --config /etc/kb/config.yaml
+# — both wrong: /opt/kb/bin/ was a stale manual-test location, not where
+# `make install` actually puts anything (/usr/local/bin/, matching every
+# other unit in this directory), and kbopd parses no CLI arguments at all
+# today (no clap/env::args() anywhere in main.rs), so --config was silently
+# ignored. Running the stale /opt/kb/bin/kbopd directly reproduced a real
+# crash (`Error: Os { code: 6, ... "No such device or address" }`) that
+# the current, correctly-installed /usr/local/bin/kbopd does not have —
+# confirmed by running both binaries directly, side by side.
+ExecStart=/usr/local/bin/kbopd
 Restart=always
 RestartSec=5
 
-# Full hardening — safe here, same reasoning as kbagents above: not deployed
-# yet, and a web dashboard's actual runtime need is a network listener plus
-# a UDS/gRPC client connection to kbd, nothing privileged.
+# Full hardening: kbopd's real runtime need is a network listener
+# (embedded dashboard server, src/dash.rs, hardcoded to 127.0.0.1:8082)
+# plus spawning /usr/local/bin/mcp-server as a child — nothing privileged.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true

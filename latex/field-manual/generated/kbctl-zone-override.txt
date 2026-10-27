@@ -1,0 +1,17 @@
+Relabels how kbd tracks a process's zone (SAFE / SUSPICIOUS /
+BORDERLANDS) for display and classification purposes only — it does not
+touch kernel or enforcement state. A subsequent real zone transition
+event from the sensor will overwrite this the next time the process's
+score crosses a threshold. The override is recorded in the audit log.
+
+Usage:
+  kbctl zone override [flags]
+
+Flags:
+  -h, --help            help for override
+      --pid uint32      target process PID (required)
+      --reason string   operator-supplied reason, recorded in the audit log
+      --zone string     SAFE | SUSPICIOUS | BORDERLANDS (required)
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

@@ -1,0 +1,11 @@
+Export the full hash-chained audit log as JSON
+
+Usage:
+  kbctl audit export [flags]
+
+Flags:
+  -h, --help         help for export
+      --out string   output file (JSON); defaults to stdout
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

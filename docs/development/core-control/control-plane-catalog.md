@@ -427,7 +427,7 @@ An empty `authorized_keys` means public-key auth rejects everyone (fails safe) �
 - **Why it matters**: §1.11 covers this in detail as a design discussion; this entry exists to track it as an actual piece of work rather than leaving it as commentary. The daemon's entire remote-access surface (§1.11) currently depends on a single custom, hand-rolled SSH server (`charmbracelet/wish`/`ssh`, wrapping `golang.org/x/crypto/ssh`) — a far less battle-tested implementation than OpenSSH for the one job that matters most here: authenticating remote operators before handing them a PTY into a process with gRPC control over containment.
 - **The lever**: swap `internal/ssh/`'s server responsibility for the system's actual `sshd`, configured to land operators directly in `kb-tui` — same UX, inherited hardening:
 ```
-# /etc/ssh/sshd_config.d/kb-operator.conf
+# /etc/kb/sshd_kb-operator.conf  (was /etc/ssh/sshd_config.d/ — see boot_sequence_spec.md §3 correction)
 Match User operator
     ForceCommand /usr/local/bin/kb-tui
     AuthorizedKeysCommand /usr/local/bin/kb-authkeys-lookup   # ties into CIS, see §2.12
@@ -473,7 +473,7 @@ Regression coverage: the deleted `internal/ssh/` package's tests (`TestAuthThrot
 
 - **Implementation plan**:
 1. **Stand up the CA.** `step-ca` issues short-TTL user certificates (hours, not days) after the operator authenticates against the org's existing OIDC/SSO provider — this is the actual access-control decision point, not a file on disk.
-2. **Trust the CA on every `kbd` host.** Part of the same `sshd_config.d` drop-in from §2.11:
+2. **Trust the CA on every `kbd` host.** Part of the same operator `sshd` config from §2.11 (`/etc/kb/sshd_kb-operator.conf`):
    ```
    TrustedUserCAKeys /etc/ssh/kb_operator_ca.pub
    AuthorizedPrincipalsFile /etc/ssh/kb_principals/%u

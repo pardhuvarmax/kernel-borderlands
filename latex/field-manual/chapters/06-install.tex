@@ -1,0 +1,134 @@
+\chapter{Installing, Verifying, Upgrading, Removing}
+\label{ch:install}
+
+\section{Install}
+\ifarch
+\begin{lstlisting}[style=console]
+$ sudo pacman -U kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+resolving dependencies...
+looking for conflicting packages...
+Packages (1) kernel-borderlands-0.1.0-1
+:: Proceed with installation? [Y/n]
+(1/1) installing kernel-borderlands
+group kb already exists, skipping      # or: created group: kb
+created user: operator (member of kb)
+generated SSH host key: /etc/kb/ssh/ssh_host_ed25519_key
+created empty /etc/kb/authorized_keys - add operator public keys here
+provisioning complete
+==> Kernel Borderlands installed. Nothing has been started.
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ sudo apt install ./kernel-borderlands_0.1.0_amd64.deb
+Reading package lists... Done
+The following NEW packages will be installed:
+  kernel-borderlands
+Setting up kernel-borderlands (0.1.0) ...
+created group: kb
+created user: operator (member of kb)
+generated SSH host key: /etc/kb/ssh/ssh_host_ed25519_key
+created empty /etc/kb/authorized_keys - add operator public keys here
+provisioning complete
+\end{lstlisting}
+Use \texttt{./} in front of the filename: without it \cmd{apt} looks for a package \emph{name} in the archive.
+\fi
+
+\subsection{What the post-install step did}
+\begin{enumerate}
+\item Created group \texttt{kb} and system user \texttt{operator} (no home, shell \file{/usr/sbin/nologin}) if absent.
+\item Created \file{/etc/kb} (\texttt{root:kb}, 0750) and \file{/etc/kb/ssh/}.
+\item Generated \file{/etc/kb/ssh/ssh_host_ed25519_key} \emph{only if it did not exist}. Re-installing never rotates it.
+\item Created an empty \file{/etc/kb/authorized_keys} (\texttt{operator:kb}, 0600).
+\item Ran \texttt{systemctl daemon-reload} so the new units are visible.
+\end{enumerate}
+It did \textbf{not} enable or start anything, and it did not create \file{/etc/kb/checker.enabled}.
+
+\begin{kbwarn}[THE OPERATOR ACCOUNT USES A NOLOGIN SHELL: VERIFY THE CONSOLE ON YOUR HOST]
+\file{provision.sh} creates \texttt{operator} with \file{/usr/sbin/nologin}. OpenSSH runs a \texttt{ForceCommand}
+as \texttt{\$SHELL -c ...}; on many systems a \texttt{nologin} shell therefore refuses it. This has
+\textbf{not} been tested with the packaged account because the build sessions had no root. Chapter~\ref{ch:ssh}
+gives the one-command test and the fix (give \texttt{operator} the shell \file{/bin/sh}; the sshd config
+already forbids forwarding and forces the wrapper).
+\end{kbwarn}
+
+\section{Verify the installation}
+\resetsteps
+\step{The files are where they should be}
+\ifarch
+\begin{lstlisting}[style=console]
+$ pacman -Ql kernel-borderlands | grep -E '/usr/bin/|/etc/kb/'
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ dpkg -L kernel-borderlands | grep -E '/usr/bin/|/etc/kb/'
+$ dpkg -s kernel-borderlands | grep -E 'Status|Version'
+Status: install ok installed
+\end{lstlisting}
+\fi
+
+\step{The units are known to systemd and use the right paths}
+\begin{lstlisting}[style=console]
+$ systemctl cat kbd.service | grep -E 'ExecStart|Environment'
+ExecStart=/usr/bin/kbd --db /var/lib/kbd/state.db --policy /etc/kb/policy.yaml \
+          --rules /etc/kb/rules.yaml --workloads /etc/kb/workloads.yaml
+Environment=KB_HTTP_CORS_ORIGIN=http://127.0.0.1:8082,http://localhost:8082
+$ systemd-analyze verify kbd.service kb-sensor.service kbopd.service
+\end{lstlisting}
+
+\step{The CLI answers and reports the maintenance hold}
+\begin{lstlisting}[style=console]
+$ kbctl status
+kbd.service                  inactive
+kb-sensor.service            inactive
+kbopd.service                inactive
+sshd@kb-operator.service     inactive
+kb-checker.service           UNDER MAINTENANCE AND REPAIRS (kept down)
+\end{lstlisting}
+
+\step{The provisioning result}
+\begin{lstlisting}[style=console]
+$ getent passwd operator
+operator:x:998:994::/home/operator:/usr/sbin/nologin
+$ sudo ls -l /etc/kb /etc/kb/ssh
+\end{lstlisting}
+
+\section{Upgrade}
+\ifarch
+Install the new file the same way (\texttt{pacman -U}). Because the five config files are in the
+\texttt{backup=()} array, a locally modified file is \emph{kept} and the new default is written beside it as
+\file{.pacnew}. Merge with \texttt{pacdiff} (from \texttt{pacman-contrib}).
+\else
+Install the new file the same way (\texttt{apt install ./new.deb}). The five files in \file{conffiles} are
+handled by \cmd{dpkg}: if you changed one and the package changed it too, you are asked whether to keep yours or
+take the maintainer's; answer \texttt{N} (keep yours), then diff against the \file{.dpkg-dist} copy.
+\fi
+Restart what changed: \texttt{sudo systemctl daemon-reload \&\& sudo kbctl down \&\& sudo kbctl up}.
+The SQLite state in \file{/var/lib/kbd/} is untouched by an upgrade.
+
+\section{Remove}
+\ifarch
+\begin{lstlisting}[style=console]
+$ sudo pacman -R kernel-borderlands
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ sudo apt remove kernel-borderlands      # keeps modified config
+$ sudo apt purge  kernel-borderlands      # removes config files the package owns
+\end{lstlisting}
+\fi
+Before removal the units are disabled and stopped. These are \textbf{intentionally left behind}, even after a
+purge, because they hold credentials and audit state an operator would not expect a package manager to destroy:
+\file{/etc/kb/ssh/} and \file{/etc/kb/authorized_keys}, \file{/var/lib/kbd/state.db}, the \texttt{kb} group and the
+\texttt{operator} user. To remove them as well:
+\begin{lstlisting}[style=console]
+$ sudo rm -rf /etc/kb /var/lib/kbd
+$ sudo userdel operator && sudo groupdel kb
+\end{lstlisting}
+
+\begin{kbnote}[IF A \emph{DEVELOPMENT} INSTALL ALREADY EXISTS ON THE HOST]
+\texttt{install.sh} and \texttt{sudo make install} place binaries in \file{/usr/local/bin} and units in
+\file{/etc/systemd/system}. Units in \file{/etc/systemd/system} \textbf{override} the package's units in
+\file{/usr/lib/systemd/system}, and \file{/usr/local/bin} wins over \file{/usr/bin} on \texttt{PATH}. Installing the
+package on top of such a host will silently keep running the old code. Remove the old units and binaries
+first (stop them, delete the files, \texttt{daemon-reload}), then install the package.
+\end{kbnote}

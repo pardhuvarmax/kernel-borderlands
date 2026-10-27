@@ -1,0 +1,49 @@
+\chapter{kb-checker: Under Maintenance and Repairs}
+\label{ch:checker}
+\begin{kbwarn}[STATUS: DOWN, BY DECISION]
+\cmd{kb-checker} is \textbf{under maintenance and repairs} and is kept down. This is deliberate and
+enforced in three places, so that no one starts it by accident.
+\end{kbwarn}
+
+\section{How it is held down}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{4.6cm}Y@{}}
+\toprule
+\textbf{Mechanism} & \textbf{Effect}\\
+\midrule
+\file{ConditionPathExists=/etc/kb/checker.enabled} in \unit{kb-checker.service} & \texttt{systemctl start kb-checker} is a no-op that reports the condition failed, until that file exists. The package never creates it.\\
+\cmd{kbctl up} & Starts \texttt{kbd}, \texttt{kb-sensor}, \texttt{kbopd}, \texttt{sshd@kb-operator} only.\\
+\cmd{kbctl status} & Prints \texttt{UNDER MAINTENANCE AND REPAIRS (kept down)} instead of a state.\\
+\unit{kbagents.service} & No longer \texttt{Requires=} the checker, which would have started it.\\
+\texttt{packaging/install.sh} & No longer enables it.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+\begin{lstlisting}[style=console]
+$ sudo systemctl start kb-checker
+$ systemctl status kb-checker | grep -E 'Active|Condition'
+   Active: inactive (dead)
+  Condition: start condition unmet ... ConditionPathExists=/etc/kb/checker.enabled was not met
+\end{lstlisting}
+
+\section{What you lose while it is down}
+\cmd{kb-checker} audits eBPF bytecode and map integrity, sensor liveness, the \cmd{kbd} gRPC health, and the swarm.
+It also runs the \emph{Tampering Containment Protocol}: on a confirmed integrity violation it stops the sensor,
+detaches the eBPF links and quarantines the host's network. With it down:
+\begin{itemize}
+\item \textbf{No automatic tamper response.} Nothing independently notices if the sensor or its programs are altered. Treat the host as \emph{observed but not self-defending}.
+\item \textbf{No false lockdowns either.} The checker's fail-closed behaviour can isolate a host over a missing dependency (for example, an absent swarm). Its absence removes that risk during demos.
+\item \texttt{/api/services} in the dashboard will report the checker as down. That is expected, not a fault.
+\end{itemize}
+
+\begin{kbwarn}[DO NOT RE-ENABLE IT AS A WORKAROUND]
+Creating \file{/etc/kb/checker.enabled} arms a component that can kill the sensor and firewall the host. Do it
+only on a machine you can reach out-of-band, and only once the repairs are signed off. When they are,
+remove the \texttt{ConditionPathExists} line from \file{packaging/systemd/kb-checker.service}, delete the
+\texttt{maintenanceUnits} entry in \file{kb-op/kbctl/svc.go}, add the unit back to \texttt{stackUnits}, and rebuild.
+\end{kbwarn}
+
+\section{Design invariants that still apply}
+The watchdog is intentionally \textbf{stateless} and opens \textbf{no network listener} (it serves diagnostics only
+on the local socket \file{/run/kb/kbc.sock}). When repairs resume, do not add persistent state or a network
+listener to it: that is a security design invariant of the project, not a style choice.

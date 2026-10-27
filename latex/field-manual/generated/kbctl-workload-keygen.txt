@@ -1,0 +1,12 @@
+Generate an Ed25519 keypair for signing/verifying workloads.yaml
+
+Usage:
+  kbctl workload keygen [flags]
+
+Flags:
+  -h, --help             help for keygen
+      --name string      base filename for the generated <name>.key/<name>.pub (default "workloads-signer")
+      --out-dir string   directory to write the generated key pair into (default ".")
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

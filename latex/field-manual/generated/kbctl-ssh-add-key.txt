@@ -1,0 +1,12 @@
+Authorize an operator public key for the SSH console (/etc/kb/authorized_keys)
+
+Usage:
+  kbctl ssh add-key <pubkey-file|-> [flags]
+
+Flags:
+  -h, --help   help for add-key
+
+Global Flags:
+      --port int        operator sshd port (packaging/ssh/kb-operator.conf) (default 2222)
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+      --user string     account the console ForceCommand is bound to (default "operator")

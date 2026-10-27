@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+if [ "$1" = configure ]; then
+    # kb group, operator user, /etc/kb, SSH host key, empty authorized_keys.
+    # Idempotent; deliberately does not enable or start any unit.
+    /usr/lib/kb/provision.sh
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload || true
+    fi
+fi
+exit 0

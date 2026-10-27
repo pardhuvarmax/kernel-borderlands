@@ -1,18 +1,20 @@
 [Unit]
 Description=Kernel Borderlands Ray Swarm Node Agent (AADS)
-After=kb-checker.service
-Requires=kb-checker.service
+# kb-checker is under maintenance and repairs (kept down), so this unit must
+# not Require it or starting the swarm would try to start the checker.
+After=kbd.service
+Requires=kbd.service
 DefaultDependencies=no
 
 [Service]
 Type=simple
-# NOT YET FUNCTIONAL: kb-aads (kb-aads/main.py) has no compiled-binary
-# build/install step anywhere in this repo today — it runs as
-# `python3 main.py`. This unit documents the target packaging convention
-# from docs/architecture/boot_sequence_spec.md, not a build that exists.
-# Producing /usr/local/bin/kbagents (wrapper script or PyInstaller/similar)
-# is deferred follow-up work, not part of this pass.
-ExecStart=/usr/local/bin/kbagents --config /etc/kb/config.yaml --grpc-socket /run/kb/kba.sock
+# kb-aads has no compiled build; packaging/bin/kbagents is a launcher that
+# runs main.py with the system python3 or /opt/kb/venv and passes --config
+# /etc/kb/agents.yaml. It exits 1 with install instructions if ray/grpcio
+# are missing, so this unit is installed but NOT enabled by the packages.
+# (The old --config /etc/kb/config.yaml --grpc-socket flags matched nothing
+# in main.py: the socket comes from agents.yaml's control_plane.grpc_socket.)
+ExecStart=/usr/local/bin/kbagents
 Restart=always
 RestartSec=5
 
@@ -28,6 +30,7 @@ ProtectHome=true
 MemoryDenyWriteExecute=true
 ProtectSystem=strict
 ReadWritePaths=/run/kb
+ReadOnlyPaths=/etc/kb /usr/lib/kb /opt/kb
 CapabilityBoundingSet=
 
 [Install]

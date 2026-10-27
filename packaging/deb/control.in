@@ -1,0 +1,17 @@
+Package: kernel-borderlands
+Version: @VERSION@
+Architecture: @ARCH@
+Section: admin
+Priority: optional
+Maintainer: Kernel Borderlands Team <rushiroyal.k@gmail.com>
+Depends: libc6, systemd, openssh-server, libelf1t64 | libelf1, zlib1g
+Recommends: python3, python3-venv
+Homepage: https://github.com/pardhuvarmax/kernel-borderlands
+Description: Kernel-level runtime defense framework (eBPF sensor, control plane, operator tools)
+ Kernel Borderlands observes kernel telemetry with eBPF sensors, scores and
+ enforces in a Go control plane (kbd), watchdogs the stack with kb-checker,
+ and exposes kbctl, an SSH-served TUI and an embedded web dashboard.
+ .
+ Nothing is started on install. Run `sudo kbctl up`, then `kbctl dashboard
+ open` or `kbctl ssh connect`. The kb-aads agent swarm needs a Python venv;
+ see /usr/share/doc/kernel-borderlands/README.Debian.

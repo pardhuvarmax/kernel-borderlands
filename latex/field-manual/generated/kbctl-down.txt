@@ -1,0 +1,10 @@
+Stop the whole stack in reverse boot order (does not disable it)
+
+Usage:
+  kbctl down [flags]
+
+Flags:
+  -h, --help   help for down
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

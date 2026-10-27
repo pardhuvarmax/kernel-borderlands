@@ -1,0 +1,15 @@
+Manage kbd's dynamic policy configuration
+
+Usage:
+  kbctl policy [command]
+
+Available Commands:
+  reload      Reload policy.yaml from the path kbd was started with
+
+Flags:
+  -h, --help   help for policy
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+
+Use "kbctl policy [command] --help" for more information about a command.

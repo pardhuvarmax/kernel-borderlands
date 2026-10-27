@@ -1,0 +1,86 @@
+\chapter{Before You Install: Kernel Prerequisites}\label{ch:prereq}
+The package can be installed on any \distroname{} host. The \emph{sensor} will only do its full job on a
+kernel that exposes BTF and has the BPF Linux Security Module enabled. Check this first; it takes a minute
+and saves an hour.
+
+\section{The checklist}
+\resetsteps
+\step{Confirm BTF is available}
+CO-RE (compile once, run everywhere) relies on kernel type information.
+\begin{lstlisting}[style=console]
+$ ls -l /sys/kernel/btf/vmlinux
+-r--r--r-- 1 root root 5321944 ... /sys/kernel/btf/vmlinux
+\end{lstlisting}
+If the file is missing, the sensor cannot relocate its programs on this kernel.
+
+\step{Confirm the kernel was built with BPF LSM}
+\begin{lstlisting}[style=console]
+$ zgrep CONFIG_BPF_LSM /proc/config.gz  # or: grep CONFIG_BPF_LSM /boot/config-$(uname -r)
+CONFIG_BPF_LSM=y
+\end{lstlisting}
+
+\step{Check whether \texttt{bpf} is in the active LSM list}
+\begin{lstlisting}[style=console]
+$ cat /sys/kernel/security/lsm
+lockdown,capability,landlock,yama,apparmor,bpf
+\end{lstlisting}
+The trailing \texttt{bpf} means the in-kernel file-access block (\texttt{kb\_lsm\_file\_open}) can attach.
+Without it, the sensor still loads its tracing programs; only the LSM program fails to attach, and the
+sensor's startup log says so rather than silently doing nothing.
+
+\section{Enabling BPF LSM when it is missing}
+Add \texttt{bpf} to the kernel's \texttt{lsm=} boot parameter, regenerate the boot configuration, reboot.
+
+\ifarch
+\subsection*{Arch Linux (GRUB)}
+\begin{lstlisting}[style=console]
+$ sudo $EDITOR /etc/default/grub
+  GRUB_CMDLINE_LINUX_DEFAULT="quiet lsm=landlock,lockdown,yama,apparmor,bpf"
+$ sudo grub-mkconfig -o /boot/grub/grub.cfg
+$ sudo reboot
+\end{lstlisting}
+\begin{kbnote}[SYSTEMD-BOOT / OTHER LOADERS]
+If you use \texttt{systemd-boot}, append the same \texttt{lsm=...} string to the \texttt{options} line of
+your entry under \file{/boot/loader/entries/}. Arch's own kernels build BPF LSM in; you only need the
+parameter. Keep \texttt{apparmor} in the list only if you actually run it; listing a module your kernel
+lacks is harmless but pointless.
+\end{kbnote}
+\else
+\subsection*{Ubuntu 24.04 (GRUB)}
+\begin{lstlisting}[style=console]
+$ sudo $EDITOR /etc/default/grub
+  GRUB_CMDLINE_LINUX_DEFAULT="quiet splash lsm=landlock,lockdown,yama,apparmor,bpf"
+$ sudo update-grub
+$ sudo reboot
+\end{lstlisting}
+\begin{kbnote}[UBUNTU 24.04 DEMO VM]
+The reference Ubuntu VM runs kernel \texttt{6.8.0-139-generic} and already reports
+\texttt{lockdown,capability,landlock,yama,apparmor,bpf} with BTF present, so no change is needed there.
+\end{kbnote}
+\fi
+
+\step{Verify after reboot}
+\begin{lstlisting}[style=console]
+$ cat /sys/kernel/security/lsm
+\end{lstlisting}
+\texttt{bpf} must appear at the end of the list.
+
+\section{What runs where}
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}L{3.6cm}L{2.6cm}Y@{}}
+\toprule
+\textbf{Component} & \textbf{Privilege} & \textbf{Why}\\
+\midrule
+\cmd{kbd\_sensor} & root & Loads eBPF, attaches LSM and uprobes; needs CAP\_BPF, CAP\_PERFMON, CAP\_SYS\_ADMIN (exact set is kernel-dependent).\\
+\cmd{kbd} & root & Owns \file{/run/kb}, \file{/var/lib/kbd}, binds the sockets.\\
+\cmd{kbopd} (service) & unprivileged-style hardening & Only a loopback listener and a child process.\\
+\cmd{sshd@kb-operator} & root, then drops to \texttt{operator} & Standard \cmd{sshd} privilege separation.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{kbwarn}[A VM OR CONTAINER SHARES THE HOST KERNEL ASSUMPTIONS]
+Inside a container the sensor sees the \emph{host} kernel. Inside a VM it sees the \emph{guest} kernel, which
+is what you want for the demo. Whichever you use, run the checklist above \emph{inside} it.
+\end{kbwarn}

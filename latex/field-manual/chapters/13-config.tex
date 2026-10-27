@@ -1,0 +1,168 @@
+\part{Configuration}
+\chapter{Configuration Reference}
+\label{ch:config}
+\section{Which file does what, and when it takes effect}
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,scale=0.9,transform shape]
+  \node[box,minimum width=3.2cm] (pol) at (0,1.8) {\file{policy.yaml}};
+  \node[box,minimum width=3.2cm] (rul) at (0,0) {\file{rules.yaml}};
+  \node[box,minimum width=3.2cm] (wrk) at (0,-1.8) {\file{workloads.yaml}};
+  \node[dark,minimum width=2.6cm,minimum height=2.2cm] (kbd) at (5.6,0) {\texttt{kbd}\\[-1pt]\scriptsize reads at start};
+  \node[box,minimum width=3.1cm,minimum height=2.2cm] (sen) at (10.6,0) {\texttt{kbd\_sensor}\\[-1pt]\scriptsize receives rules, paths,\\workloads};
+  \draw[flow] (pol) -- node[lbl,above,sloped]{\texttt{--policy}} (kbd);
+  \draw[flow] (rul) -- node[lbl,above]{\texttt{--rules}} (kbd);
+  \draw[flow] (wrk) -- node[lbl,below,sloped]{\texttt{--workloads}} (kbd);
+  \draw[flow] (kbd) -- node[lbl,above]{pushed on connect} (sen);
+  \node[lbl,align=center] at (5.6,-2.3) {live: \texttt{kbctl policy reload}, \texttt{kbctl workload reload}};
+\end{tikzpicture}
+\caption{The config files are read by \texttt{kbd}, never by the sensor. The sensor only receives the
+compiled result when it connects.}
+\end{figure}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3.2cm}L{3.1cm}L{3.8cm}Y@{}}
+\toprule
+\textbf{File} & \textbf{Consumed by} & \textbf{Takes effect} & \textbf{Notes}\\
+\midrule
+\file{policy.yaml} & \cmd{kbd} \texttt{--policy} & \texttt{kbctl policy reload} (thresholds); \texttt{sensitive\_paths} only on sensor reconnect & Per-process thresholds, extra watched paths.\\
+\file{rules.yaml} & \cmd{kbd} \texttt{--rules} & On sensor (re)connect & Behavior-engine attack-chain rules, 19 by default.\\
+\file{workloads.yaml} & \cmd{kbd} \texttt{--workloads} & \texttt{kbctl workload reload} (live) & Empty by default; CWP is opt-in.\\
+\file{agents.yaml} & \cmd{kbagents} \texttt{--config} & On \cmd{kbagents} start & Swarm composition.\\
+\file{allowlist.yaml} (repo only) & \textbf{nothing today} & -- & Its own header says ``Not yet consumed by the daemon''. \textbf{Not installed.}\\
+\file{kb.yaml} (repo only) & \textbf{nothing today} & -- & No code references it; \cmd{kbd} has no \texttt{--config} flag. Not installed.\\
+\file{sshd_kb-operator.conf} & operator \cmd{sshd} & \texttt{systemctl reload sshd@kb-operator} & Chapter~\ref{ch:ssh}.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+\begin{kbwarn}[DO NOT EDIT THE SENSOR'S COMPILED-IN FLOOR AWAY]
+Config can only \emph{add} to what the sensor enforces (for example extra \texttt{sensitive\_paths}); it can
+never narrow the compiled-in floor (\file{/etc/shadow}, \file{/etc/sudoers}, \file{/root/.ssh/}). That is
+intentional: a stolen config file must not be able to blind the sensor.
+\end{kbwarn}
+
+\section{policy.yaml}
+\lstconf{kb-control-plane/config/policy.yaml}{lst:policy}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{4.2cm}L{2.2cm}Y@{}}
+\toprule
+\textbf{Key} & \textbf{Type} & \textbf{Meaning}\\
+\midrule
+\texttt{defaults.suspicious} & float & Score at which a process enters the \texttt{SUSPICIOUS} zone (default 40).\\
+\texttt{defaults.borderlands} & float & Score for \texttt{BORDERLANDS} (default 75). Must exceed \texttt{suspicious}.\\
+\texttt{sensitive\_paths[]} & absolute path & Extra files the LSM hook watches. $\le$ 63 bytes, not bare \texttt{/}, additive only. Applied at sensor reconnect.\\
+\texttt{policies[].comm} & string & Process name (the kernel \texttt{comm}, at most 15 characters) this entry applies to.\\
+\texttt{policies[].suspicious / borderlands} & float & Per-process thresholds overriding the defaults.\\
+\texttt{policies[].allow\_network} & bool & Permits network activity for this \texttt{comm} without penalty.\\
+\texttt{policies[].auto\_terminate} & bool & Terminate automatically on \texttt{BORDERLANDS}. Dangerous; off by default.\\
+\file{policies[].auto_namespace_on_exfil_beacon} & bool & Auto-contain at NAMESPACE when the beaconing detector flags it. Off by default: a timing heuristic has real false-positive risk.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+\begin{kbnote}[THE ZONE LADDER]
+Scores move a process through \texttt{SAFE} $\to$ \texttt{SUSPICIOUS} (40) $\to$ \texttt{BORDERLANDS} (75). Scoring is
+computed in the sensor (EMA/\texttt{ScoreDelta}) and arrives pre-computed; \cmd{kbd} only applies these
+thresholds and forwards the results. Reads of watched paths are \emph{always flagged for scoring}; the
+hard \texttt{-EACCES} block applies only to a process an operator already contained at level $\ge$ 2 (Seccomp),
+so \cmd{sudo} and PAM keep working.
+\end{kbnote}
+
+\section{rules.yaml: the behavior engine}
+Each rule is a small state-machine edge: when the listed \emph{event flags} occur, in the listed \emph{order}, within
+\texttt{window\_seconds}, a process currently at \texttt{min\_source\_state} or above moves to
+\texttt{target\_state}.
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3.7cm}Y@{}}
+\toprule
+\textbf{Field} & \textbf{Meaning}\\
+\midrule
+\texttt{name}, \texttt{description} & Identifier and human text.\\
+\texttt{required\_flags} & Event flags that must all have been seen (\texttt{KB\_EV\_*}).\\
+\texttt{optional\_flags}, \texttt{optional\_min} & At least \texttt{optional\_min} of these must also be present.\\
+\texttt{sequence} & Ordered steps (\texttt{KB\_SEQ\_*}) that must occur in this order.\\
+\texttt{window\_seconds} & Time window for the whole sequence.\\
+\texttt{target\_state} & State entered on a match: \texttt{KB\_STATE\_OBSERVED}, \texttt{SUSPICIOUS}, \texttt{BORDERLANDS}, \texttt{COMPROMISED}.\\
+\texttt{reason} & Reason code recorded with the transition (\texttt{KB\_REASON\_*}).\\
+\texttt{min\_source\_state} & Rule only fires for processes already at or above this state.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+The 19 shipped rules, strongest effect first:
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3.2cm}Y@{}}
+\toprule
+\textbf{Target state} & \textbf{Rules}\\
+\midrule
+\texttt{COMPROMISED} (5) & \texttt{known\_ioc\_sequence}, \texttt{reverse\_shell\_compromised}, \texttt{injection\_ptrace\_compromised}, \texttt{injection\_proc\_mem\_compromised}, \texttt{escalation\_exfil\_compromised}\\
+\texttt{BORDERLANDS} & \texttt{rwx\_memory\_abuse}, \texttt{ptrace\_injection\_borderlands}, \texttt{c2\_port\_connection}, \texttt{proc\_mem\_write\_borderlands}, \texttt{rapid\_connect\_burst\_borderlands}\\
+\texttt{SUSPICIOUS} & \texttt{multi\_anomaly\_suspicious}, \texttt{privilege\_plus\_network\_suspicious}, \texttt{cred\_file\_access\_suspicious}, \texttt{anon\_exec\_mapping\_suspicious}, \texttt{shell\_spawn\_suspicious}\\
+\texttt{OBSERVED} & \texttt{unexpected\_outbound\_connection}, \texttt{privilege\_change\_observed}, \texttt{high\_syscall\_entropy\_observed}, \texttt{first\_anomaly\_observed}\\
+\bottomrule
+\end{tabularx}
+\end{center}
+The complete shipped file follows. Rules are compiled by \cmd{kbd} and sent to the sensor when it connects;
+if \texttt{--rules} is empty the sensor falls back to its compiled-in defaults.
+\lstconf{kb-control-plane/config/rules.yaml}{lst:rules}
+
+\section{workloads.yaml: Critical Workload Protection}
+\lstconf{kb-control-plane/config/workloads.yaml}{lst:workloads}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{4cm}Y@{}}
+\toprule
+\textbf{Key} & \textbf{Meaning}\\
+\midrule
+\texttt{critical\_workloads[].path} & Resolved executable path of the protected program.\\
+\texttt{identity\_tier: path} & (default) match on path only.\\
+\texttt{identity\_tier: hash} & Also require the binary's SHA-256. If \texttt{expected\_hash} is omitted, \cmd{kbd} computes it from the file on load.\\
+\texttt{owner\_team}, \texttt{justification} & Documentation; parsed and logged, not yet part of any alert.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+\begin{kbwarn}[HASH TIER AND UPGRADES]
+After every \emph{legitimate} upgrade of a hash-tier binary, run \texttt{sudo kbctl workload reload}, or the entry
+will start rejecting the new, correct binary. For signed registries, see Playbook~\ref{sec:cwp}.
+\end{kbwarn}
+
+\section{agents.yaml}
+\lstconf{config/agents.yaml}{lst:agents}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{4.2cm}Y@{}}
+\toprule
+\textbf{Key} & \textbf{Meaning}\\
+\midrule
+\texttt{ray.mode: local} & Start a single-node Ray head inside the process.\\
+\texttt{ray.mode: cluster} & Join an existing head (\texttt{ray start --head}) for fleet deployments.\\
+\texttt{swarm.*} & Actor counts: \texttt{patroller} 2, \texttt{hunter} 2, \texttt{healer} 1, \texttt{containment} 1, \texttt{signal\_relay} 1. Keys must match the agent roles exactly (singular).\\
+\texttt{jury.pool\_size} & Jury size per consensus round (judge and executor are single long-lived actors).\\
+\file{patroller.suspicious_threshold} & Score at which the Patroller escalates a PID to a Hunter. Tuned independently of \file{policy.yaml}.\\
+\texttt{control\_plane.grpc\_socket} & \file{/run/kb/kba.sock}.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{allowlist.yaml and kb.yaml}
+\lstconf{kb-control-plane/config/allowlist.yaml}{lst:allow}
+\lstconf{kb-control-plane/config/kb.yaml}{lst:kbyaml2}
+\textbf{Neither is read by any shipped binary} (confirmed by searching the daemon, sensor and checker sources; \file{config/dashboard.yaml} has no consumer either).
+Editing them would change nothing, so \textbf{neither is installed}, and both are marked \texttt{NOT CONSUMED} in the repository
+(\file{kb.yaml}'s header, \file{config/README.md}). \file{kb.yaml} (gRPC port, scoring alpha, enforcement mode, audit path, SIEM target) is
+design intent only; the real settings are \cmd{kbd}'s flags and \file{policy.yaml}.
+
+\section{Overriding without editing packaged files: systemd drop-ins}
+\label{sec:dropin}
+Never edit \file{/usr/lib/systemd/system/*.service}; the next upgrade overwrites it. Use a drop-in, which
+\cmd{systemctl edit} creates under \file{/etc/systemd/system/<unit>.d/override.conf}.
+\begin{lstlisting}[style=console]
+$ sudo systemctl edit kbd
+# add:
+[Service]
+Environment=KB_HTTP_API_TOKEN=change-me-long-random
+Environment=KB_HTTP_CORS_ORIGIN=http://127.0.0.1:8082,http://localhost:8082,http://kb-host:8082
+$ sudo systemctl restart kbd
+\end{lstlisting}
+\begin{kbnote}
+Repeating an \texttt{Environment=} line in a drop-in \emph{adds} a variable; setting the same name again
+overrides it. \texttt{KB\_HTTP\_CORS\_ORIGIN} is one comma-separated value, so restate the whole list when you
+extend it. To replace \texttt{ExecStart} you must first clear it with an empty \texttt{ExecStart=} line
+(as in the CWP playbook).
+\end{kbnote}
+Inspect the merged result any time with \texttt{systemctl cat kbd} and \texttt{systemctl show kbd -p Environment}.

@@ -1,0 +1,12 @@
+Replaces this process with kbopd attached to your terminal, which renders the
+ratatui console. For a remote session through the dedicated operator sshd
+(port 2222) use 'kbctl ssh connect'.
+
+Usage:
+  kbctl tui [flags]
+
+Flags:
+  -h, --help   help for tui
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

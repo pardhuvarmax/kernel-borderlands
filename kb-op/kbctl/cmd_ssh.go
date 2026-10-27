@@ -8,16 +8,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// sshCmd's subcommands are the audit-tie-in callback described in
+// sshCmd groups the operator-facing console controls (up/down/status/
+// connect/add-key, cmd_ssh_console.go) with the session-start/session-end
+// audit-tie-in callbacks described in
 // docs/development/core-control/control-plane-catalog.md §2.12 step 5 —
-// invoked by the ForceCommand wrapper script (docs/architecture/
-// boot_sequence_spec.md §3), not run interactively by an operator. Kept
-// under kbctl rather than a standalone binary so there's one less thing to
-// build/install/version alongside kbd and kb-tui.
+// those two are invoked by the ForceCommand wrapper script (docs/
+// architecture/boot_sequence_spec.md §3), not by an operator, so they stay
+// hidden. Kept under kbctl rather than a standalone binary so there's one
+// less thing to build/install/version alongside kbd and kb-tui.
 var sshCmd = &cobra.Command{
-	Use:    "ssh",
-	Short:  "SSH session audit callbacks (used by the ForceCommand wrapper script, not interactive)",
-	Hidden: true,
+	Use:   "ssh",
+	Short: "Manage and connect to the SSH operator console (sshd@kb-operator, port 2222)",
 }
 
 var (
@@ -55,8 +56,9 @@ func recordSSHSession(event string) error {
 }
 
 var sshSessionStartCmd = &cobra.Command{
-	Use:   "session-start",
-	Short: "Record an SSH session start in kbd's audit log",
+	Use:    "session-start",
+	Hidden: true,
+	Short:  "Record an SSH session start in kbd's audit log",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := recordSSHSession("session_start"); err != nil {
 			// Best-effort: an audit-logging failure must never block the
@@ -72,8 +74,9 @@ var sshSessionStartCmd = &cobra.Command{
 }
 
 var sshSessionEndCmd = &cobra.Command{
-	Use:   "session-end",
-	Short: "Record an SSH session end in kbd's audit log",
+	Use:    "session-end",
+	Hidden: true,
+	Short:  "Record an SSH session end in kbd's audit log",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := recordSSHSession("session_end"); err != nil {
 			fmt.Fprintf(os.Stderr, "kbctl ssh session-end: audit logging failed: %v\n", err)

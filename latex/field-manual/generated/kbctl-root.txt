@@ -1,0 +1,28 @@
+kbctl is the command-line control utility for Kernel Borderlands.
+It talks to the kbd control plane daemon over gRPC on its Unix domain
+socket (default /run/kb/kba.sock).
+
+Usage:
+  kbctl [command]
+
+Available Commands:
+  audit       Inspect the SHA-256 hash-chained audit log
+  completion  Generate the autocompletion script for the specified shell
+  dashboard   Start, stop and open the embedded web dashboard (kbopd.service)
+  down        Stop the whole stack in reverse boot order (does not disable it)
+  help        Help about any command
+  policy      Manage kbd's dynamic policy configuration
+  process     Query or contain tracked processes
+  ssh         Manage and connect to the SSH operator console (sshd@kb-operator, port 2222)
+  stats       Fetch global telemetry volumes and active process counts
+  status      Show the state of every Kernel Borderlands unit
+  tui         Run the terminal UI in this shell (same binary the SSH console serves)
+  up          Enable and start the stack (kbd, sensor, dashboard, SSH console; kb-checker stays down for maintenance)
+  workload    Manage kbd's CWP protected-workload registry (docs/features/CWP.md)
+  zone        Inspect or override process threat zone classification
+
+Flags:
+  -h, --help            help for kbctl
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+
+Use "kbctl [command] --help" for more information about a command.

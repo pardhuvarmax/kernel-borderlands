@@ -1,0 +1,16 @@
+kbd is the control plane daemon for Kernel Borderlands.
+It aggregates eBPF events, manages process behavioral state,
+and coordinates with the AADS agent swarm.
+
+Usage:
+  kbd [flags]
+
+Flags:
+  -d, --db string                              path to SQLite state database (L2 durable store) (default "/var/lib/kbd/state.db")
+      --grpc-socket string                     path to the gRPC UDS socket (kba.sock) (default "/run/kb/kba.sock")
+  -h, --help                                   help for kbd
+      --http-addr string                       address for the HTTP API/SSE server (web dashboard) to bind — loopback-only by default (default "127.0.0.1:8080")
+  -p, --policy string                          path to policy.yaml (per-process thresholds, auto-terminate rules) (default "config/policy.yaml")
+      --rules string                           path to rules.yaml (dynamic attack-chain rules pushed to the sensor at connect time); empty disables the push, sensor falls back to compiled-in default rules (default "config/rules.yaml")
+      --workloads string                       path to workloads.yaml (CWP protected-workload registry, docs/features/CWP.md); empty disables CWP entirely. A missing file is not an error — CWP just has nothing registered (default "config/workloads.yaml")
+      --workloads-pubkey kbctl workload sign   path to an Ed25519 public key (hex/base64/raw) that --workloads must be validly signed against (CWP.md §4.3/§11.4, see kbctl workload sign); empty (default) keeps CWP unsigned/opt-in

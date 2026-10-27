@@ -1,0 +1,12 @@
+Enable and start the operator sshd (sshd@kb-operator.service)
+
+Usage:
+  kbctl ssh up [flags]
+
+Flags:
+  -h, --help   help for up
+
+Global Flags:
+      --port int        operator sshd port (packaging/ssh/kb-operator.conf) (default 2222)
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+      --user string     account the console ForceCommand is bound to (default "operator")

@@ -1,0 +1,10 @@
+Verify the audit log hash chain has not been tampered with
+
+Usage:
+  kbctl audit verify [flags]
+
+Flags:
+  -h, --help   help for verify
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

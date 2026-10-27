@@ -1,0 +1,118 @@
+\part{Operations}
+\chapter{Starting the Stack}
+\label{ch:start}
+\section{The boot order}
+Four units make up the running system. Their order is not arbitrary: \cmd{kbd} must bind its sockets
+\emph{before} anything tries to connect to them.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,scale=0.86,transform shape]
+  \node[dark,minimum width=3.2cm] (kbd) at (0,0) {\unit{kbd.service}\\[-1pt]\scriptsize Type=notify};
+  \node[box,minimum width=3.4cm] (sen) at (5.6,1.5) {\unit{kb-sensor.service}\\[-1pt]\scriptsize Requires=kbd};
+  \node[box,minimum width=3.4cm] (opd) at (5.6,-1.5) {\unit{kbopd.service}\\[-1pt]\scriptsize Requires=kbd};
+  \node[dashedbox,minimum width=3.6cm] (chk) at (11.6,1.5) {\unit{kb-checker.service}\\[-1pt]\scriptsize KEPT DOWN};
+  \node[box,minimum width=3.6cm] (ssh) at (11.6,-1.5) {\unit{sshd@kb-operator}\\[-1pt]\scriptsize After=network};
+  \draw[flow] (kbd.north east) -- node[lbl,above,sloped]{READY=1} (sen.west);
+  \draw[flow] (kbd.south east) -- (opd.west);
+  \draw[flowd] (sen) -- node[lbl,above]{Wants, After} (chk);
+  \draw[flowd] (opd) -- node[lbl,above]{independent} (ssh);
+  \node[font=\bfseries\sffamily\scriptsize,anchor=north,align=center] at (0,-0.9) {binds \texttt{kbd.sock}, \texttt{kbct.sock},\\\texttt{kba.sock}, then notifies};
+\end{tikzpicture}
+\caption{Start order. \texttt{kbd} sends \texttt{sd\_notify(READY=1)} only after its sockets exist, so
+the units that \texttt{Require} it never race ahead of it. The dashed box is the unit held down by the
+maintenance condition.}
+\end{figure}
+
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3.3cm}L{3.2cm}Y@{}}
+\toprule
+\textbf{Unit} & \textbf{Runs} & \textbf{Notes}\\
+\midrule
+\unit{kbd.service} & \cmd{kbd} with \texttt{--db} \file{/var/lib/kbd/state.db} and \texttt{--policy}, \texttt{--rules}, \texttt{--workloads} from \file{/etc/kb} & \texttt{Type=notify}; \texttt{RuntimeDirectory=kb}; \texttt{StateDirectory=kbd}; sets \texttt{KB\_HTTP\_CORS\_ORIGIN}. Conservative hardening only.\\
+\unit{kb-sensor.service} & \cmd{kbd\_sensor} & Root, no capability dropping (needs CAP\_BPF/PERFMON/SYS\_ADMIN). Loads the eBPF hooks; connects to \file{kbd.sock}.\\
+\unit{kbopd.service} & \cmd{kbopd} headless & Serves the dashboard on 127.0.0.1:8082 and spawns \cmd{mcp-server}. Fully hardened (\texttt{ProtectSystem=strict}, empty capability set).\\
+\unit{sshd@kb-operator.service} & \cmd{sshd -D -f} \file{/etc/kb/sshd_kb-operator.conf} & Dedicated instance on port 2222, key-only, forces the wrapper script.\\
+\unit{kb-checker.service} & \cmd{kb-checker monitor --all} & \textbf{Held down}: \texttt{ConditionPathExists=/etc/kb/checker.enabled}.\\
+\unit{kbagents.service} & \cmd{kbagents} & Installed, not enabled; see Chapter~\ref{ch:aads}.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{The one-command start}
+\resetsteps
+\step{Authorize your SSH public key first (once)}
+\begin{lstlisting}[style=console]
+$ sudo kbctl ssh add-key ~/.ssh/id_ed25519.pub
+key authorized for operator
+\end{lstlisting}
+\step{Bring the stack up}
+\begin{lstlisting}[style=console]
+$ sudo kbctl up
+\end{lstlisting}
+This runs \texttt{systemctl enable --now kbd.service kb-sensor.service kbopd.service sshd@kb-operator.service}
+in that order. \cmd{kbctl} adds \texttt{sudo} itself when you are not root, so plain \texttt{kbctl up} also works
+and prompts for your password.
+\step{Confirm}
+\begin{lstlisting}[style=console]
+$ kbctl status
+kbd.service                  active
+kb-sensor.service            active
+kbopd.service                active
+sshd@kb-operator.service     active
+kb-checker.service           UNDER MAINTENANCE AND REPAIRS (kept down)
+\end{lstlisting}
+\step{Open a surface}
+\begin{lstlisting}[style=console]
+$ kbctl dashboard open        # web, http://127.0.0.1:8082
+$ kbctl ssh connect           # TUI over the operator sshd
+$ kbctl tui                   # TUI directly on this terminal
+\end{lstlisting}
+
+\section{The same thing with \cmd{systemctl}}
+Every \cmd{kbctl} verb is a thin wrapper. Know the equivalents; they are what you use when \cmd{kbd} is down
+and \cmd{kbctl} cannot dial it.
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{4.6cm}Y@{}}
+\toprule
+\textbf{kbctl} & \textbf{systemctl equivalent}\\
+\midrule
+\texttt{kbctl up} & \texttt{systemctl enable --now kbd kb-sensor kbopd sshd@kb-operator}\\
+\texttt{kbctl down} & \texttt{systemctl stop} on those four, in reverse order (does not disable)\\
+\texttt{kbctl status} & \texttt{systemctl is-active} on each unit, plus the maintenance label\\
+\texttt{kbctl dashboard up / down} & \texttt{systemctl enable --now / disable --now kbopd}\\
+\texttt{kbctl ssh up / down} & \texttt{systemctl enable --now / disable --now sshd@kb-operator}\\
+\bottomrule
+\end{tabularx}
+\end{center}
+\begin{kbnote}
+\texttt{up} \emph{enables} units (they start at every boot). \texttt{down} only \emph{stops} the whole stack and
+leaves it enabled, so a reboot brings it back. To keep a unit down across reboots use
+\texttt{kbctl dashboard down} or \texttt{kbctl ssh down}, which also \emph{disable} it.
+\end{kbnote}
+
+\section{Watching a start succeed}
+\begin{lstlisting}[style=console]
+$ journalctl -u kbd -u kb-sensor -u kbopd -f
+... kbd: [KB] gRPC health service registered, status=SERVING for "kernel-borderlands"
+... kbd: [KB] audit log hash chain verified intact (0 entries)
+... kbd: [KB] Control plane ready
+... kb-sensor: (6 hooks attached; uprobes into libssl/libgnutls)
+... kbopd: Vite Dashboard Server listening on http://localhost:8082
+\end{lstlisting}
+\texttt{kbd} printing \texttt{audit log hash chain verified intact} on every start is the cheapest tamper check
+you will ever get; see Section~\ref{sec:audit}.
+
+\section{Stopping, restarting, and what to expect}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{4.2cm}Y@{}}
+\toprule
+\textbf{You do} & \textbf{What happens}\\
+\midrule
+\texttt{sudo systemctl restart kbd} & \texttt{kb-sensor} and \texttt{kbopd} (which \texttt{Require} it) are restarted with it; the sensor reconnects and \cmd{kbd} re-pushes the rules and sensitive paths at connect time.\\
+\texttt{sudo systemctl stop kb-sensor} & Telemetry stops; existing containment stays in the kernel maps until cleared. \cmd{kbd} keeps serving history.\\
+\texttt{sudo kbctl down} & Orderly stop in reverse boot order.\\
+Power loss & \texttt{kbd}'s SQLite WAL replays on next start (\texttt{L1 restored from L2}).\\
+\bottomrule
+\end{tabularx}
+\end{center}

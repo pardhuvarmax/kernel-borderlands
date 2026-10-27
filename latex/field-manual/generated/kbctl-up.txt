@@ -1,0 +1,10 @@
+Enable and start the stack (kbd, sensor, dashboard, SSH console; kb-checker stays down for maintenance)
+
+Usage:
+  kbctl up [flags]
+
+Flags:
+  -h, --help   help for up
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

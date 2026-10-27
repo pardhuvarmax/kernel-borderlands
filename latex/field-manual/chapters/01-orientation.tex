@@ -1,0 +1,139 @@
+\part{Orientation}
+\chapter{What You Are Operating}
+\section{The one-paragraph version}
+\kb{} (KB) is a kernel-level runtime defense framework for Linux. A set of \textbf{eBPF sensors} watch kernel
+telemetry at Ring~0; a \textbf{Go control plane} (\cmd{kbd}) ingests that telemetry, keeps per-process state,
+and enforces policy; a \textbf{Python agent swarm} (\cmd{kb-aads}) coordinates adaptive response; and four
+\textbf{operator surfaces} (\cmd{kbctl}, a terminal UI served over SSH, a web dashboard, and an MCP server)
+let humans and automation see and steer the system. A separate Rust watchdog (\cmd{kb-checker}) audits the
+rest of the stack.
+
+This book is the field manual for \emph{operating the packaged system}: how it is built into a
+\pkgext{} package for \distroname, how that package is installed, how every service is started, what every
+command does, how the commands combine into working procedures, and what every configuration file means.
+
+\begin{kbwarn}[READ THIS FIRST: THE KB-CHECKER IS DOWN ON PURPOSE]
+\cmd{kb-checker}, the safety and integrity watchdog, is \textbf{under maintenance and repairs} and is kept
+down in this release. The package installs its binary and unit file, but the unit refuses to start unless
+\file{/etc/kb/checker.enabled} exists, \cmd{kbctl up} never starts it, and \cmd{kbctl status} prints
+\texttt{UNDER MAINTENANCE AND REPAIRS (kept down)}. Everything in this book is written for a stack
+\emph{without} the watchdog. Chapter~\ref{ch:checker} explains what that means for you.
+\end{kbwarn}
+
+\section{The five subsystems}
+KB is five subsystems kept in sync through shared wire and event contracts. A change in one often
+requires a matching change in another, which is why the package ships them together.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}L{3.6cm}L{2.4cm}Y@{}}
+\toprule
+\textbf{Directory} & \textbf{Language} & \textbf{Role and installed artifact}\\
+\midrule
+\file{kb-core/} & C (eBPF, CO-RE) & Ring-0 instrumentation and the userspace loader/bridge. Installed as \cmd{kbd\_sensor}.\\
+\file{kb-control-plane/} & Go & The \cmd{kbd} daemon: ingestion, storage, scoring, gRPC, HTTP/SSE, enforcement.\\
+\file{kb-aads/} & Python & Agent Defense Swarm (multi-agent RL on Ray). Installed as sources plus the \cmd{kbagents} launcher.\\
+\file{kb-checker/} & Rust & Stateless safety and integrity watchdog. Installed as \cmd{kb-checker} (\emph{kept down}).\\
+\file{kb-op/} & Go / Rust / TS & Operator interfaces: \cmd{kbctl}, \cmd{kbopd} (the TUI and embedded dashboard), \cmd{mcp-server}.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{The data flow, end to end}
+Figure~\ref{fig:arch} is the picture to keep in your head for the rest of the book. Telemetry flows
+\emph{up} from the kernel; containment commands flow \emph{down} on a \emph{separate} socket so a
+telemetry burst can never stall or kill delivery of a containment order.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,scale=0.88,transform shape]
+  % Kernel
+  \node[dark,minimum width=4.6cm,minimum height=1.2cm] (kern) at (0,0) {RING 0 \textbullet\ LINUX KERNEL\\[-1pt]\scriptsize tracepoints, kprobes, uprobes, BPF LSM};
+  \node[box,minimum width=4.6cm] (sens) at (0,-2.2) {\texttt{kbd\_sensor}\\[-1pt]\scriptsize eBPF loader + bridge (C, root)};
+  \node[box,minimum width=5.6cm,minimum height=2.8cm] (kbd) at (8.2,-2.2) {};
+  \node[font=\bfseries\sffamily\footnotesize,anchor=north] at (8.2,-0.95) {\texttt{kbd} \textbullet\ control plane (Go)};
+  \node[soft,minimum width=2.3cm] (store) at (6.95,-2.2) {\scriptsize L1 sync.Map\\L2 SQLite WAL};
+  \node[soft,minimum width=2.3cm] (score) at (9.45,-2.2) {\scriptsize policy,\\audit chain};
+  \node[soft,minimum width=4.9cm,minimum height=6mm] (grpc) at (8.2,-3.2) {\scriptsize gRPC \texttt{kba.sock} \textbullet\ HTTP/SSE \texttt{:8080}};
+  % operators
+  \node[box,minimum width=2.6cm] (ctl) at (-0.2,-6.6) {\texttt{kbctl}\\[-1pt]\scriptsize CLI};
+  \node[box,minimum width=2.6cm] (tui) at (3,-6.6) {\texttt{kbopd}\\[-1pt]\scriptsize TUI over SSH};
+  \node[box,minimum width=2.6cm] (dash) at (6.2,-6.6) {\texttt{kbopd}\\[-1pt]\scriptsize web \texttt{:8082}};
+  \node[box,minimum width=2.6cm] (mcp) at (9.4,-6.6) {\texttt{mcp-server}\\[-1pt]\scriptsize JSON-RPC};
+  \node[box,minimum width=2.6cm] (aads) at (12.6,-6.6) {\texttt{kbagents}\\[-1pt]\scriptsize Ray swarm};
+  \node[dashedbox,minimum width=3.4cm] (chk) at (13.9,-2.2) {\texttt{kb-checker}\\[-1pt]\scriptsize UNDER MAINTENANCE};
+  % flows
+  \draw[flow] (kern) -- node[lbl,right]{perf/ring buffer} (sens);
+  \draw[flow] ([yshift=3mm]sens.east) -- node[lbl,above]{\texttt{kbd.sock}} ([yshift=3mm]kbd.west);
+  \draw[flowd] ([yshift=-3mm]kbd.west) -- node[lbl,below]{\texttt{kbct.sock}} ([yshift=-3mm]sens.east);
+  \draw[flow] (grpc.south) ++(-1.9,0) |- (0,-4.9) -| (ctl.north);
+  \draw[flow] ([xshift=-1.2cm]grpc.south) -- ++(0,-1) -| (tui.north);
+  \draw[flow] ([xshift=0cm]grpc.south) -- ++(0,-1.0) -| (dash.north);
+  \draw[flow] ([xshift=1.2cm]grpc.south) -- ++(0,-1.0) -| (mcp.north);
+  \draw[flow] (grpc.south east) -- ++(0.4,-1.0) -| (aads.north);
+  \draw[flowd] (chk.west) -- node[lbl,above]{audits} (kbd.east);
+\end{tikzpicture}
+\caption{Data flow. Solid arrows carry telemetry and queries; the dashed arrow from \texttt{kbd} to
+\texttt{kbd\_sensor} is the separate control socket that carries containment commands.}
+\label{fig:arch}
+\end{figure}
+
+\section{The four operator surfaces}
+Kernel-level operations demand availability and flexibility, so KB gives you four independent ways in.
+If the web port is firewalled you fall back to the SSH TUI; if the shell is restricted, automation
+scripts \cmd{kbctl}; if the system is run autonomously, an AI assistant uses the MCP gateway.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}L{2.1cm}L{3.2cm}Y@{}}
+\toprule
+\textbf{Surface} & \textbf{Transport} & \textbf{Use it for}\\
+\midrule
+\cmd{kbctl} & gRPC over \file{/run/kb/kba.sock} & Scripted playbooks, CI, rapid overrides, starting and stopping the other surfaces.\\
+\cmd{kbopd} (TUI) & gRPC over UDS, served via the dedicated operator \cmd{sshd} on port 2222 & Low-bandwidth triage on a bastion, no browser needed.\\
+\cmd{kbopd} (web) & Static app on \texttt{127.0.0.1:8082}; REST + SSE to \cmd{kbd} on \texttt{127.0.0.1:8080} & Visual, live threat monitoring.\\
+\cmd{mcp-server} & JSON-RPC 2.0 over stdio & AI agents querying state and recommending containment.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{kbnote}[ONE BINARY, TWO FACES]
+\cmd{kbopd} is the compiled \cmd{kb-tui} binary installed under another name. Run with a terminal it
+draws the TUI; run without one (as the \unit{kbopd.service} unit does) it serves the embedded web
+dashboard and starts a background \cmd{mcp-server}. That is why \cmd{kbctl tui} and
+\cmd{kbctl dashboard} both end up executing \cmd{kbopd}.
+\end{kbnote}
+
+\section{Design invariants you must not break}
+\begin{itemize}
+\item \textbf{Shared structs stay byte-identical.} Wire structs are packed little-endian on both the C and Go sides (Appendix~\ref{app:wire}). They change together or not at all.
+\item \textbf{Rules and policy are compiled, not hand-edited on the sensor.} \file{policy.yaml} and \file{rules.yaml} are read by \cmd{kbd} and \emph{pushed} to the sensor when it connects.
+\item \textbf{\cmd{kb-checker} is stateless and has no network listeners.} This is a security invariant of the watchdog, not a style preference.
+\item \textbf{Documented contracts beat code.} Where this book and the repository documentation under \file{docs/} disagree, the documentation is canonical and the disagreement is flagged in Chapter~\ref{ch:trouble}.
+\end{itemize}
+
+\section{What is verified, and what is not}
+A field manual that hides its own uncertainty is dangerous. This release was built and tested without
+root access on the build machines, so the status of every claim in this book is one of the following.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}L{5.2cm}L{2.4cm}Y@{}}
+\toprule
+\textbf{Claim} & \textbf{Status} & \textbf{Evidence}\\
+\midrule
+Both packages build, contain no key material & Verified & File lists inspected; \texttt{find} for \texttt{ssh\_host*}, \texttt{authorized\_keys}, \texttt{id\_*} returns nothing.\\
+Ubuntu binaries resolve all libraries on 24.04 & Verified & \texttt{ldd} on every binary, no \texttt{not found}.\\
+Unit files rewritten to \file{/usr/bin} & Verified & \texttt{grep ExecStart} on the extracted package.\\
+\cmd{kbctl dashboard up/open/down} & Verified & Driven against the packaged \cmd{kbopd} through a stub \cmd{systemctl}; HTTP 200 from the embedded app.\\
+SSH TUI path (wrapper, PTY, tabs, quit) & Verified & Unprivileged \cmd{sshd} with the packaged wrapper; exit status 0.\\
+Offline banner when \cmd{kbd} is down & Verified & \texttt{[OFFLINE]} and \texttt{[DEMO DATA]} rendered in the TUI.\\
+\cmd{kbagents} launcher and \cmd{kb-aads} swarm (Ubuntu) & Verified & Ran on the VM with its venv: status server up, nine agents active, 0 errors, checkpoint loaded. Not run under \cmd{systemd}.\\
+\texttt{apt install} / \texttt{pacman -U} on a live host & \textbf{Not tested} & No root in the build session.\\
+Units booting under real \cmd{systemd}, eBPF sensor under the package & \textbf{Not tested} & Needs root and a BPF-LSM kernel.\\
+\cmd{kbd} HTTP + CORS for the packaged dashboard & \textbf{Source-verified only} & \cmd{kbd} needs a writable \file{/run/kb}.\\
+\texttt{operator} account with a \texttt{nologin} shell and \texttt{ForceCommand} & \textbf{Not tested} & See Chapter~\ref{ch:ssh}.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+Chapter~\ref{ch:demo} gives you the exact checklist to close every \textbf{Not tested} row on your own host.

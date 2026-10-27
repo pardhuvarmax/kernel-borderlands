@@ -1,0 +1,15 @@
+Inspect or override process threat zone classification
+
+Usage:
+  kbctl zone [command]
+
+Available Commands:
+  override    Override a tracked process's zone classification
+
+Flags:
+  -h, --help   help for zone
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+
+Use "kbctl zone [command] --help" for more information about a command.

@@ -1,0 +1,21 @@
+Manage and connect to the SSH operator console (sshd@kb-operator, port 2222)
+
+Usage:
+  kbctl ssh [command]
+
+Available Commands:
+  add-key       Authorize an operator public key for the SSH console (/etc/kb/authorized_keys)
+  connect       Open the TUI over SSH on the operator console (default host 127.0.0.1)
+  down          Stop and disable the operator sshd
+  status        Show whether the operator sshd is running and its port is answering
+  up            Enable and start the operator sshd (sshd@kb-operator.service)
+
+Flags:
+  -h, --help          help for ssh
+      --port int      operator sshd port (packaging/ssh/kb-operator.conf) (default 2222)
+      --user string   account the console ForceCommand is bound to (default "operator")
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+
+Use "kbctl ssh [command] --help" for more information about a command.

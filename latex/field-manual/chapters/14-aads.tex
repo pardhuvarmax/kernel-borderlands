@@ -1,0 +1,78 @@
+\chapter{kb-aads: The Agent Swarm (Optional)}
+\label{ch:aads}
+\cmd{kb-aads} is a Python/Ray multi-agent system that consumes \cmd{kbd}'s data and coordinates response. It has
+\textbf{no compiled build}. The package installs its sources under \file{/usr/lib/kb/aads/} and a launcher,
+\cmd{kbagents}; it does \textbf{not} install Ray or PyTorch, which are several gigabytes and CPU-specific
+(the development virtualenv is 5.4~GB). The unit is installed but not enabled.
+
+\begin{kbnote}[STATUS: RUN AND VERIFIED, WITHOUT SYSTEMD]
+The packaged launcher and sources were run on the Ubuntu 24.04 VM with that machine's existing virtualenv
+(Ray 2.56): Ray started a local instance, the status server listened on \texttt{127.0.0.1:8601}, and
+\texttt{GET /agents} returned nine agents (executor, judge, two hunters, two patrollers, and more), all
+\texttt{active} with \texttt{error\_count} 0; the containment agent loaded the shipped checkpoint. The same launcher
+also reached the swarm banner on Arch with a scratch Python 3.11 venv (Ray 2.59, CPU torch), where Ray's own
+startup then stalled on a networking problem of that machine. \textbf{Not tested:} running it as
+\unit{kbagents.service} under \cmd{systemd}, with a live \cmd{kbd} behind it.
+\end{kbnote}
+
+\section{Create the environment}
+\resetsteps
+\step{Install Python tooling}
+\ifarch
+\begin{lstlisting}[style=console]
+$ sudo pacman -S --needed python python-pip
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ sudo apt install -y python3 python3-venv python3-pip
+\end{lstlisting}
+\fi
+\step{Build the venv where the launcher looks for it}
+\begin{lstlisting}[style=console]
+$ sudo python3 -m venv /opt/kb/venv
+$ sudo /opt/kb/venv/bin/pip install -r /usr/lib/kb/aads/requirements.txt
+\end{lstlisting}
+Requirements: \texttt{ray[rllib,default]>=2.9.0}, \texttt{grpcio>=1.50.0}, \texttt{grpcio-tools}, \texttt{pyyaml}, \texttt{gymnasium},
+\texttt{torch>=2.0.0}, plus \texttt{pytest} for tests. Expect a long download and several GB of disk.
+\step{Check the launcher is satisfied}
+\begin{lstlisting}[style=console]
+$ kbagents --help
+usage: main.py [-h] [--config CONFIG]
+\end{lstlisting}
+Before the venv exists, \cmd{kbagents} exits 1 and prints exactly the \texttt{pip install} command to run.
+
+\section{Run it}
+To try it without installing the package, point the launcher at an unpacked tree and an existing venv:
+\begin{lstlisting}[style=console]
+$ KB_AADS_DIR=/path/to/usr/lib/kb/aads KB_AADS_PYTHON=/path/to/venv/bin/python3 \
+  KB_AADS_CONFIG=/path/to/agents.yaml RAY_AUTH_MODE=disabled kbagents
+$ curl -s http://127.0.0.1:8601/agents
+\end{lstlisting}
+The status server answers on \texttt{/agents} (the bare \texttt{/} returns nothing). \texttt{RAY\_AUTH\_MODE=disabled} stops newer Ray
+versions from generating a token file in your home directory; leave it unset in the service.
+To run it for real:
+\begin{lstlisting}[style=console]
+$ sudo systemctl enable --now kbagents
+$ systemctl status kbagents
+$ curl -s http://127.0.0.1:8601/agents   # swarm status server
+\end{lstlisting}
+\texttt{kbagents.service} runs \texttt{/usr/bin/kbagents}, which \texttt{cd}s to \file{/usr/lib/kb/aads} and executes
+\texttt{main.py --config /etc/kb/agents.yaml}. It \texttt{Requires=kbd.service}; it deliberately does
+\textbf{not} require the maintenance-held \cmd{kb-checker}.
+
+\section{How \cmd{kbd} finds it}
+\cmd{kbd} proxies the swarm's status for the dashboard's \texttt{/api/agents} route. The status server binds
+\texttt{127.0.0.1:8601} by default (\texttt{KB\_AADS\_STATUS\_HOST}, \texttt{KB\_AADS\_STATUS\_PORT}); \cmd{kbd}'s
+\texttt{KB\_AADS\_API\_ADDR} must point at the same address if you change it.
+
+\begin{kbnote}[KNOWN GAP]
+The event contract notes that nothing in \cmd{kb-aads} yet \emph{consumes} \cmd{kbd}'s \texttt{process\_state} /
+\texttt{zone\_transition} events. The swarm is wired and runs, but event-driven behaviour is still being built
+out. Do not present it as autonomous response.
+\end{kbnote}
+
+\section{Hardening in the unit}
+\texttt{NoNewPrivileges}, \texttt{PrivateTmp}, \texttt{ProtectHome}, \texttt{MemoryDenyWriteExecute},
+\texttt{ProtectSystem=strict}, an empty capability set, and read-only access to \file{/etc/kb}, \file{/usr/lib/kb},
+\file{/opt/kb}; only \file{/run/kb} is writable. If Ray or PyTorch turn out to need JIT memory
+(\texttt{MemoryDenyWriteExecute} blocks it), relax that single directive in a drop-in and document why.

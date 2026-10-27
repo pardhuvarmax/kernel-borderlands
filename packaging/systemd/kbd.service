@@ -11,6 +11,14 @@ Type=notify
 # --config flag; it takes --db/--policy/--rules/--workloads separately.
 # Pointed at /etc/kb/ so the provisioning story matches kb-checker's own
 # real /etc/kb usage (kb-checker/src/integrity/mod.rs:21).
+WorkingDirectory=/
+# The packaged dashboard is served by kbopd on 127.0.0.1:8082 and its browser
+# code fetches kbd's API on :8080 cross-origin. kbd's CORS allowlist defaults
+# to the Vite dev server (:5173) only (internal/controlplane/http.go), so
+# without this the dashboard loads but every API call is blocked by the
+# browser. Mutating routes (isolate/restore) additionally need
+# KB_HTTP_API_TOKEN set; they fail closed without it.
+Environment=KB_HTTP_CORS_ORIGIN=http://127.0.0.1:8082,http://localhost:8082
 ExecStart=/usr/local/bin/kbd --db /var/lib/kbd/state.db --policy /etc/kb/policy.yaml --rules /etc/kb/rules.yaml --workloads /etc/kb/workloads.yaml
 Restart=always
 RestartSec=3

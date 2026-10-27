@@ -1,0 +1,8 @@
+Start the background validation loops daemon
+
+Usage: kb-checker monitor [OPTIONS]
+
+Options:
+      --all                        Monitor all loops simultaneously
+      --grpc-socket <GRPC_SOCKET>  Optional: Path to run the diagnostic gRPC server on Unix Domain Socket [default: /run/kb/kbc.sock]
+  -h, --help                       Print help

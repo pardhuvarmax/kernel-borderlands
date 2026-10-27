@@ -1,0 +1,10 @@
+Reload workloads.yaml and push the registry live to every connected sensor
+
+Usage:
+  kbctl workload reload [flags]
+
+Flags:
+  -h, --help   help for reload
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

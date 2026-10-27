@@ -1,0 +1,5 @@
+/etc/kb/policy.yaml
+/etc/kb/rules.yaml
+/etc/kb/workloads.yaml
+/etc/kb/agents.yaml
+/etc/kb/sshd_kb-operator.conf

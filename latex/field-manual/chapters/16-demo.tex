@@ -1,0 +1,130 @@
+\chapter{Acceptance Checklist}
+\label{ch:demo}
+Run this top to bottom on the \emph{target} host after installing the package. Each row has the command, the
+result that means PASS, and a box to tick. Rows marked \kbstar{} close a claim that this release's build
+sessions could \textbf{not} verify (no root); do not skip them before a demonstration.
+
+
+\section{A. Pre-flight}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}c L{5.1cm}Y@{}}
+\toprule
+ & \textbf{Command} & \textbf{PASS looks like}\\
+\midrule
+\chk & \texttt{ls /usr/local/bin/kb* /etc/systemd/system/kb*} & ``No such file'' (no development install shadowing the package)\\
+\chk & \texttt{ls /sys/kernel/btf/vmlinux} & file exists\\
+\chk & \texttt{cat /sys/kernel/security/lsm} & ends with \texttt{bpf}\\
+\chk & \texttt{sha256sum \pkgfile} & matches the release's recorded hash\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{B. Install}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}c L{5.1cm}Y@{}}
+\toprule
+ & \textbf{Command} & \textbf{PASS looks like}\\
+\midrule
+\chk \kbstar{} & \ifarch\texttt{sudo pacman -U \pkgfile}\else\texttt{sudo apt install ./\pkgfile}\fi & Completes; prints ``provisioning complete''. \textbf{(a real install is untested)}\\
+\chk & \texttt{getent passwd operator; getent group kb} & both exist\\
+\chk & \texttt{sudo ls -l /etc/kb/ssh/ssh\_host\_ed25519\_key} & exists, root-readable only\\
+\chk & \texttt{systemctl cat kbd | grep CORS} & shows the 8082 origins\\
+\chk & \texttt{kbctl status} & four \texttt{inactive}, checker line says UNDER MAINTENANCE AND REPAIRS\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{C. Start and the sensor}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}c L{5.1cm}Y@{}}
+\toprule
+ & \textbf{Command} & \textbf{PASS looks like}\\
+\midrule
+\chk \kbstar{} & \texttt{sudo kbctl up} & returns 0 with no unit failures. \textbf{(boot under real systemd is untested)}\\
+\chk & \texttt{kbctl status} & four \texttt{active}\\
+\chk & \texttt{ls /run/kb} & \texttt{kbd.sock kbct.sock kba.sock} (no \texttt{kbc.sock}: only the held-down checker creates it)\\
+\chk \kbstar{} & \texttt{journalctl -u kb-sensor -b | grep -i -E 'attach|hook|lsm'} & hooks attached; no LSM failure. \textbf{(sensor under the package is untested)}\\
+\chk & \texttt{journalctl -u kbd -b | grep 'hash chain'} & ``verified intact''\\
+\chk & \texttt{kbctl stats} & prints events/sec and active processes\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{D. Dashboard and API}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}c L{5.6cm}Y@{}}
+\toprule
+ & \textbf{Command} & \textbf{PASS looks like}\\
+\midrule
+\chk & \texttt{kbctl dashboard status; echo \$?} & \texttt{active ... listening=true}, exit 0\\
+\chk \kbstar{} & \texttt{curl -si -H 'Origin: http://127.0.0.1:8082' http://127.0.0.1:8080/api/services | grep -i access-control-allow-origin} & header present and equal to the origin. \textbf{(CORS runtime path is source-verified only)}\\
+\chk & same request with \texttt{Origin: http://evil.example} & \emph{no} \texttt{Access-Control-Allow-Origin} header\\
+\chk & \texttt{kbctl dashboard open} & browser opens; panels fill; no red CORS errors in the browser console\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{E. SSH console}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}c L{5.6cm}Y@{}}
+\toprule
+ & \textbf{Command} & \textbf{PASS looks like}\\
+\midrule
+\chk & \texttt{sudo kbctl ssh add-key \textasciitilde/.ssh/id\_ed25519.pub} & ``key authorized for operator''\\
+\chk & \texttt{kbctl ssh status; echo \$?} & active, listening, exit 0 (no \texttt{Address already in use} in \texttt{journalctl -u sshd@kb-operator})\\
+\chk \kbstar{} & \texttt{kbctl ssh connect} & the TUI appears. \textbf{(nologin + ForceCommand is untested)} If refused: Section~\ref{sec:nologin}\\
+\chk & in the TUI: \texttt{Tab} through four tabs, \texttt{q} & clean exit, shell returns\\
+\chk & \texttt{ssh -p 2222 operator@HOST id} from another machine & does \textbf{not} run \texttt{id}; shows the TUI (ForceCommand wins)\\
+\chk & \texttt{ssh -p 2222 -L 9999:127.0.0.1:8080 operator@HOST} & forwarding refused (\texttt{AllowTcpForwarding no})\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{F. Containment and audit}
+\begin{lstlisting}[style=console]
+$ sleep 600 &                       # a harmless victim
+[1] 5120
+$ sudo kbctl process isolate --pid 5120 --level CGROUP --reason "acceptance test"
+pid=5120 contained at level CGROUP
+$ kbctl audit verify
+chain intact — N entries verified
+$ kbctl audit export --out /tmp/acceptance-audit.json
+$ kill 5120
+\end{lstlisting}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}c Y@{}}
+\toprule
+ & \textbf{PASS looks like}\\
+\midrule
+\chk & the isolate line prints and the TUI Processes tab shows CGROUP for that PID\\
+\chk & \texttt{audit verify} reports intact; the export contains your reason string\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{G. Maintenance hold}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}c L{5.1cm}Y@{}}
+\toprule
+ & \textbf{Command} & \textbf{PASS looks like}\\
+\midrule
+\chk & \texttt{kbctl status | tail -1} & UNDER MAINTENANCE AND REPAIRS (kept down)\\
+\chk & \texttt{sudo systemctl start kb-checker; systemctl is-active kb-checker} & \texttt{inactive} (condition unmet)\\
+\chk & \texttt{ls /etc/kb/checker.enabled} & does not exist\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{H. Reboot and removal}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}c L{5.1cm}Y@{}}
+\toprule
+ & \textbf{Command} & \textbf{PASS looks like}\\
+\midrule
+\chk \kbstar{} & \texttt{sudo reboot}, then \texttt{kbctl status} & the four units came back on their own (\texttt{up} enabled them)\\
+\chk & \ifarch\texttt{sudo pacman -R kernel-borderlands}\else\texttt{sudo apt purge kernel-borderlands}\fi & units disabled; \file{/etc/kb/ssh} and \file{/var/lib/kbd} retained\\
+\bottomrule
+\end{tabularx}
+\end{center}
+Record any failed row with the exact command, its output, and \texttt{journalctl -b} for the unit, and file it
+against the packaging (\file{packaging/}) rather than patching the host by hand.

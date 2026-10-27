@@ -1,0 +1,10 @@
+Reload policy.yaml from the path kbd was started with
+
+Usage:
+  kbctl policy reload [flags]
+
+Flags:
+  -h, --help   help for reload
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

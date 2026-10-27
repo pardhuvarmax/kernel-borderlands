@@ -1,0 +1,160 @@
+\chapter{Command Combinations and Playbooks}
+\label{ch:play}
+A command is a word; a playbook is a sentence. Each recipe below is complete, ordered, and says what you
+should see after every step.
+
+\section{Playbook 1: cold start to first dashboard}
+\begin{lstlisting}[style=console]
+$ sudo kbctl ssh add-key ~/.ssh/id_ed25519.pub     # once per operator
+$ sudo kbctl up
+$ kbctl status                                      # all four active
+$ kbctl dashboard open                              # browser appears
+$ kbctl stats
+events/sec:       112.40
+active processes: 238
+\end{lstlisting}
+If \texttt{stats} errors with \texttt{dial unix /run/kb/kba.sock: no such file}, \cmd{kbd} is not running:
+\texttt{systemctl status kbd}.
+
+\section{Playbook 2: a remote operator takes over}
+On the server (once): \texttt{sudo kbctl ssh add-key} for their key, \texttt{sudo kbctl ssh up}.
+On their laptop:
+\begin{lstlisting}[style=console]
+$ ssh -t -p 2222 operator@kb-host        # lands directly in the TUI, nothing else
+\end{lstlisting}
+They need no account on the server and get no shell. Revoke by deleting their line from
+\file{/etc/kb/authorized_keys}; no restart is needed.
+
+\section{Playbook 3: incident, from detection to containment}
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,scale=0.9,transform shape]
+  \node[box,minimum width=2.7cm] (d) at (0,0) {1. DETECT\\[-1pt]\scriptsize dashboard / TUI alert};
+  \node[box,minimum width=2.7cm] (i) at (3.7,0) {2. INVESTIGATE\\[-1pt]\scriptsize \texttt{pid}, MCP, audit};
+  \node[dark,minimum width=2.7cm] (c) at (7.4,0) {3. CONTAIN\\[-1pt]\scriptsize \texttt{process isolate}};
+  \node[box,minimum width=2.7cm] (v) at (11.1,0) {4. VERIFY\\[-1pt]\scriptsize \texttt{audit verify}};
+  \draw[flow] (d)--(i); \draw[flow] (i)--(c); \draw[flow] (c)--(v);
+  \draw[flowd] (v.south) -- ++(0,-0.9) -| node[lbl,pos=0.25,below]{released? \texttt{--level} lower or \texttt{none}} (c.south);
+\end{tikzpicture}
+\caption{The response loop. Containment is reversible until you choose \texttt{TERMINATE}.}
+\end{figure}
+\resetsteps
+\step{Detect.} A process enters \texttt{BORDERLANDS}. The dashboard raises a \texttt{BORDERLANDS\_ENTRY} alert.
+\step{Investigate.} In the TUI Query Console: \texttt{pid 4242}, \texttt{zone borderlands}.
+\step{Contain, mildest effective level first.}
+\begin{lstlisting}[style=console]
+$ sudo kbctl process isolate --pid 4242 --level SECCOMP \
+      --reason "beaconing to unknown ASN, ticket 1187"
+pid=4242 contained at level SECCOMP
+\end{lstlisting}
+Escalate to \texttt{NAMESPACE} only if the behaviour continues; reserve \texttt{TERMINATE} for confirmed hostile code.
+\step{Verify the record.}
+\begin{lstlisting}[style=console]
+$ kbctl audit verify
+chain intact — 1432 entries verified     # counts will differ
+\end{lstlisting}
+
+\section{Playbook 4: change policy without restarting}
+\label{sec:policy-change}
+\begin{lstlisting}[style=console]
+$ sudo $EDITOR /etc/kb/policy.yaml
+$ sudo kbctl policy reload
+\end{lstlisting}
+\cmd{kbd} re-reads the file it was \emph{started with} (\file{/etc/kb/policy.yaml} in the packaged unit) and
+logs how many process policies and extra sensitive paths it loaded.
+
+\section{Playbook 5: protect a workload with signed CWP rules}
+\label{sec:cwp}
+Protected-workload rules can require a signature so nobody can weaken them by editing a file.
+\resetsteps
+\step{Create a signing key pair somewhere safe (not on the monitored host if you can avoid it).}
+\begin{lstlisting}[style=console]
+$ kbctl workload keygen --out-dir ~/kb-keys --name cwp-signer
+Wrote private key (keep secret): /home/you/kb-keys/cwp-signer.key
+Wrote public key (for kbd's --workloads-pubkey): /home/you/kb-keys/cwp-signer.pub
+\end{lstlisting}
+\step{Edit and sign. The file is rewritten \emph{in place}.}
+\begin{lstlisting}[style=console]
+$ sudo $EDITOR /etc/kb/workloads.yaml
+$ sudo kbctl workload sign /etc/kb/workloads.yaml \
+      --key ~/kb-keys/cwp-signer.key --signed-by "alice@soc" --version 2
+Signed /etc/kb/workloads.yaml (signed_by="alice@soc" version=2)
+\end{lstlisting}
+\step{Tell \cmd{kbd} to require the signature.} Install the public key and add a drop-in (Section~\ref{sec:dropin}):
+\begin{lstlisting}[style=console]
+$ sudo install -m644 ~/kb-keys/cwp-signer.pub /etc/kb/workloads.pub
+$ sudo systemctl edit kbd
+[Service]
+ExecStart=
+ExecStart=/usr/bin/kbd --db /var/lib/kbd/state.db --policy /etc/kb/policy.yaml \
+    --rules /etc/kb/rules.yaml --workloads /etc/kb/workloads.yaml \
+    --workloads-pubkey /etc/kb/workloads.pub
+$ sudo systemctl restart kbd
+\end{lstlisting}
+\step{Push live to every connected sensor.}
+\begin{lstlisting}[style=console]
+$ sudo kbctl workload reload
+\end{lstlisting}
+Without \texttt{--workloads-pubkey}, CWP stays unsigned and opt-in; an unsigned file is accepted.
+
+\section{Playbook 6: prove the audit log is intact}
+\label{sec:audit}
+\begin{lstlisting}[style=console]
+$ kbctl audit verify
+chain intact — 1432 entries verified           # counts will differ; exit 0
+$ kbctl audit export --out /tmp/audit-$(date +%F).json
+wrote 1432 entries to /tmp/audit-2026-10-27.json
+\end{lstlisting}
+Each entry hashes the previous one (SHA-256). A broken chain prints
+\texttt{CHAIN BROKEN — N entries verified before break}. Export before you investigate a suspected break so
+you hold a copy of the evidence.
+
+\section{Playbook 7: scripting and health gates}
+\begin{lstlisting}[style=console]
+# wait until the SSH console really answers, then continue
+$ until kbctl ssh status >/dev/null; do sleep 1; done
+
+# fail a CI step if the dashboard is not serving
+$ kbctl dashboard status || { echo "dashboard down"; exit 1; }
+
+# watch the stack
+$ watch -n2 kbctl status
+
+# stop everything for maintenance, start it again
+$ sudo kbctl down && sudo kbctl up
+
+# one-liner health report
+$ kbctl status; kbctl stats; kbctl audit verify
+\end{lstlisting}
+Exit code 3 from the two \texttt{status} commands means ``not up''; code 1 means the command itself failed.
+
+\section{Playbook 8: a quick demo for an audience}
+\begin{lstlisting}[style=console]
+$ sudo kbctl up
+$ kbctl dashboard open                       # screen 1: live dashboard
+$ kbctl ssh connect                          # screen 2: the same data in a terminal
+# in the TUI: Tab to Processes, press / to filter, c to contain a demo process
+$ kbctl audit verify                         # screen 3: the audit proof
+\end{lstlisting}
+Remember the TUI's \texttt{[DEMO DATA]} banner when \cmd{kbd} is down: do not present fictional rows as live.
+
+\section{Combination cheat sheet}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{5.6cm}Y@{}}
+\toprule
+\textbf{Goal} & \textbf{Command}\\
+\midrule
+Everything up and verified & \texttt{sudo kbctl up \&\& kbctl status}\\
+Web only & \texttt{kbctl dashboard open}\\
+TUI only, on this box & \texttt{kbctl tui}\\
+TUI over SSH, loopback & \texttt{kbctl ssh connect}\\
+TUI over SSH, remote & \texttt{kbctl ssh connect HOST -i KEY}\\
+Add an operator & \texttt{sudo kbctl ssh add-key KEY.pub}\\
+Contain, then prove it & \texttt{kbctl process isolate ... \&\& kbctl audit verify}\\
+Policy edit, apply & \texttt{sudo \$EDITOR /etc/kb/policy.yaml \&\& sudo kbctl policy reload}\\
+Evidence copy & \texttt{kbctl audit export --out FILE}\\
+Stop for maintenance & \texttt{sudo kbctl down}\\
+Stop one surface permanently & \texttt{kbctl dashboard down} / \texttt{sudo kbctl ssh down}\\
+\bottomrule
+\end{tabularx}
+\end{center}

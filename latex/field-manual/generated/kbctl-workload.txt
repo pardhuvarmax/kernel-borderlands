@@ -1,0 +1,17 @@
+Manage kbd's CWP protected-workload registry (docs/features/CWP.md)
+
+Usage:
+  kbctl workload [command]
+
+Available Commands:
+  keygen      Generate an Ed25519 keypair for signing/verifying workloads.yaml
+  reload      Reload workloads.yaml and push the registry live to every connected sensor
+  sign        Sign a workloads.yaml file for kbd's --workloads-pubkey verification (CWP.md §4.3/§11.4)
+
+Flags:
+  -h, --help   help for workload
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+
+Use "kbctl workload [command] --help" for more information about a command.

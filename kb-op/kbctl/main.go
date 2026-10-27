@@ -37,6 +37,11 @@ func init() {
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(statsCmd)
 	rootCmd.AddCommand(sshCmd)
+	rootCmd.AddCommand(dashboardCmd)
+	rootCmd.AddCommand(tuiCmd)
+	rootCmd.AddCommand(upCmd)
+	rootCmd.AddCommand(downCmd)
+	rootCmd.AddCommand(statusCmd)
 }
 
 // dial connects to kbd over its UDS gRPC socket. Every subcommand calls

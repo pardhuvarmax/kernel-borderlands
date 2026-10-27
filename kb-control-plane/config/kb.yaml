@@ -1,3 +1,7 @@
+# NOT CONSUMED: no code in kbd, kbd_sensor or kb-checker reads this file today and kbd has
+# no --config flag (verified by search, 2026-10-27). These values are design intent only;
+# the real settings are kbd's flags (--grpc-socket, --http-addr, --policy, ...) and
+# policy.yaml's thresholds. It is not installed by the packages.
 grpc_port: 50051
 
 scoring:

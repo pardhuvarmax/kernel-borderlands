@@ -1,0 +1,15 @@
+Replaces this process with ssh to the operator sshd, which ForceCommands the
+audit wrapper and then kbopd. Starts the console first if it is not running
+and the target is this machine.
+
+Usage:
+  kbctl ssh connect [host] [flags]
+
+Flags:
+  -h, --help              help for connect
+  -i, --identity string   private key file passed to ssh -i
+
+Global Flags:
+      --port int        operator sshd port (packaging/ssh/kb-operator.conf) (default 2222)
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+      --user string     account the console ForceCommand is bound to (default "operator")

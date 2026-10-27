@@ -1,0 +1,11 @@
+Start the dashboard if needed and open it in the default browser
+
+Usage:
+  kbctl dashboard open [flags]
+
+Flags:
+  -h, --help   help for open
+
+Global Flags:
+      --port int        dashboard port (kbopd's embedded server is fixed at 8082; change only if you rebuilt it) (default 8082)
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

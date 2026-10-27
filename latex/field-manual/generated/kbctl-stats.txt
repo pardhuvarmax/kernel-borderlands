@@ -1,0 +1,10 @@
+Fetch global telemetry volumes and active process counts
+
+Usage:
+  kbctl stats [flags]
+
+Flags:
+  -h, --help   help for stats
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")

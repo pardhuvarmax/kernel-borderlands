@@ -1,0 +1,15 @@
+Query or contain tracked processes
+
+Usage:
+  kbctl process [command]
+
+Available Commands:
+  isolate     Forcefully contain/isolate a process
+
+Flags:
+  -h, --help   help for process
+
+Global Flags:
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
+
+Use "kbctl process [command] --help" for more information about a command.

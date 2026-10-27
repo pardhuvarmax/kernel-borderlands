@@ -1,0 +1,150 @@
+\chapter{The SSH Terminal Console}
+\label{ch:ssh}
+\section{The architecture}
+The console is not a feature of \cmd{kbd}. It is a \emph{second, independent} \cmd{sshd} that exists only to
+authenticate an operator and force one program. Host keys, \file{authorized_keys} and PTY handling all live
+in that \cmd{sshd}.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,scale=0.9,transform shape]
+  \node[box,minimum width=2.4cm] (cl) at (0,0) {operator\\[-1pt]\scriptsize \texttt{ssh -t -p 2222}};
+  \node[box,minimum width=3.2cm] (sd) at (4.4,0) {\texttt{sshd@kb-operator}\\[-1pt]\scriptsize key auth, \texttt{Match User operator}};
+  \node[box,minimum width=3.6cm] (wr) at (9.2,0) {\texttt{kb-tui-session-wrapper.sh}\\[-1pt]\scriptsize ForceCommand};
+  \node[box,minimum width=3.2cm] (s1) at (9.2,-2.1) {\texttt{kbctl ssh session-start}\\[-1pt]\scriptsize audit callback, best-effort};
+  \node[dark,minimum width=3.2cm] (tui) at (9.2,-4.2) {\texttt{kbopd} (TUI on the PTY)};
+  \node[box,minimum width=3.2cm] (s2) at (9.2,-6.3) {\texttt{kbctl ssh session-end}\\[-1pt]\scriptsize audit callback};
+  \node[box,minimum width=2.8cm] (kbd) at (3.4,-4.2) {\texttt{kbd}\\[-1pt]\scriptsize \texttt{kba.sock} gRPC};
+  \draw[flow] (cl) -- (sd); \draw[flow] (sd) -- (wr);
+  \draw[flow] (wr) -- node[lbl,right]{1} (s1); \draw[flow] (s1) -- node[lbl,right]{2} (tui);
+  \draw[flow] (tui) -- node[lbl,right]{3, on quit} (s2);
+  \draw[flow] (tui) -- node[lbl,above]{gRPC} (kbd);
+  \draw[flowd] (s1.west) -| node[lbl,pos=0.25,above]{record} (kbd.north);
+\end{tikzpicture}
+\caption{One SSH session. The wrapper records the start, runs the TUI, records the end, and returns the
+TUI's exit status to the client.}
+\end{figure}
+Both audit callbacks are \textbf{best-effort by design}. If \cmd{kbd} is down, \cmd{kbctl ssh session-start}
+prints a warning to the operator's terminal and exits 0; an audit-logging outage must never become a denial of
+access to the very tool you need during an incident.
+
+\section{Commands}
+\begin{lstlisting}[style=console]
+$ sudo kbctl ssh up            # enable + start sshd@kb-operator, wait for :2222
+$ kbctl ssh status             # exit 0 only if active AND port answering
+$ sudo kbctl ssh add-key ~/.ssh/id_ed25519.pub
+key authorized for operator
+$ kbctl ssh connect            # to 127.0.0.1:2222 as operator, starting it if needed
+$ kbctl ssh connect kb-host    # to a remote host
+$ kbctl ssh connect kb-host -i ~/.ssh/ops_key --port 2222
+$ sudo kbctl ssh down          # stop + disable
+\end{lstlisting}
+\cmd{ssh connect} replaces itself with \cmd{ssh -t} (so your terminal, window resizes and exit status are
+real SSH's). For loopback targets it adds \texttt{UserKnownHostsFile=/dev/null} and
+\texttt{StrictHostKeyChecking=no}, because the host key is regenerated per machine and would otherwise
+pollute \file{known_hosts}; \emph{remote} hosts keep normal host-key checking.
+
+\subsection{\cmd{add-key} in detail}
+It accepts a public-key file or \texttt{-} for stdin, requires \textbf{exactly one line}, checks the key type
+prefix (\texttt{ssh-ed25519}, \texttt{ssh-rsa}, \texttt{ecdsa-sha2-*}, \texttt{sk-*}), skips a key already present,
+and appends to \file{/etc/kb/authorized_keys} with \cmd{tee -a} under \cmd{sudo} (the file is \texttt{operator:kb} 0600).
+\begin{lstlisting}[style=console]
+$ ssh-add -L | head -1 | sudo kbctl ssh add-key -     # from an agent
+$ printf 'garbage\n' | kbctl ssh add-key -
+error: not an OpenSSH public key (want ssh-ed25519/ecdsa-sha2-*/sk-*/ssh-rsa ...)
+\end{lstlisting}
+
+\section{The sshd configuration, line by line}
+\lstinputlisting[style=conf,caption={\file{/etc/kb/sshd_kb-operator.conf} (packaged)}]{../../packaging/ssh/kb-operator.conf}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{4.6cm}Y@{}}
+\toprule
+\textbf{Directive} & \textbf{Effect}\\
+\midrule
+\texttt{Port 2222} & Dedicated port, separate from the host's port 22.\\
+\texttt{HostKey /etc/kb/ssh/...} & Host key private to this instance.\\
+\texttt{Match User operator} & Everything below applies only to the \texttt{operator} account.\\
+\texttt{ForceCommand ...wrapper.sh} & Whatever the client asks to run, this runs instead.\\
+\texttt{AuthorizedKeysFile /etc/kb/authorized\_keys} & Keys live outside any home directory.\\
+\texttt{X11Forwarding no}, \texttt{AllowTcpForwarding no} & No tunnels through the console.\\
+\texttt{PermitTTY yes} & The TUI needs a PTY.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+\begin{kbnote}[HARDENING YOU MAY WANT TO ADD]
+The packaged file does not disable password authentication for non-\texttt{operator} users. The
+\texttt{operator} account has no password, so it is moot for that account, but adding
+\texttt{PasswordAuthentication no} and \texttt{KbdInteractiveAuthentication no} makes the whole instance
+key-only. Edit \file{/etc/kb/sshd_kb-operator.conf}; it is a protected config file and survives upgrades.
+\end{kbnote}
+
+\section{Test the console on your host (the unverified step)}
+\label{sec:nologin}
+\file{provision.sh} gives \texttt{operator} the shell \file{/usr/sbin/nologin}. This has not been exercised with
+the packaged account. Run this test once after \cmd{kbctl up}:
+\resetsteps
+\step{Connect}
+\begin{lstlisting}[style=console]
+$ kbctl ssh connect
+\end{lstlisting}
+\step{Read the result}
+\begin{itemize}
+\item \textbf{The TUI appears.} Your system's \cmd{sshd} runs \texttt{ForceCommand} without consulting the shell. Nothing to do.
+\item \textbf{``This account is currently not available.''} and the connection closes: the \texttt{nologin} shell refused the forced command. Fix it as below.
+\end{itemize}
+\step{If refused, give the account a plain shell}
+\begin{lstlisting}[style=console]
+$ sudo usermod --shell /bin/sh operator
+$ kbctl ssh connect
+\end{lstlisting}
+This is safe in this design: the only way in is a key in \file{/etc/kb/authorized_keys}, the config forces
+the wrapper and forbids forwarding, and the account has no password. Also change \texttt{--shell} in
+\file{/usr/lib/kb/provision.sh} so a reinstall does not undo it.
+
+\section{Using the TUI}
+\subsection{The four tabs}
+\texttt{Tab} moves forward, \texttt{Shift+Tab} backward. \texttt{?} toggles help (\texttt{Esc} also closes it).
+\texttt{q} or \texttt{Ctrl+C} quits.
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{3cm}L{4.2cm}Y@{}}
+\toprule
+\textbf{Tab} & \textbf{Keys} & \textbf{Meaning}\\
+\midrule
+Processes & \texttt{j}/\texttt{k} or arrows & Move selection through the process table (PID, COMM, ZONE, SCORE, UID, CONTAINMENT).\\
+ & \texttt{/} & Start a filter; type to narrow, \texttt{Enter}/\texttt{Esc} to stop typing, \texttt{Esc} again clears it.\\
+ & \texttt{c} & Contain the selected process (see below).\\
+Alerts & \texttt{j}/\texttt{k}, \texttt{Enter} & Scroll alerts; \texttt{Enter} expands or collapses one.\\
+Agent Activity & \texttt{j}/\texttt{k} & Scroll the swarm's activity feed.\\
+Query Console & type, \texttt{Enter} & Run a command; \texttt{Up}/\texttt{Down} history; \texttt{Ctrl+U} clears the line.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Containing a process}
+\resetsteps
+\step{Select it and press \texttt{c}.} A modal asks for a level.
+\step{Pick the level.}
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\toprule \textbf{Key} & \textbf{Level}\\ \midrule
+\texttt{0} & None (release)\\ \texttt{1} & Cgroup\\ \texttt{2} & Seccomp\\ \texttt{3} & Namespace\\ \texttt{4} & Terminate\\ \bottomrule
+\end{tabular}
+\end{center}
+\step{Confirm.} \texttt{y} or \texttt{Enter} submits with the reason \texttt{operator action via kb-tui};
+\texttt{n} returns to level selection; \texttt{Esc} cancels.
+
+\subsection{The query console}
+\begin{lstlisting}[style=console]
+> help
+> pid 4242                      # full state for one process
+> zone borderlands              # list processes in safe|suspicious|borderlands
+> stats                         # global telemetry snapshot
+> contain 4242 seccomp suspicious beaconing
+> clear
+\end{lstlisting}
+Levels for \texttt{contain}: \texttt{none, cgroup, seccomp, namespace, terminate}.
+
+\subsection{When \cmd{kbd} is unreachable}
+If \file{/run/kb/kba.sock} cannot be dialed the TUI does \emph{not} fail. It shows an
+\texttt{[OFFLINE]} banner (``\texttt{kbd unreachable}'') and a \texttt{[DEMO DATA]} table so you can see the
+interface working. Never act on demo rows: the PIDs are fictional. Read the banner before the table.

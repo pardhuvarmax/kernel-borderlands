@@ -1,11 +1,33 @@
 [Unit]
+# UNDER MAINTENANCE AND REPAIRS: kept down by default. The unit only starts if
+# /etc/kb/checker.enabled exists; remove this condition (and the matching
+# maintenanceUnits entry in kb-op/kbctl/svc.go) once kb-checker is repaired.
+ConditionPathExists=/etc/kb/checker.enabled
 Description=Kernel Borderlands Safety and Integrity Watchdog Daemon
-# Dependency updated in this pass to also require kb-sensor.service: the
-# checker's Phase 2 boot audits (eBPF bytecode integrity, hook liveness) are
-# meaningless before the sensor has actually loaded its hooks into the
-# kernel — see docs/architecture/boot_sequence_spec.md §2 Phase 2 step 4.
+# kbd.service: Requires= is correct here — kb-checker never stops kbd
+# itself, so if kbd genuinely goes down, kb-checker going down with it is
+# the desired behavior (matches the original spec's design).
+#
+# kb-sensor.service: deliberately Wants=, NOT Requires=, even though the
+# checker's Phase 2 boot audits (eBPF bytecode integrity, hook liveness)
+# are meaningless before the sensor has loaded its hooks — see
+# docs/architecture/boot_sequence_spec.md §2 Phase 2 step 4. Found by
+# actually booting this unit: Requires= means systemd stops kb-checker
+# whenever kb-sensor stops, in EITHER direction — including when
+# kb-checker's OWN recovery logic (report/mod.rs's trigger_auto_recovery)
+# calls `systemctl stop/restart kb-sensor` as part of its normal
+# operation. That self-inflicted stop-propagation killed kb-checker's own
+# process (and its still-running `systemctl stop kb-sensor` child, via
+# the whole cgroup receiving SIGTERM) in the middle of executing its own
+# containment response — which then made a perfectly normal SIGTERM look
+# like a failed stop, triggering the full pkill/bpf-detach/iptables
+# Lockdown fallback from a daemon that was already being torn down.
+# Wants=+After= keeps the same startup ordering (kb-checker only starts
+# once kb-sensor has been asked to start) without the destructive stop
+# propagation back onto kb-checker when IT is the one stopping the sensor.
 After=kbd.service kb-sensor.service
-Requires=kbd.service kb-sensor.service
+Requires=kbd.service
+Wants=kb-sensor.service
 DefaultDependencies=no
 
 [Service]

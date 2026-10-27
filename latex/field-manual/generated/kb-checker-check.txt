@@ -1,0 +1,15 @@
+Run one-off integrity checks
+
+Usage: kb-checker check <COMMAND>
+
+Commands:
+  ebpf           Verify active eBPF bytecode signatures
+  control-plane  Audit Control Plane availability via gRPC
+  swarm          Verify AADS Swarm Ray cluster health
+  liveness       Active end-to-end BPF hook liveness check
+  map            Verify and self-heal eBPF containment map elements
+  performance    Audit eBPF hook execution latencies
+  help           Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help

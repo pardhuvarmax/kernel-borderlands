@@ -1,0 +1,88 @@
+\chapter{The Web Dashboard}
+\label{ch:dash}
+\section{How it is put together}
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,scale=0.92,transform shape]
+  \node[box,minimum width=3.4cm,minimum height=1.5cm] (br) at (0,0) {browser\\[-1pt]\scriptsize \texttt{http://127.0.0.1:8082}};
+  \node[box,minimum width=3.8cm,minimum height=1.5cm] (opd) at (6,1.4) {\texttt{kbopd} (headless)\\[-1pt]\scriptsize static app, embedded at build};
+  \node[box,minimum width=3.8cm,minimum height=1.5cm] (kbd) at (6,-1.4) {\texttt{kbd} HTTP API\\[-1pt]\scriptsize \texttt{127.0.0.1:8080}, REST + SSE};
+  \node[dark,minimum width=3cm] (gr) at (11.4,-1.4) {gRPC \texttt{kba.sock}};
+  \draw[flow] (br.north east) -- node[lbl,above,sloped]{1. load page} (opd.west);
+  \draw[flow] (br.south east) -- node[lbl,below,sloped]{2. fetch + EventSource, CORS} (kbd.west);
+  \draw[flow] (kbd) -- (gr);
+  \draw[flowd] (opd.south) -- node[lbl,right]{\texttt{POST /api/containment}} (kbd.north);
+\end{tikzpicture}
+\caption{The page itself comes from \texttt{kbopd} on 8082; every data call goes from the \emph{browser}
+straight to \texttt{kbd} on 8080. That second hop is cross-origin and is why \texttt{KB\_HTTP\_CORS\_ORIGIN}
+exists.}
+\end{figure}
+The dashboard's JavaScript builds its API address as \texttt{http://<the host you loaded it from>:8080}.
+Loaded via \texttt{127.0.0.1} it calls \texttt{127.0.0.1:8080}; loaded via \texttt{localhost} it calls
+\texttt{localhost:8080}. Both origins are in the packaged allowlist; any other hostname is blocked by the
+browser until you add it.
+
+\section{Commands}
+\begin{lstlisting}[style=console]
+$ kbctl dashboard up        # enable + start kbopd, wait for the port, print the URL
+dashboard up: http://127.0.0.1:8082
+$ kbctl dashboard open      # up (if needed) + launch the default browser
+opened http://127.0.0.1:8082
+$ kbctl dashboard status    # exit 0 if active AND listening, 3 otherwise
+kbopd.service: active, http://127.0.0.1:8082 listening=true
+$ kbctl dashboard url       # just print it, handy in scripts
+$ kbctl dashboard down      # stop + disable
+\end{lstlisting}
+\cmd{up} polls the port for up to 15~seconds. If no browser can be launched (a headless server),
+\cmd{open} prints the URL and succeeds; open it from another machine through the tunnel below.
+
+\section{Reaching it from your workstation}
+The dashboard binds loopback only. The operator \cmd{sshd} deliberately forbids TCP forwarding
+(\texttt{AllowTcpForwarding no}), so tunnel through your \emph{normal} SSH service (port 22):
+\begin{lstlisting}[style=console]
+workstation$ ssh -N -L 8082:127.0.0.1:8082 -L 8080:127.0.0.1:8080 you@kb-host
+workstation$ xdg-open http://127.0.0.1:8082
+\end{lstlisting}
+Forward \emph{both} ports: the page comes from 8082, the data from 8080. Use \texttt{127.0.0.1} (or
+\texttt{localhost}) in the browser, matching the CORS allowlist.
+
+\section{What the API exposes}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{4.2cm}L{1.6cm}Y@{}}
+\toprule
+\textbf{Route on \texttt{:8080}} & \textbf{Auth} & \textbf{Purpose}\\
+\midrule
+\texttt{/api/processes} & none & Tracked processes and zones.\\
+\texttt{/api/alerts}, \texttt{/api/logs} & none & Alert stream snapshot, log tail.\\
+\texttt{/api/services} & none & Health of KB services.\\
+\texttt{/api/metrics} & none & Event rates, active process counts.\\
+\texttt{/api/agents} & none & Proxied from the swarm status server (:8601).\\
+\texttt{/api/policy} & none & Current policy.\\
+\texttt{/api/audit/verify} & none & Hash-chain verification.\\
+\texttt{/api/events} & none & Server-Sent Events live stream.\\
+\texttt{/api/isolate}, \texttt{/api/restore} & \textbf{token} & Contain / release a process.\\
+\texttt{/api/policy/reload} & \textbf{token} & Reload \file{policy.yaml}.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+\begin{kbwarn}[THE ACTION BUTTONS NEED A TOKEN]
+The three mutating routes are wrapped in \texttt{requireAPIToken} and \textbf{fail closed}: with no
+\texttt{KB\_HTTP\_API\_TOKEN} configured they are unusable, not unauthenticated. The read-only views work out
+of the box; to use isolate, restore or policy-reload from the browser, set a token with a drop-in
+(Section~\ref{sec:dropin}) and supply it as the dashboard expects. Until then use \cmd{kbctl}, which talks gRPC
+over the root-only socket and needs no token.
+\end{kbwarn}
+
+\section{Symptoms and causes}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{4.4cm}Y@{}}
+\toprule
+\textbf{You see} & \textbf{Cause and fix}\\
+\midrule
+Page loads, every panel empty, console shows CORS errors & The page's origin is not in \texttt{KB\_HTTP\_CORS\_ORIGIN}. Load via \texttt{127.0.0.1} or \texttt{localhost}, or add your origin in a drop-in and restart \cmd{kbd}.\\
+\texttt{connection refused} on 8082 & \unit{kbopd.service} is not running: \texttt{kbctl dashboard status}.\\
+Page loads but data source shows a different host & You loaded it via a hostname not in the allowlist; the dashboard derives the API host from the page URL.\\
+\texttt{kbctl dashboard up} times out & \texttt{journalctl -u kbopd}. Another process already holds 8082.\\
+\bottomrule
+\end{tabularx}
+\end{center}
