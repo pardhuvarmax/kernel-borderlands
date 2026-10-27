@@ -40,8 +40,24 @@ Use \texttt{./} in front of the filename: without it \cmd{apt} looks for a packa
 \item Generated \file{/etc/kb/ssh/ssh_host_ed25519_key} \emph{only if it did not exist}. Re-installing never rotates it.
 \item Created an empty \file{/etc/kb/authorized_keys} (\texttt{operator:kb}, 0600).
 \item Ran \texttt{systemctl daemon-reload} so the new units are visible.
+\item Ran \file{/usr/lib/kb/migrate-legacy.sh} (Section~\ref{sec:migrate}): repaired a legacy operator-sshd install if one exists, and removed any boot autostart of \cmd{kb-checker}.
 \end{enumerate}
-It did \textbf{not} enable or start anything, and it did not create \file{/etc/kb/checker.enabled}.
+It did \textbf{not} enable or start anything (on a fresh install it also made sure \cmd{kb-checker} is stopped).
+
+\section{Automatic repair of a legacy dev install}
+\label{sec:migrate}
+If the host previously ran the development install (\texttt{install.sh} or \texttt{make install}), the package
+repairs it for you; there is nothing to do by hand. \file{/usr/lib/kb/migrate-legacy.sh} runs from the post-install
+step, is idempotent, and does the following only when it finds the legacy layout:
+\begin{enumerate}
+\item Moves \file{/etc/ssh/sshd_config.d/kb-operator.conf} to \file{/etc/kb/sshd_kb-operator.conf.legacy}. It is kept as a backup, never deleted, and your edits are not lost; the \emph{packaged} \file{sshd_kb-operator.conf} stays in force because its \texttt{ForceCommand} points at the packaged wrapper.
+\item Repoints a legacy \file{/etc/systemd/system/sshd@kb-operator.service} at \file{/etc/kb/sshd_kb-operator.conf} (backup: \file{.pre-migration}).
+\item Runs \texttt{systemctl daemon-reload} and \emph{reloads} the host's own \cmd{sshd} (\unit{ssh} on Ubuntu, \unit{sshd} on Arch), which releases the port 2222 it had wrongly bound. Reload, not restart: your admin session stays up.
+\item Restarts \unit{sshd@kb-operator} \textbf{unless you stopped it by hand} (it is neither enabled nor active); in that case it is left exactly as you left it.
+\end{enumerate}
+Separately, on every install and upgrade it removes any boot autostart of \cmd{kb-checker} (and stops it on a fresh
+install), so the watchdog stays dead unless you start it yourself (Chapter~\ref{ch:checker}). Units from a legacy
+install that live in \file{/etc/systemd/system} still override the packaged ones; the shadowing note at the end of this chapter applies.
 
 \begin{kbwarn}[THE OPERATOR ACCOUNT USES A NOLOGIN SHELL: VERIFY THE CONSOLE ON YOUR HOST]
 \file{provision.sh} creates \texttt{operator} with \file{/usr/sbin/nologin}. OpenSSH runs a \texttt{ForceCommand}

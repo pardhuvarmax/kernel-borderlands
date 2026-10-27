@@ -7,5 +7,8 @@ if [ "$1" = configure ]; then
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload || true
     fi
+    # Repair a legacy dev install (operator sshd conf in sshd_config.d) and keep
+    # kb-checker from autostarting. $2 is empty on a fresh install.
+    if [ -z "${2:-}" ]; then /usr/lib/kb/migrate-legacy.sh fresh; else /usr/lib/kb/migrate-legacy.sh upgrade; fi
 fi
 exit 0

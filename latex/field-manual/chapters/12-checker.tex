@@ -5,25 +5,27 @@
 enforced in three places, so that no one starts it by accident.
 \end{kbwarn}
 
-\section{How it is held down}
+\section{How it is kept dead, and how you start it}
+Nothing starts \cmd{kb-checker} automatically. A manual start is deliberately \emph{allowed}.
 \begin{center}\small
 \begin{tabularx}{\textwidth}{@{}L{4.6cm}Y@{}}
 \toprule
 \textbf{Mechanism} & \textbf{Effect}\\
 \midrule
-\file{ConditionPathExists=/etc/kb/checker.enabled} in \unit{kb-checker.service} & \texttt{systemctl start kb-checker} is a no-op that reports the condition failed, until that file exists. The package never creates it.\\
+The package never enables it & No \texttt{systemctl enable} for \unit{kb-checker.service} anywhere in the packaging.\\
+\file{/usr/lib/kb/migrate-legacy.sh} & On every install and upgrade it runs \texttt{systemctl disable kb-checker}, so a checker enabled by an older dev install no longer starts at boot. On a \emph{fresh install} it also stops it; on an \emph{upgrade} a running checker is left alone, so a manual start survives upgrades.\\
 \cmd{kbctl up} & Starts \texttt{kbd}, \texttt{kb-sensor}, \texttt{kbopd}, \texttt{sshd@kb-operator} only.\\
-\cmd{kbctl status} & Prints \texttt{UNDER MAINTENANCE AND REPAIRS (kept down)} instead of a state.\\
+\cmd{kbctl status} & Prints \texttt{UNDER MAINTENANCE AND REPAIRS (kept down)}; if you have started it by hand, \texttt{active, STARTED MANUALLY (under maintenance and repairs)}.\\
 \unit{kbagents.service} & No longer \texttt{Requires=} the checker, which would have started it.\\
-\texttt{packaging/install.sh} & No longer enables it.\\
 \bottomrule
 \end{tabularx}
 \end{center}
 \begin{lstlisting}[style=console]
-$ sudo systemctl start kb-checker
-$ systemctl status kb-checker | grep -E 'Active|Condition'
-   Active: inactive (dead)
-  Condition: start condition unmet ... ConditionPathExists=/etc/kb/checker.enabled was not met
+$ systemctl is-enabled kb-checker      # disabled: no boot autostart
+$ sudo systemctl start kb-checker      # your decision; it now runs
+$ kbctl status | tail -1
+kb-checker.service           active, STARTED MANUALLY (under maintenance and repairs)
+$ sudo systemctl stop kb-checker       # back to dead
 \end{lstlisting}
 
 \section{What you lose while it is down}
@@ -36,11 +38,12 @@ detaches the eBPF links and quarantines the host's network. With it down:
 \item \texttt{/api/services} in the dashboard will report the checker as down. That is expected, not a fault.
 \end{itemize}
 
-\begin{kbwarn}[DO NOT RE-ENABLE IT AS A WORKAROUND]
-Creating \file{/etc/kb/checker.enabled} arms a component that can kill the sensor and firewall the host. Do it
-only on a machine you can reach out-of-band, and only once the repairs are signed off. When they are,
-remove the \texttt{ConditionPathExists} line from \file{packaging/systemd/kb-checker.service}, delete the
-\texttt{maintenanceUnits} entry in \file{kb-op/kbctl/svc.go}, add the unit back to \texttt{stackUnits}, and rebuild.
+\begin{kbwarn}[A MANUAL START ARMS A COMPONENT THAT CAN LOCK DOWN THE HOST]
+Starting it by hand can stop the sensor and firewall the host. Do it only on a machine you can reach
+out-of-band. Never \texttt{systemctl enable} it as a workaround; the next package install or upgrade removes
+that autostart again. Once the repairs are signed off, delete the \texttt{kb-checker.service} line from
+\texttt{maintenanceUnits} in \file{kb-op/kbctl/svc.go}, add the unit to \texttt{stackUnits}, drop the
+\texttt{systemctl disable kb-checker} step from \file{packaging/scripts/migrate-legacy.sh}, and rebuild.
 \end{kbwarn}
 
 \section{Design invariants that still apply}

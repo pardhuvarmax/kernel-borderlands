@@ -32,8 +32,9 @@ explicitly deferred to a follow-up pass, not part of this one.
 
 Install with `sudo apt install ./kernel-borderlands_*.deb` or `sudo pacman -U kernel-borderlands-*.pkg.tar.zst`. Nothing is started on install: run `sudo kbctl up`, then `kbctl dashboard open` or `kbctl ssh connect`. See `latex/field-manual/` for the full manual.
 
-- **`kb-checker` is under maintenance and repairs and is kept down.** Its unit has `ConditionPathExists=/etc/kb/checker.enabled`, `kbctl up` skips it and `kbctl status` labels it.
+- **`kb-checker` is under maintenance and repairs and is kept down.** It is never enabled or auto-started: `kbctl up` skips it, `kbctl status` labels it, and `scripts/migrate-legacy.sh` removes any boot autostart on every install/upgrade (and stops it on a fresh install). A manual `systemctl start kb-checker` still works and survives upgrades.
 - The operator sshd config ships at `/etc/kb/sshd_kb-operator.conf`, not `/etc/ssh/sshd_config.d/`: that directory is also read by the host's own sshd, which would then bind port 2222 and make `sshd@kb-operator` fail with `Address already in use`. `install.sh` (the dev flow) still uses `sshd_config.d`.
+- Package install/upgrade runs `scripts/migrate-legacy.sh` (installed as `/usr/lib/kb/migrate-legacy.sh`): it moves a legacy `/etc/ssh/sshd_config.d/kb-operator.conf` to `/etc/kb/sshd_kb-operator.conf.legacy`, repoints a legacy `/etc/systemd/system/sshd@kb-operator.service`, reloads the host sshd, and restarts `sshd@kb-operator` unless it was stopped by hand. `install.sh` runs it too.
 - `kbagents` is a launcher for the Python swarm (`/opt/kb/venv` or system python); it is installed but not enabled.
 - Build from a clean `PATH` (system toolchains): a Nix profile's `clang` cannot see `/usr/include/bpf`.
 

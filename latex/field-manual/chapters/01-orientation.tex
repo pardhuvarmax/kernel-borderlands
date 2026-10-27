@@ -14,9 +14,9 @@ command does, how the commands combine into working procedures, and what every c
 
 \begin{kbwarn}[READ THIS FIRST: THE KB-CHECKER IS DOWN ON PURPOSE]
 \cmd{kb-checker}, the safety and integrity watchdog, is \textbf{under maintenance and repairs} and is kept
-down in this release. The package installs its binary and unit file, but the unit refuses to start unless
-\file{/etc/kb/checker.enabled} exists, \cmd{kbctl up} never starts it, and \cmd{kbctl status} prints
-\texttt{UNDER MAINTENANCE AND REPAIRS (kept down)}. Everything in this book is written for a stack
+down in this release. The package installs its binary and unit file, but nothing ever starts it for you:
+the package does not enable it (and removes any boot autostart), \cmd{kbctl up} skips it, and \cmd{kbctl status}
+prints \texttt{UNDER MAINTENANCE AND REPAIRS (kept down)}. It starts only if you start it by hand. Everything in this book is written for a stack
 \emph{without} the watchdog. Chapter~\ref{ch:checker} explains what that means for you.
 \end{kbwarn}
 

@@ -34,6 +34,8 @@ sudo cp packaging/systemd/*.service /etc/systemd/system/
 # the config's `Port 2222` itself, so sshd@kb-operator would die with "Address already in use".
 sudo install -Dm644 packaging/ssh/kb-operator.conf /etc/kb/sshd_kb-operator.conf
 sudo install -Dm755 packaging/ssh/kb-tui-session-wrapper.sh /usr/local/bin/kb-tui-session-wrapper.sh
+# Repair a legacy sshd_config.d install and keep kb-checker from autostarting.
+sudo packaging/scripts/migrate-legacy.sh upgrade
 sudo systemctl daemon-reload
 
 # kb-checker is deliberately not started: under maintenance and repairs.

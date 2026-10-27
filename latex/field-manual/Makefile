@@ -1,4 +1,4 @@
-# Builds "The How To Kernel Borderlands Book" for both distributions.
+# Builds "The Kernel Borderlands" for both distributions.
 #   make            -> build/KB-Field-Manual-Arch.pdf and build/KB-Field-Manual-Ubuntu.pdf
 #   make help       -> regenerate generated/*.txt from the real kbctl/kbd binaries (BIN=../../bin)
 # Needs LuaLaTeX (TeX Live) with tcolorbox, tikz, listings, fontspec and the Latin Modern OTF fonts.

@@ -75,6 +75,7 @@ install-pkg: install
 	done
 	install -Dm640 config/agents.yaml $(DESTDIR)$(SYSCONFDIR)/kb/agents.yaml
 	install -Dm755 scripts/setup/provision.sh $(DESTDIR)$(LIBDIR)/kb/provision.sh
+	install -Dm755 packaging/scripts/migrate-legacy.sh $(DESTDIR)$(LIBDIR)/kb/migrate-legacy.sh
 	install -dm755 $(DESTDIR)$(LIBDIR)/kb/aads
 	cp -r kb-aads/agents kb-aads/api kb-aads/comms kb-aads/consensus kb-aads/marl kb-aads/swarm $(DESTDIR)$(LIBDIR)/kb/aads/
 	install -m644 kb-aads/main.py kb-aads/requirements.txt $(DESTDIR)$(LIBDIR)/kb/aads/

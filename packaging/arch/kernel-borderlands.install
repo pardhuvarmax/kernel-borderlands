@@ -2,9 +2,10 @@ post_install() {
     # kb group, operator user, /etc/kb, SSH host key, empty authorized_keys.
     /usr/lib/kb/provision.sh
     systemctl daemon-reload >/dev/null 2>&1 || true
+    /usr/lib/kb/migrate-legacy.sh fresh
     cat <<MSG
 ==> Kernel Borderlands installed. Nothing has been started.
-    sudo kbctl up                      # kbd, sensor, checker, dashboard, SSH console
+    sudo kbctl up                      # kbd, sensor, dashboard, SSH console (kb-checker stays down)
     kbctl dashboard open               # http://127.0.0.1:8082
     sudo kbctl ssh add-key ~/.ssh/id_ed25519.pub && kbctl ssh connect
 ==> Needs a kernel with BTF and BPF LSM (docs/architecture/enabling-bpf-lsm.md).
@@ -13,6 +14,7 @@ MSG
 
 post_upgrade() {
     systemctl daemon-reload >/dev/null 2>&1 || true
+    /usr/lib/kb/migrate-legacy.sh upgrade
 }
 
 pre_remove() {

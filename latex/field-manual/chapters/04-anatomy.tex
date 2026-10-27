@@ -114,7 +114,7 @@ Source of truth & \file{packaging/deb/} & \file{packaging/arch/PKGBUILD}\\
 Runtime deps & \texttt{libc6, systemd, openssh-server, libelf1t64, zlib1g} & \texttt{glibc systemd openssh libelf zlib}\\
 Optional & \texttt{python3, python3-venv} (Recommends) & \texttt{python} (optdepends)\\
 Config preserved on upgrade & \file{conffiles} (five files) & \texttt{backup=(...)} array (five files)\\
-After install & \texttt{postinst} runs \file{provision.sh}, \cmd{systemctl daemon-reload} & \file{.install} \texttt{post\_install} does the same and prints next steps\\
+After install & \texttt{postinst} runs \file{provision.sh}, \file{migrate-legacy.sh}, \cmd{systemctl daemon-reload} & \file{.install} \texttt{post\_install} / \texttt{post\_upgrade} do the same and print next steps\\
 Before removal & \texttt{prerm} disables and stops the units & \texttt{pre\_remove} does the same\\
 After removal & \texttt{postrm} reloads systemd; keeps \file{/etc/kb}, state, users & \texttt{post\_remove} reloads systemd; same retention\\
 Build flags & plain \texttt{make build} & \texttt{!lto}, neutral \texttt{CFLAGS/LDFLAGS/RUSTFLAGS}\\

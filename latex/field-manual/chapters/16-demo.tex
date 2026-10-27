@@ -109,8 +109,8 @@ $ kill 5120
  & \textbf{Command} & \textbf{PASS looks like}\\
 \midrule
 \chk & \texttt{kbctl status | tail -1} & UNDER MAINTENANCE AND REPAIRS (kept down)\\
-\chk & \texttt{sudo systemctl start kb-checker; systemctl is-active kb-checker} & \texttt{inactive} (condition unmet)\\
-\chk & \texttt{ls /etc/kb/checker.enabled} & does not exist\\
+\chk & \texttt{systemctl is-active kb-checker} & \texttt{inactive} after install, after \texttt{kbctl up}, and after a reboot\\
+\chk & \texttt{systemctl is-enabled kb-checker} & \texttt{disabled} (no boot autostart)\\
 \bottomrule
 \end{tabularx}
 \end{center}

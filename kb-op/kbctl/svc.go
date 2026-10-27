@@ -30,10 +30,12 @@ var stackUnits = []string{
 // maintenanceUnits are deliberately kept down. kb-checker is out of service
 // for maintenance and repairs: `kbctl up` never starts it, `kbctl status`
 // labels it, and kb-checker.service itself refuses to start unless
-// /etc/kb/checker.enabled exists (ConditionPathExists in the unit).
+// nothing enables or starts it automatically; a manual `systemctl start` still
+// works, and `kbctl status` then reports it as manually started.
 var maintenanceUnits = []string{"kb-checker.service"}
 
 const maintenanceLabel = "UNDER MAINTENANCE AND REPAIRS (kept down)"
+const maintenanceActiveLabel = "active, STARTED MANUALLY (under maintenance and repairs)"
 
 // privileged runs name with args, prefixing sudo when not already root so
 // `kbctl dashboard up` works from an operator's own shell.

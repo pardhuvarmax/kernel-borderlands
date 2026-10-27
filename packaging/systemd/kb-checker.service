@@ -1,8 +1,9 @@
 [Unit]
-# UNDER MAINTENANCE AND REPAIRS: kept down by default. The unit only starts if
-# /etc/kb/checker.enabled exists; remove this condition (and the matching
-# maintenanceUnits entry in kb-op/kbctl/svc.go) once kb-checker is repaired.
-ConditionPathExists=/etc/kb/checker.enabled
+# UNDER MAINTENANCE AND REPAIRS: dead unless started by hand. Nothing starts it
+# automatically: the packages never enable it, `kbctl up` skips it, kbagents.service
+# does not require it, and packaging/scripts/migrate-legacy.sh disables any boot
+# autostart. `systemctl start kb-checker` DOES start it, on purpose. Beware: its
+# Tampering Containment Protocol can stop the sensor and firewall the host.
 Description=Kernel Borderlands Safety and Integrity Watchdog Daemon
 # kbd.service: Requires= is correct here — kb-checker never stops kbd
 # itself, so if kbd genuinely goes down, kb-checker going down with it is

@@ -33,7 +33,7 @@ maintenance condition.}
 \unit{kb-sensor.service} & \cmd{kbd\_sensor} & Root, no capability dropping (needs CAP\_BPF/PERFMON/SYS\_ADMIN). Loads the eBPF hooks; connects to \file{kbd.sock}.\\
 \unit{kbopd.service} & \cmd{kbopd} headless & Serves the dashboard on 127.0.0.1:8082 and spawns \cmd{mcp-server}. Fully hardened (\texttt{ProtectSystem=strict}, empty capability set).\\
 \unit{sshd@kb-operator.service} & \cmd{sshd -D -f} \file{/etc/kb/sshd_kb-operator.conf} & Dedicated instance on port 2222, key-only, forces the wrapper script.\\
-\unit{kb-checker.service} & \cmd{kb-checker monitor --all} & \textbf{Held down}: \texttt{ConditionPathExists=/etc/kb/checker.enabled}.\\
+\unit{kb-checker.service} & \cmd{kb-checker monitor --all} & \textbf{Held down}: never enabled or auto-started; runs only if you start it by hand.\\
 \unit{kbagents.service} & \cmd{kbagents} & Installed, not enabled; see Chapter~\ref{ch:aads}.\\
 \bottomrule
 \end{tabularx}

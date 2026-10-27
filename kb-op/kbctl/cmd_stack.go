@@ -35,7 +35,11 @@ var statusCmd = &cobra.Command{
 			fmt.Printf("%-28s %s\n", u, unitState(u))
 		}
 		for _, u := range maintenanceUnits {
-			fmt.Printf("%-28s %s\n", u, maintenanceLabel)
+			label := maintenanceLabel
+			if unitState(u) == "active" {
+				label = maintenanceActiveLabel
+			}
+			fmt.Printf("%-28s %s\n", u, label)
 		}
 		return nil
 	},
