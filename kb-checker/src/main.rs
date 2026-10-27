@@ -216,22 +216,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
 
                 // Task 3: Ray swarm REST check (30s sleep interval)
+                //
+                // Deliberately does NOT call maybe_trigger_recovery/
+                // trigger_auto_recovery — the AADS/Ray swarm being
+                // unreachable is a downstream-infrastructure-readiness
+                // problem, not evidence of kernel/eBPF tampering, and
+                // restarting kbd_sensor has zero causal relationship to
+                // "is Ray up." Confirmed via a real boot test that this
+                // previously called trigger_auto_recovery(reason, false),
+                // which invoked `systemctl restart kb-sensor` on a
+                // perfectly healthy sensor for no reason every time a
+                // node booted before its swarm was ready — and, if that
+                // restart itself ever raced with another task's recovery
+                // action, could cascade into the same hard Lockdown
+                // reserved for genuine tampering (see CHANGELOG). The
+                // failure is still recorded via update_state above (so
+                // /api/services and this loop's own health status still
+                // correctly report it) — only the sensor-affecting
+                // recovery action is removed for this check specifically.
                 let t3_state = Arc::clone(&state);
                 tokio::spawn(async move {
                     loop {
-                        let err_str = match check_swarm_health().await {
-                            Ok(_) => {
-                                update_state(&t3_state, true, None);
-                                None
-                            }
-                            Err(e) => {
-                                let msg = e.to_string();
-                                update_state(&t3_state, false, Some(msg.clone()));
-                                Some(msg)
-                            }
-                        };
-                        if let Some(reason) = err_str {
-                            maybe_trigger_recovery(daemon_start, &reason, false).await;
+                        match check_swarm_health().await {
+                            Ok(_) => update_state(&t3_state, true, None),
+                            Err(e) => update_state(&t3_state, false, Some(e.to_string())),
                         }
                         sleep(Duration::from_secs(30)).await;
                     }

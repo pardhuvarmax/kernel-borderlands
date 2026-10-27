@@ -175,6 +175,46 @@ pub async fn verify_liveness(uds_path: &str) -> Result<(), Box<dyn std::error::E
 }
 
 // Helper to locate map FD system-wide
+// The kernel stores BPF object names in a char[BPF_OBJ_NAME_LEN] (16) buffer,
+// i.e. at most 15 characters plus the NUL, and silently truncates longer
+// names -- so "contained_pids_map" (18 chars, as declared in
+// kb-core/ebpf/kbd_sensor.bpf.c) is reported by bpf_map_info.name as
+// "contained_pids_". An exact comparison against the full name therefore
+// NEVER matches when running as root, which made the map audit report
+// "contained_pids_map not found in kernel" while the sensor was healthy and
+// attached -- escalating to the integrity-violation path (stop kb-sensor) on
+// every cycle after the startup grace period. Compare against the truncated
+// form instead.
+const CONTAINED_PIDS_MAP_NAME: &str = "contained_pids_map";
+const BPF_OBJ_NAME_MAX_CHARS: usize = 15;
+
+fn bpf_name_matches(kernel_name: &str, full_name: &str) -> bool {
+    let keep = full_name.len().min(BPF_OBJ_NAME_MAX_CHARS);
+    full_name.is_char_boundary(keep) && kernel_name == &full_name[..keep]
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::bpf_name_matches;
+
+    #[test]
+    fn long_name_matches_kernel_truncation() {
+        assert!(bpf_name_matches("contained_pids_", "contained_pids_map"));
+        assert!(!bpf_name_matches("contained_pids_map", "contained_pids_map")); // kernel never reports 18 chars
+        assert!(!bpf_name_matches("other_map", "contained_pids_map"));
+    }
+
+    #[test]
+    fn short_name_matches_exactly() {
+        assert!(bpf_name_matches("kb_handle_exec", "kb_handle_exec"));
+        assert!(!bpf_name_matches("kb_handle_exe", "kb_handle_exec"));
+    }
+}
+
+fn process_exists(pid: u32) -> bool {
+    Path::new(&format!("/proc/{}", pid)).exists()
+}
+
 fn find_contained_pids_map_fd() -> Result<i32, Box<dyn std::error::Error>> {
     let mut id = 0;
     unsafe {
@@ -188,7 +228,7 @@ fn find_contained_pids_map_fd() -> Result<i32, Box<dyn std::error::Error>> {
                 if bpf_obj_get_info_by_fd(fd, &mut info as *mut _ as *mut _, &mut info_len) == 0 {
                     let name_bytes: Vec<u8> = info.name.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
                     let map_name = String::from_utf8_lossy(&name_bytes).to_string();
-                    if map_name == "contained_pids_map" {
+                    if bpf_name_matches(&map_name, CONTAINED_PIDS_MAP_NAME) {
                         return Ok(fd);
                     }
                 }
@@ -274,6 +314,19 @@ pub async fn verify_map_integrity(uds_path: &str) -> Result<(), Box<dyn std::err
     // 4. Verify and heal mismatches
     let mut tampered_count = 0;
     for (pid, &expected_level) in &expected_containments {
+        // The control plane persists containment state across reboots and
+        // sensor restarts (kbd's state.db), so it can still list PIDs whose
+        // processes are long dead. A dead PID can't be tampered with, and
+        // re-enforcing a level onto it is actively unsafe: the kernel may
+        // hand the same PID to an unrelated process later, which would then
+        // be contained by mistake. Found live: after a clean sensor restart
+        // the fresh map was empty, three stale PIDs from a previous boot
+        // were flagged as "tampering", "healed", and the resulting error
+        // made kb-checker stop kb-sensor -- in a loop. Skip them.
+        if !process_exists(*pid) {
+            println!("[MAP-AUDIT] Skipping stale containment entry for PID {} (process no longer exists).", pid);
+            continue;
+        }
         let kernel_level = kernel_entries.get(pid).cloned().unwrap_or(0);
         
         if kernel_level != expected_level {

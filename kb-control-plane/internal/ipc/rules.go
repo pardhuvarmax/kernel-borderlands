@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -177,7 +178,9 @@ func SendRulesPayload(conn net.Conn, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// Try fallback relative path
-		data, err = os.ReadFile("../" + path)
+		if !filepath.IsAbs(path) {
+			data, err = os.ReadFile(filepath.Join("..", path))
+		}
 		if err != nil {
 			return fmt.Errorf("read rules yaml: %w", err)
 		}

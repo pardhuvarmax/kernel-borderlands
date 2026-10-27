@@ -1,9 +1,17 @@
+import argparse
 import asyncio
 import os
 import yaml
 from swarm.orchestrator import RaySwarmOrchestrator
 from api.status_server import start_status_server
 
+# Relative-path default, unchanged for dev runs (`python3 main.py` from
+# inside kb-aads/, config/ a sibling of the repo root) — but this breaks
+# once kb-aads is installed anywhere else (e.g. /usr/local/share/kb-aads,
+# where "../config/agents.yaml" resolves to a path that doesn't exist).
+# --config (below) is the real fix for that, matching the /etc/kb/
+# convention kbd's --policy/--rules/--workloads already use; the
+# packaging/bin/kbagents wrapper script passes --config /etc/kb/agents.yaml.
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "agents.yaml")
 
 
@@ -13,12 +21,16 @@ def load_config(path: str = CONFIG_PATH) -> dict:
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="kbagents — Kernel Borderlands Agent Swarm (kb-aads)")
+    parser.add_argument("--config", default=CONFIG_PATH, help="path to agents.yaml (default: %(default)s)")
+    args = parser.parse_args()
+
     print("╔══════════════════════════════════════════╗")
     print("║   KB AADS — Agent Swarm v0.1             ║")
     print("║   Kernel Borderlands                     ║")
     print("╚══════════════════════════════════════════╝")
 
-    cfg = load_config()
+    cfg = load_config(args.config)
     orchestrator = RaySwarmOrchestrator(ray_mode=cfg.get("ray", {}).get("mode", "local"))
 
     # Started before start_swarm (which blocks forever driving agent tick
