@@ -65,13 +65,34 @@ Forward \emph{both} ports: the page comes from 8082, the data from 8080. Use \te
 \bottomrule
 \end{tabularx}
 \end{center}
-\begin{kbwarn}[THE ACTION BUTTONS NEED A TOKEN]
-The three mutating routes are wrapped in \texttt{requireAPIToken} and \textbf{fail closed}: with no
-\texttt{KB\_HTTP\_API\_TOKEN} configured they are unusable, not unauthenticated. The read-only views work out
-of the box; to use isolate, restore or policy-reload from the browser, set a token with a drop-in
-(Section~\ref{sec:dropin}) and supply it as the dashboard expects. Until then use \cmd{kbctl}, which talks gRPC
-over the root-only socket and needs no token.
+\section{The API token: how the action buttons are authorized}\label{sec:token}
+The three mutating routes are wrapped in \texttt{requireAPIToken} and \textbf{fail closed}: without a configured
+token they are unusable, and with one they need a matching \texttt{Authorization: Bearer} header. The package
+sets this up so the buttons work without weakening that check:
+\begin{enumerate}
+\item \textbf{Generation.} On install, \file{/usr/lib/kb/migrate-legacy.sh} creates \file{/etc/kb/api.env} containing \texttt{KB\_HTTP\_API\_TOKEN=}\emph{64 random hex characters} (mode 0640, \texttt{root:kb}). It is created once and never overwritten.
+\item \textbf{Server.} \unit{kbd.service} loads it with \texttt{EnvironmentFile=-/etc/kb/api.env}. \cmd{kbd} must be \emph{restarted} to read a newly created token; the installer prints a notice and does not restart \cmd{kbd} for you.
+\item \textbf{Browser.} \cmd{kbctl dashboard open} opens \texttt{http://127.0.0.1:8082/\#token=...}. A URL \emph{fragment} is never sent to any server. The page moves it into \texttt{sessionStorage} (this tab only, cleared when the tab closes) and removes it from the address bar. It is \emph{not} compiled into the dashboard bundle, so loading the page without the fragment gives read-only views.
+\end{enumerate}
+\begin{lstlisting}[style=console]
+$ kbctl dashboard open              # token handed to the browser automatically
+$ kbctl dashboard url --token       # print the tokened URL for another browser; treat as a secret
+$ sudo cat /etc/kb/api.env          # the token itself (root or the kb group)
+\end{lstlisting}
+\begin{kbwarn}[LIMITS OF THIS DESIGN]
+Anyone who can read \file{/etc/kb/api.env} (root and the \texttt{kb} group, which includes \texttt{operator}) can
+isolate processes through the HTTP API; so can anyone who sees the tokened URL (it appears in the process list
+of the machine while the browser launches). The API listens on loopback only. To rotate the token, delete
+\file{/etc/kb/api.env}, run \texttt{sudo /usr/lib/kb/migrate-legacy.sh upgrade}, then \texttt{sudo systemctl restart kbd}
+and reopen the dashboard. If the buttons report ``API token missing or wrong'', you opened the page without
+the fragment (use \cmd{kbctl dashboard open}) or \cmd{kbd} has not been restarted since the token was created.
 \end{kbwarn}
+\begin{kbnote}[VERIFICATION STATUS]
+The dashboard compiles with the new logic, the served bundle contains it, the fragment parsing was tested, and
+\cmd{kbctl dashboard url --token} was tested against a token file. It was \textbf{not} exercised in a real
+browser against a live \cmd{kbd} (no browser extension and no root in the build sessions); step D of the acceptance
+checklist closes that.
+\end{kbnote}
 
 \section{Symptoms and causes}
 \begin{center}\small
@@ -81,6 +102,7 @@ over the root-only socket and needs no token.
 \midrule
 Page loads, every panel empty, console shows CORS errors & The page's origin is not in \texttt{KB\_HTTP\_CORS\_ORIGIN}. Load via \texttt{127.0.0.1} or \texttt{localhost}, or add your origin in a drop-in and restart \cmd{kbd}.\\
 \texttt{connection refused} on 8082 & \unit{kbopd.service} is not running: \texttt{kbctl dashboard status}.\\
+Isolate / restore / reload report ``API token missing or wrong'' & Page opened without the token fragment, or \cmd{kbd} not restarted since \file{/etc/kb/api.env} was created: \cmd{kbctl dashboard open}; \texttt{sudo systemctl restart kbd}.\\
 Page loads but data source shows a different host & You loaded it via a hostname not in the allowlist; the dashboard derives the API host from the page URL.\\
 \texttt{kbctl dashboard up} times out & \texttt{journalctl -u kbopd}. Another process already holds 8082.\\
 \bottomrule

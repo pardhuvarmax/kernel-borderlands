@@ -60,6 +60,9 @@ sessions could \textbf{not} verify (no root); do not skip them before a demonstr
 \chk \kbstar{} & \texttt{curl -si -H 'Origin: http://127.0.0.1:8082' http://127.0.0.1:8080/api/services | grep -i access-control-allow-origin} & header present and equal to the origin. \textbf{(CORS runtime path is source-verified only)}\\
 \chk & same request with \texttt{Origin: http://evil.example} & \emph{no} \texttt{Access-Control-Allow-Origin} header\\
 \chk & \texttt{kbctl dashboard open} & browser opens; panels fill; no red CORS errors in the browser console\\
+\chk & \texttt{sudo stat -c '\%a \%U:\%G' /etc/kb/api.env} & \texttt{640 root:kb}\\
+\chk \kbstar{} & in the dashboard, isolate a harmless process (\texttt{sleep 600}) and click restore & both succeed; the page's address bar shows no \texttt{\#token=} afterwards. \textbf{(untested in a browser)}\\
+\chk & reload the page \emph{without} the fragment (type the bare URL in a new tab) and press isolate & reports ``API token missing or wrong''\\
 \bottomrule
 \end{tabularx}
 \end{center}
@@ -72,7 +75,7 @@ sessions could \textbf{not} verify (no root); do not skip them before a demonstr
 \midrule
 \chk & \texttt{sudo kbctl ssh add-key \textasciitilde/.ssh/id\_ed25519.pub} & ``key authorized for operator''\\
 \chk & \texttt{kbctl ssh status; echo \$?} & active, listening, exit 0 (no \texttt{Address already in use} in \texttt{journalctl -u sshd@kb-operator})\\
-\chk \kbstar{} & \texttt{kbctl ssh connect} & the TUI appears. \textbf{(nologin + ForceCommand is untested)} If refused: Section~\ref{sec:nologin}\\
+\chk \kbstar{} & \texttt{kbctl ssh connect} & the TUI appears. \textbf{(ForceCommand with the \texttt{/bin/sh} shell is untested)} If refused: Section~\ref{sec:nologin}\\
 \chk & in the TUI: \texttt{Tab} through four tabs, \texttt{q} & clean exit, shell returns\\
 \chk & \texttt{ssh -p 2222 operator@HOST id} from another machine & does \textbf{not} run \texttt{id}; shows the TUI (ForceCommand wins)\\
 \chk & \texttt{ssh -p 2222 -L 9999:127.0.0.1:8080 operator@HOST} & forwarding refused (\texttt{AllowTcpForwarding no})\\

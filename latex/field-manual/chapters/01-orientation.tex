@@ -132,7 +132,8 @@ Offline banner when \cmd{kbd} is down & Verified & \texttt{[OFFLINE]} and \textt
 \texttt{apt install} / \texttt{pacman -U} on a live host & \textbf{Not tested} & No root in the build session.\\
 Units booting under real \cmd{systemd}, eBPF sensor under the package & \textbf{Not tested} & Needs root and a BPF-LSM kernel.\\
 \cmd{kbd} HTTP + CORS for the packaged dashboard & \textbf{Source-verified only} & \cmd{kbd} needs a writable \file{/run/kb}.\\
-\texttt{operator} account with a \texttt{nologin} shell and \texttt{ForceCommand} & \textbf{Not tested} & See Chapter~\ref{ch:ssh}.\\
+\texttt{operator} account with a \texttt{/bin/sh} shell and \texttt{ForceCommand} (replaces the \texttt{nologin} default) & \textbf{Not tested} & Fix made on the known OpenSSH behaviour; see Chapter~\ref{ch:ssh}.\\
+Dashboard action buttons with the runtime token & \textbf{Not tested in a browser} & Build, served bundle, fragment parsing and \cmd{kbctl} hand-off tested; see Chapter~\ref{ch:dash}.\\
 \bottomrule
 \end{tabularx}
 \end{center}

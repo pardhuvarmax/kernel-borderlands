@@ -11,7 +11,7 @@ Available Commands:
   open        Start the dashboard if needed and open it in the default browser
   status      Show whether the dashboard unit is running and its port is answering
   up          Enable and start the web dashboard, then print its URL
-  url         Print the dashboard URL
+  url         Print the dashboard URL (--token adds the API token fragment; treat the output as a secret)
 
 Flags:
   -h, --help       help for dashboard

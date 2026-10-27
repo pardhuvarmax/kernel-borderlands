@@ -25,6 +25,16 @@ from another machine with an SSH local forward or use the SSH TUI
 
 func dashboardURL() string { return fmt.Sprintf("http://127.0.0.1:%d", dashboardPort) }
 
+// dashboardTokenURL adds the API token as a URL *fragment*: browsers never send the
+// fragment to a server, and the dashboard moves it into sessionStorage and scrubs it
+// from the address bar. Returns the plain URL if no token is readable.
+func dashboardTokenURL() (string, bool) {
+	if t := readAPIToken(); t != "" {
+		return dashboardURL() + "/#token=" + t, true
+	}
+	return dashboardURL(), false
+}
+
 func ensureDashboardUp() error {
 	if unitState(unitDashboard) != "active" {
 		if err := systemctl("enable", "--now", unitDashboard); err != nil {
@@ -67,10 +77,19 @@ var dashboardStatusCmd = &cobra.Command{
 	},
 }
 
+var dashboardURLWithToken bool
+
 var dashboardURLCmd = &cobra.Command{
 	Use:   "url",
-	Short: "Print the dashboard URL",
-	Run:   func(cmd *cobra.Command, args []string) { fmt.Println(dashboardURL()) },
+	Short: "Print the dashboard URL (--token adds the API token fragment; treat the output as a secret)",
+	Run: func(cmd *cobra.Command, args []string) {
+		if dashboardURLWithToken {
+			u, _ := dashboardTokenURL()
+			fmt.Println(u)
+			return
+		}
+		fmt.Println(dashboardURL())
+	},
 }
 
 var dashboardOpenCmd = &cobra.Command{
@@ -84,8 +103,12 @@ var dashboardOpenCmd = &cobra.Command{
 		if runtime.GOOS == "darwin" {
 			opener = "open"
 		}
-		if err := exec.Command(opener, dashboardURL()).Start(); err != nil {
-			fmt.Printf("could not launch a browser (%v); open %s manually\n", err, dashboardURL())
+		target, haveToken := dashboardTokenURL()
+		if !haveToken {
+			fmt.Fprintf(os.Stderr, "note: no API token readable at %s; the dashboard will be read-only (isolate/restore/policy-reload fail closed)\n", apiEnvPath)
+		}
+		if err := exec.Command(opener, target).Start(); err != nil {
+			fmt.Printf("could not launch a browser (%v); open %s manually (or: kbctl dashboard url --token)\n", err, dashboardURL())
 			return nil
 		}
 		fmt.Println("opened", dashboardURL())
@@ -96,5 +119,6 @@ var dashboardOpenCmd = &cobra.Command{
 func init() {
 	dashboardCmd.PersistentFlags().IntVar(&dashboardPort, "port", 8082,
 		"dashboard port (kbopd's embedded server is fixed at 8082; change only if you rebuilt it)")
+	dashboardURLCmd.Flags().BoolVar(&dashboardURLWithToken, "token", false, "include the API token as a URL fragment")
 	dashboardCmd.AddCommand(dashboardUpCmd, dashboardDownCmd, dashboardStatusCmd, dashboardURLCmd, dashboardOpenCmd)
 }

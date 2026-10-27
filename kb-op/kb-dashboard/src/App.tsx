@@ -34,9 +34,32 @@ interface ChartPoint { t: string; safe: number; sus: number; bl: number; }
 const API_BASE = import.meta.env.VITE_KB_API_BASE || `http://${window.location.hostname}:8080`;
 
 // Bearer token sent as Authorization on state-mutating requests
-// (/api/isolate, /api/restore) — kbd refuses those routes without one
-// (KB_HTTP_API_TOKEN on the server side, see BUG-001).
-const API_TOKEN = import.meta.env.VITE_KB_API_TOKEN || '';
+// (/api/isolate, /api/restore, /api/policy/reload) — kbd refuses those routes
+// without one (KB_HTTP_API_TOKEN on the server side, see BUG-001).
+//
+// The token is resolved at RUNTIME, never baked into the shipped bundle (a
+// build-time secret in a static bundle is readable by anyone who can load the
+// page). `kbctl dashboard open` opens the page as http://127.0.0.1:8082/#token=...;
+// the fragment is never sent to any server, is moved into sessionStorage
+// (per-tab, cleared when the tab closes) and is scrubbed from the address bar.
+// VITE_KB_API_TOKEN remains as a dev-only fallback for `npm run dev`.
+const TOKEN_KEY = 'kb.apiToken';
+const loadApiToken = (): string => {
+  const dev = import.meta.env.VITE_KB_API_TOKEN || '';
+  try {
+    const m = /(?:^|[#&])token=([^&]+)/.exec(window.location.hash);
+    if (m) {
+      sessionStorage.setItem(TOKEN_KEY, decodeURIComponent(m[1]));
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    return sessionStorage.getItem(TOKEN_KEY) || dev;
+  } catch {
+    return dev;
+  }
+};
+const API_TOKEN = loadApiToken();
+const TOKEN_HINT = 'API token missing or wrong — open the dashboard with `kbctl dashboard open`';
+const needsToken = (status: number) => status === 401 || status === 503;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const ts = () =>
@@ -181,9 +204,13 @@ export default function App() {
       method: 'POST',
       headers: API_TOKEN ? { 'Authorization': `Bearer ${API_TOKEN}` } : {},
     })
-      .then(res => res.json().then(data => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        setReloadStatus(ok ? `${data.message}` : `Failed: ${data.message || 'unknown error'}`);
+      .then(res => res.text().then(t => {
+        let data: { message?: string } = {};
+        try { data = JSON.parse(t); } catch { data = { message: t.trim() }; }
+        return { ok: res.ok, status: res.status, data };
+      }))
+      .then(({ ok, status, data }) => {
+        setReloadStatus(ok ? `${data.message}` : `Failed: ${needsToken(status) ? TOKEN_HINT : (data.message || 'unknown error')}`);
         if (ok) fetchPolicy();
       })
       .catch(err => setReloadStatus(`Failed: ${err.message}`));
@@ -509,7 +536,7 @@ export default function App() {
           setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'QUARANTINED', score: 1.0 } : p));
           addLog(`[OPERATOR] manual isolate request sent for PID ${pid} (${comm})`, 'success');
         } else {
-          addLog(`[OPERATOR] manual isolate failed for PID ${pid}`, 'err');
+          addLog(`[OPERATOR] manual isolate failed for PID ${pid}${needsToken(res.status) ? ' — ' + TOKEN_HINT : ''}`, 'err');
         }
       }).catch(err => {
         addLog(`[OPERATOR] isolation error: ${err.message}`, 'err');
@@ -532,7 +559,7 @@ export default function App() {
           setProcesses(prev => prev.map(p => p.pid === pid ? { ...p, zone: 'SAFE', score: 0.04, quorumPending: false } : p));
           addLog(`[OPERATOR] manual restore request sent for PID ${pid} (${comm})`, 'success');
         } else {
-          addLog(`[OPERATOR] manual restore failed for PID ${pid}`, 'err');
+          addLog(`[OPERATOR] manual restore failed for PID ${pid}${needsToken(res.status) ? ' — ' + TOKEN_HINT : ''}`, 'err');
         }
       }).catch(err => {
         addLog(`[OPERATOR] restore error: ${err.message}`, 'err');

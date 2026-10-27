@@ -19,6 +19,10 @@ WorkingDirectory=/
 # browser. Mutating routes (isolate/restore) additionally need
 # KB_HTTP_API_TOKEN set; they fail closed without it.
 Environment=KB_HTTP_CORS_ORIGIN=http://127.0.0.1:8082,http://localhost:8082
+# Runtime API token for the mutating routes (isolate/restore/policy-reload), generated at
+# install by migrate-legacy.sh into /etc/kb/api.env (KB_HTTP_API_TOKEN=..., root:kb 0640).
+# The leading '-' keeps kbd startable without it (the routes then fail closed).
+EnvironmentFile=-/etc/kb/api.env
 ExecStart=/usr/local/bin/kbd --db /var/lib/kbd/state.db --policy /etc/kb/policy.yaml --rules /etc/kb/rules.yaml --workloads /etc/kb/workloads.yaml
 Restart=always
 RestartSec=3

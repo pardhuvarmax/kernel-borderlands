@@ -155,10 +155,12 @@ Never edit \file{/usr/lib/systemd/system/*.service}; the next upgrade overwrites
 $ sudo systemctl edit kbd
 # add:
 [Service]
-Environment=KB_HTTP_API_TOKEN=change-me-long-random
 Environment=KB_HTTP_CORS_ORIGIN=http://127.0.0.1:8082,http://localhost:8082,http://kb-host:8082
 $ sudo systemctl restart kbd
 \end{lstlisting}
+\begin{kbnote}[THE API TOKEN IS NOT SET HERE]
+The dashboard token is generated for you into \file{/etc/kb/api.env} and loaded by the packaged unit (Section~\ref{sec:token}); do not put it in a drop-in.
+\end{kbnote}
 \begin{kbnote}
 Repeating an \texttt{Environment=} line in a drop-in \emph{adds} a variable; setting the same name again
 overrides it. \texttt{KB\_HTTP\_CORS\_ORIGIN} is one comma-separated value, so restate the whole list when you

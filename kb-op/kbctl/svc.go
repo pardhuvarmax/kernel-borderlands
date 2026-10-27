@@ -95,6 +95,33 @@ func findBinary(name string) (string, error) {
 	return exec.LookPath(name)
 }
 
+// apiEnvPath holds KB_HTTP_API_TOKEN=... for kbd's mutating HTTP routes
+// (written at install by migrate-legacy.sh, root:kb 0640).
+const apiEnvPath = "/etc/kb/api.env"
+
+// readAPIToken returns the dashboard API token, or "" if it cannot be read.
+// Tries the file directly (kb group / root), then `sudo cat` for other operators.
+func readAPIToken() string {
+	path := apiEnvPath
+	if v := os.Getenv("KB_API_ENV"); v != "" { // test hook
+		path = v
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		out, serr := exec.Command("sudo", "-n", "cat", path).Output()
+		if serr != nil {
+			return ""
+		}
+		data = out
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "KB_HTTP_API_TOKEN="); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 func isExecutable(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0

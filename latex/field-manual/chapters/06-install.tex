@@ -35,7 +35,7 @@ Use \texttt{./} in front of the filename: without it \cmd{apt} looks for a packa
 
 \subsection{What the post-install step did}
 \begin{enumerate}
-\item Created group \texttt{kb} and system user \texttt{operator} (no home, shell \file{/usr/sbin/nologin}) if absent.
+\item Created group \texttt{kb} and system user \texttt{operator} (no home, shell \file{/bin/sh}) if absent.
 \item Created \file{/etc/kb} (\texttt{root:kb}, 0750) and \file{/etc/kb/ssh/}.
 \item Generated \file{/etc/kb/ssh/ssh_host_ed25519_key} \emph{only if it did not exist}. Re-installing never rotates it.
 \item Created an empty \file{/etc/kb/authorized_keys} (\texttt{operator:kb}, 0600).
@@ -50,22 +50,23 @@ If the host previously ran the development install (\texttt{install.sh} or \text
 repairs it for you; there is nothing to do by hand. \file{/usr/lib/kb/migrate-legacy.sh} runs from the post-install
 step, is idempotent, and does the following only when it finds the legacy layout:
 \begin{enumerate}
+\item Generates the dashboard API token in \file{/etc/kb/api.env} if absent (Section~\ref{sec:token}) and switches an existing \texttt{operator} from a \texttt{nologin} shell to \file{/bin/sh}.
 \item Moves \file{/etc/ssh/sshd_config.d/kb-operator.conf} to \file{/etc/kb/sshd_kb-operator.conf.legacy}. It is kept as a backup, never deleted, and your edits are not lost; the \emph{packaged} \file{sshd_kb-operator.conf} stays in force because its \texttt{ForceCommand} points at the packaged wrapper.
-\item Repoints a legacy \file{/etc/systemd/system/sshd@kb-operator.service} at \file{/etc/kb/sshd_kb-operator.conf} (backup: \file{.pre-migration}).
+\item Moves legacy dev units (\unit{kbd}, \unit{kb-sensor}, \unit{kb-checker}, \unit{kbopd}, \unit{kbagents}, \unit{sshd@kb-operator}) out of \file{/etc/systemd/system} when they reference \file{/usr/local/bin} or the old sshd config path. They are kept as \file{.pre-migration} and the packaged units apply instead.
 \item Runs \texttt{systemctl daemon-reload} and \emph{reloads} the host's own \cmd{sshd} (\unit{ssh} on Ubuntu, \unit{sshd} on Arch), which releases the port 2222 it had wrongly bound. Reload, not restart: your admin session stays up.
 \item Restarts \unit{sshd@kb-operator} \textbf{unless you stopped it by hand} (it is neither enabled nor active); in that case it is left exactly as you left it.
+\item Prints a notice if \cmd{kbd} or another migrated unit is running with the old code or without the new token. \textbf{It does not restart them for you}; run \texttt{sudo kbctl down \&\& sudo kbctl up}.
 \end{enumerate}
 Separately, on every install and upgrade it removes any boot autostart of \cmd{kb-checker} (and stops it on a fresh
 install), so the watchdog stays dead unless you start it yourself (Chapter~\ref{ch:checker}). Units from a legacy
-install that live in \file{/etc/systemd/system} still override the packaged ones; the shadowing note at the end of this chapter applies.
+install that live in \file{/etc/systemd/system} are retired by the same step, so the packaged units take effect.
 
-\begin{kbwarn}[THE OPERATOR ACCOUNT USES A NOLOGIN SHELL: VERIFY THE CONSOLE ON YOUR HOST]
-\file{provision.sh} creates \texttt{operator} with \file{/usr/sbin/nologin}. OpenSSH runs a \texttt{ForceCommand}
-as \texttt{\$SHELL -c ...}; on many systems a \texttt{nologin} shell therefore refuses it. This has
-\textbf{not} been tested with the packaged account because the build sessions had no root. Chapter~\ref{ch:ssh}
-gives the one-command test and the fix (give \texttt{operator} the shell \file{/bin/sh}; the sshd config
-already forbids forwarding and forces the wrapper).
-\end{kbwarn}
+\begin{kbnote}[WHY THE OPERATOR ACCOUNT HAS A REAL SHELL]
+OpenSSH runs a \texttt{ForceCommand} as \texttt{\$SHELL -c ...}, and a \texttt{nologin} shell refuses it (``This account is
+currently not available''). \file{provision.sh} therefore creates \texttt{operator} with \file{/bin/sh}, and the migration step switches
+an existing \texttt{operator} that has a \texttt{nologin} or \texttt{false} shell. The account stays locked down by the operator
+\cmd{sshd} config: key-only, the wrapper forced, no forwarding, no password. Chapter~\ref{ch:ssh} has the one-command check.
+\end{kbnote}
 
 \section{Verify the installation}
 \resetsteps
@@ -104,7 +105,7 @@ kb-checker.service           UNDER MAINTENANCE AND REPAIRS (kept down)
 \step{The provisioning result}
 \begin{lstlisting}[style=console]
 $ getent passwd operator
-operator:x:998:994::/home/operator:/usr/sbin/nologin
+operator:x:998:994::/home/operator:/bin/sh
 $ sudo ls -l /etc/kb /etc/kb/ssh
 \end{lstlisting}
 
@@ -145,6 +146,9 @@ $ sudo userdel operator && sudo groupdel kb
 \texttt{install.sh} and \texttt{sudo make install} place binaries in \file{/usr/local/bin} and units in
 \file{/etc/systemd/system}. Units in \file{/etc/systemd/system} \textbf{override} the package's units in
 \file{/usr/lib/systemd/system}, and \file{/usr/local/bin} wins over \file{/usr/bin} on \texttt{PATH}. Installing the
-package on top of such a host will silently keep running the old code. Remove the old units and binaries
-first (stop them, delete the files, \texttt{daemon-reload}), then install the package.
+package used to keep running the old code silently. Now the migration step moves the legacy \emph{units} aside
+(Section~\ref{sec:migrate}), so the packaged units apply. The old binaries in \file{/usr/local/bin} remain and still
+win on an interactive \texttt{PATH}, though the packaged units call \file{/usr/bin/...} by absolute path. Delete the
+old \file{/usr/local/bin/kb*} files to avoid running a stale \cmd{kbctl} by hand. Restart the stack once
+(\texttt{sudo kbctl down \&\& sudo kbctl up}) so the running units adopt the packaged ones.
 \end{kbnote}

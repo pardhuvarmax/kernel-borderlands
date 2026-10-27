@@ -78,10 +78,12 @@ The packaged file does not disable password authentication for non-\texttt{opera
 key-only. Edit \file{/etc/kb/sshd_kb-operator.conf}; it is a protected config file and survives upgrades.
 \end{kbnote}
 
-\section{Test the console on your host (the unverified step)}
+\section{Check the console on your host}
 \label{sec:nologin}
-\file{provision.sh} gives \texttt{operator} the shell \file{/usr/sbin/nologin}. This has not been exercised with
-the packaged account. Run this test once after \cmd{kbctl up}:
+OpenSSH runs a \texttt{ForceCommand} through the account's login shell, which a \texttt{nologin} shell refuses.
+\file{provision.sh} therefore creates \texttt{operator} with \file{/bin/sh}, and the package's migration step fixes an
+existing account that still has \texttt{nologin} or \texttt{false}. This has \textbf{not} been exercised on a live host (no root in
+the build sessions), so run this check once after \cmd{kbctl up}:
 \resetsteps
 \step{Connect}
 \begin{lstlisting}[style=console]
@@ -89,17 +91,16 @@ $ kbctl ssh connect
 \end{lstlisting}
 \step{Read the result}
 \begin{itemize}
-\item \textbf{The TUI appears.} Your system's \cmd{sshd} runs \texttt{ForceCommand} without consulting the shell. Nothing to do.
-\item \textbf{``This account is currently not available.''} and the connection closes: the \texttt{nologin} shell refused the forced command. Fix it as below.
+\item \textbf{The TUI appears.} Nothing to do.
+\item \textbf{``This account is currently not available.''} and the connection closes: the account still has a \texttt{nologin} shell (for example the package was installed before this fix and the migration did not run). Fix it as below.
 \end{itemize}
-\step{If refused, give the account a plain shell}
+\step{If refused, give the account a plain shell by hand}
 \begin{lstlisting}[style=console]
 $ sudo usermod --shell /bin/sh operator
 $ kbctl ssh connect
 \end{lstlisting}
 This is safe in this design: the only way in is a key in \file{/etc/kb/authorized_keys}, the config forces
-the wrapper and forbids forwarding, and the account has no password. Also change \texttt{--shell} in
-\file{/usr/lib/kb/provision.sh} so a reinstall does not undo it.
+the wrapper and forbids forwarding, and the account has no password.
 
 \section{Using the TUI}
 \subsection{The four tabs}

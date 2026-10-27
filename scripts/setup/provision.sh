@@ -28,7 +28,11 @@ else
 fi
 
 if ! getent passwd operator >/dev/null 2>&1; then
-    useradd --system --no-create-home --shell /usr/sbin/nologin --gid kb operator
+    # Shell is /bin/sh, not nologin: sshd runs a ForceCommand as "$SHELL -c <cmd>", which a
+    # nologin shell refuses ("This account is currently not available"). The account stays
+    # locked down by the operator sshd config: key-only, ForceCommand wrapper, no forwarding,
+    # no password.
+    useradd --system --no-create-home --shell /bin/sh --gid kb operator
     echo "created user: operator (member of kb)"
 else
     echo "user operator already exists, skipping"

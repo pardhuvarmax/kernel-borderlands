@@ -60,8 +60,8 @@ The dashboard and API bind loopback on purpose. Remote humans reach the system t
 \node[t] at (6.6,-4.1) {\textit{created by provision.sh}};
 \node[t] at (1.6,-4.8) {authorized\_keys};
 \node[t] at (6.6,-4.8) {\textit{created empty by provision.sh}};
-\node[t] at (1.6,-5.5) {sshd\_kb-operator.conf.legacy};
-\node[t] at (7.4,-5.5) {\textit{only after a legacy migration}};
+\node[t] at (1.6,-5.5) {api.env};
+\node[t] at (6.6,-5.5) {\textit{dashboard API token, root:kb 0640}};
 \node[t] at (0.8,-6.2) {var/lib/kbd/state.db};
 \node[t] at (6.6,-6.2) {\textit{SQLite WAL, made by StateDirectory=kbd}};
 \node[t] at (0.8,-6.9) {run/kb/};
@@ -101,7 +101,7 @@ Config files in \file{/etc/kb} & Mode 0640 root-owned; \cmd{kbd} runs as root. L
 \textbf{Variable} & \textbf{Read by} & \textbf{Meaning}\\
 \midrule
 \texttt{KB\_HTTP\_CORS\_ORIGIN} & \cmd{kbd} & Comma-separated browser origins allowed to call the API. The packaged unit sets \texttt{http://127.0.0.1:8082,http://localhost:8082}. Default without it: the Vite dev origins on 5173 only.\\
-\texttt{KB\_HTTP\_API\_TOKEN} & \cmd{kbd} & Bearer token gating the mutating routes (\texttt{isolate}, \texttt{restore}). Unset means those routes fail closed.\\
+\texttt{KB\_HTTP\_API\_TOKEN} & \cmd{kbd} & Bearer token gating the mutating routes (\texttt{isolate}, \texttt{restore}, \texttt{policy/reload}). The package generates it into \file{/etc/kb/api.env} and \unit{kbd.service} loads it. Unset means those routes fail closed.\\
 \texttt{KB\_AADS\_STATUS\_HOST}, \texttt{KB\_AADS\_STATUS\_PORT} & \cmd{kbagents} & Bind address of the agent status server (default 127.0.0.1:8601).\\
 \texttt{KB\_AADS\_API\_ADDR} & \cmd{kbd} & Where \cmd{kbd} proxies \texttt{/api/agents}; must match the status server.\\
 \bottomrule
