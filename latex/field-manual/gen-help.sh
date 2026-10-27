@@ -25,6 +25,7 @@ h ssh-add-key ssh add-key
 h dashboard-up dashboard up
 h dashboard-open dashboard open
 h dashboard-status dashboard status
+h dashboard-url dashboard url
 "$BIN/kbd" --help > "$OUT/kbd.txt" 2>&1 || true
 "$BIN/kb-checker" monitor --help > "$OUT/kb-checker-monitor.txt" 2>&1 || true
 "$BIN/kb-checker" check --help > "$OUT/kb-checker-check.txt" 2>&1 || true

@@ -1,0 +1,395 @@
+\chapter{Demonstration Runbook: Install to Uninstall}
+\label{ch:runbook}
+This is the whole demonstration, in order, from an empty host to an empty host. Follow it top to bottom.
+Every step has the command, what you should see, and an honest status tag:
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\verified & the step was run on the Ubuntu 24.04 test VM and behaved as written\\[3pt]
+\notrun & the step has not been run; the expected output is derived from the code\\[3pt]
+\fromsrc & as above, and the exact wording is taken from the source rather than a live run\\
+\end{tabular}
+\end{center}
+Steps marked \notrun\ are the ones to rehearse before an audience. Section~\ref{sec:rb-auto} shows how to run
+the install and checks automatically on the VM.
+
+\section{Time budget and layout}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}L{1.2cm}L{4.4cm}Y@{}}
+\toprule
+\textbf{Phase} & \textbf{What} & \textbf{Screen / terminal}\\
+\midrule
+0--3 & Prepare, install, verify (about 4 min) & Terminal A (the demo host)\\
+4 & Start the stack (1 min) & Terminal A\\
+5 & Sensor and control plane live (2 min) & Terminal B: \texttt{journalctl} follow\\
+6 & Web dashboard (2 min) & Browser\\
+7 & SSH console (2 min) & Terminal C\\
+8 & Contain a process (2 min) & Terminals A and C\\
+9--10 & Audit proof, policy reload (2 min) & Terminal A\\
+11 & Failure and recovery (1 min) & Terminals A and C\\
+12--14 & Stop, uninstall, reset (3 min) & Terminal A\\
+\bottomrule
+\end{tabularx}
+\end{center}
+Open three terminals on the demo host before you start (A: commands, B: logs, C: the SSH console) and one browser window.
+
+\section{Phase 0: Before you start}
+\resetsteps
+\step{Confirm the host meets the prerequisites (Chapter~\ref{ch:prereq})}
+\begin{lstlisting}[style=console]
+$ ls /sys/kernel/btf/vmlinux            # must exist
+$ cat /sys/kernel/security/lsm          # must end with: ...,bpf
+$ id -nG | tr ' ' '\n' | grep -x -E 'sudo|wheel'   # you need sudo
+\end{lstlisting}
+\verified\ (\texttt{lockdown,capability,landlock,yama,apparmor,bpf} and BTF present on the test VM.)
+\step{Make sure no earlier install is running}
+\begin{lstlisting}[style=console]
+$ systemctl is-active kbd kb-sensor kbopd sshd@kb-operator kb-checker
+\end{lstlisting}
+All should say \texttt{inactive} (or \texttt{unknown} on a clean host). \verified\ If a development install is running, either
+stop it by hand or let the package's migration step retire it (Section~\ref{sec:migrate}).
+\step{Check the package file}
+\ifarch
+\begin{lstlisting}[style=console]
+$ sha256sum -c SHA256SUMS --ignore-missing
+kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst: OK
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ sha256sum -c SHA256SUMS --ignore-missing
+kernel-borderlands_0.1.0_amd64.deb: OK
+\end{lstlisting}
+\fi
+\verified
+
+\section{Phase 1: Install}
+\resetsteps
+\step{Install the package}
+\ifarch
+\begin{lstlisting}[style=console]
+$ sudo pacman -U kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+\end{lstlisting}
+\notrun\ (not run on Arch; the post-install hook is the same script as on Ubuntu.) Expected tail:
+\begin{lstlisting}[style=console]
+created group: kb
+created user: operator (member of kb)
+generated SSH host key: /etc/kb/ssh/ssh_host_ed25519_key
+created empty /etc/kb/authorized_keys - add operator public keys here
+provisioning complete
+kb: generated the dashboard API token in /etc/kb/api.env
+==> Kernel Borderlands installed. Nothing has been started.
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ sudo apt install ./kernel-borderlands_0.1.0_amd64.deb
+\end{lstlisting}
+\verified\ Expected tail (on a clean host):
+\begin{lstlisting}[style=console]
+Setting up kernel-borderlands (0.1.0) ...
+created group: kb
+created user: operator (member of kb)
+generated SSH host key: /etc/kb/ssh/ssh_host_ed25519_key
+created empty /etc/kb/authorized_keys - add operator public keys here
+provisioning complete
+kb: generated the dashboard API token in /etc/kb/api.env
+\end{lstlisting}
+On a host that had the old development install you will also see \texttt{kb: moved legacy ...}, \texttt{kb: legacy dev unit ... moved aside},
+\texttt{kb: operator shell ... -> /bin/sh} and \texttt{kb: operator account was locked ...}. These are the migration working. \verified
+\fi
+\step{Prove nothing started and the checker is held down}
+\begin{lstlisting}[style=console]
+$ kbctl status
+kbd.service                  inactive
+kb-sensor.service            inactive
+kbopd.service                inactive
+sshd@kb-operator.service     inactive
+kb-checker.service           UNDER MAINTENANCE AND REPAIRS (kept down)
+$ systemctl is-enabled kb-checker
+disabled
+\end{lstlisting}
+\verified
+\step{Check the provisioning}
+\begin{lstlisting}[style=console]
+$ getent passwd operator
+operator:x:998:994::/:/bin/sh
+$ sudo stat -c '%a %U:%G' /etc/kb/api.env
+640 root:kb
+\end{lstlisting}
+\verified\ (UID and GID numbers differ per host; the home is \texttt{/} and the shell \texttt{/bin/sh}.)
+
+\section{Phase 2: Authorize an operator and start the stack}
+\resetsteps
+\step{Authorize your SSH public key for the console}
+\begin{lstlisting}[style=console]
+$ sudo kbctl ssh add-key ~/.ssh/id_ed25519.pub
+key authorized for operator
+\end{lstlisting}
+\verified\ (If you have no key: \texttt{ssh-keygen -t ed25519}.)
+\step{Bring the stack up}
+\begin{lstlisting}[style=console]
+$ sudo kbctl up
+$ kbctl status
+kbd.service                  active
+kb-sensor.service            active
+kbopd.service                active
+sshd@kb-operator.service     active
+kb-checker.service           UNDER MAINTENANCE AND REPAIRS (kept down)
+\end{lstlisting}
+\verified
+\step{Check the sockets and ports}
+\begin{lstlisting}[style=console]
+$ ls -l /run/kb
+srw-rw---- 1 root kb   ... kba.sock       # group kb: the operator console can reach it
+srwxr-xr-x 1 root root ... kbct.sock
+srwxr-xr-x 1 root root ... kbd.sock
+$ ss -ltn | grep -E ':(8080|8082|2222)\b'
+\end{lstlisting}
+\verified\ Three listeners: \texttt{127.0.0.1:8080} (\cmd{kbd} API), \texttt{127.0.0.1:8082} (dashboard), \texttt{0.0.0.0:2222} (operator \cmd{sshd}).
+
+\section{Phase 3: Show the sensor and the control plane working}
+\resetsteps
+\step{In Terminal B, follow the sensor and \cmd{kbd}}
+\begin{lstlisting}[style=console]
+$ sudo journalctl -f -u kb-sensor -u kbd
+\end{lstlisting}
+You will see a stream of \texttt{[process\_exec]}, \texttt{[process\_exit]} and \texttt{[privilege\_change]} lines from the sensor.
+\verified
+\step{In Terminal A, show the live counters}
+\begin{lstlisting}[style=console]
+$ kbctl stats
+events/sec:       112.40
+active processes: 238
+\end{lstlisting}
+\fromsrc\ (numbers will differ).
+\step{Trigger a detection with a safe, real event}
+Reading a credential file is something the sensor always flags. Do it from Terminal A:
+\begin{lstlisting}[style=console]
+$ sudo cat /etc/shadow > /dev/null
+\end{lstlisting}
+In Terminal B you should see lines like these (observed during the VM test, produced by \cmd{sudo} itself):
+\begin{lstlisting}[style=console]
+kbd_sensor: [file_access] PID=28539 UID=1000 COMM=sudo file=/etc/shadow SENSITIVE
+kbd_sensor: [BEHAVIOR ENGINE] PID=28539 COMM=sudo State transition: OBSERVED -> SUSPICIOUS (Reason: CRED_FILE_ACCESS ...)
+kbd: [KB] Zone PID=28555 SAFE->SUSPICIOUS score=9.8
+kbd: [AUDIT] ZONE_SAFE_TO_SUSPICIOUS | pid=28555 ... score=9.81 ...
+\end{lstlisting}
+\verified\ Say what happened: the kernel hook saw the file open, the behavior engine moved the process to a higher state, and
+\cmd{kbd} recorded the zone change in the tamper-evident audit log. This is a \emph{detection}, not a block: containment is an operator
+decision (Phase 6).
+\begin{kbnote}[WHY THERE IS NO ATTACK SCRIPT HERE]
+The repository's \file{scripts/attack-lab/} README lists six attack simulations, but only \file{containment_demo.py} exists in the
+tree. This runbook therefore uses only harmless, real events: a credential-file read and a \texttt{sleep} process.
+Do not run attack simulations on a host that is not isolated.
+\end{kbnote}
+
+\section{Phase 4: Web dashboard}
+\resetsteps
+\step{Open it with the API token handed over}
+\begin{lstlisting}[style=console]
+$ kbctl dashboard open
+opened http://127.0.0.1:8082
+\end{lstlisting}
+\verified\ on the VM: the dashboard service is active and \texttt{/} returns 200. \notrun\ for \cmd{kbctl dashboard open} itself on the VM (it was tested locally against the packaged \cmd{kbopd} with a stub \cmd{systemctl}) and for the page content in a browser. The page loads at \texttt{http://127.0.0.1:8082},
+the token is moved from the URL fragment into \texttt{sessionStorage}, and the address bar is cleaned. On a headless server, run
+\texttt{kbctl dashboard url --token} on the host and browse through an SSH tunnel (Chapter~\ref{ch:dash}).
+\step{Show the data and the action buttons}
+Point at the process table, the zone chart and the alert feed. Then show that the action buttons are authorized:
+\begin{lstlisting}[style=console]
+$ TOK=$(sudo grep ^KB_HTTP_API_TOKEN= /etc/kb/api.env | cut -d= -f2)
+$ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8080/api/policy/reload                         # no token
+401
+$ curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $TOK" http://127.0.0.1:8080/api/policy/reload
+200
+\end{lstlisting}
+\verified\ (the 401 / 401 (wrong token) / 200 behaviour of the API). Clicking isolate and restore in the page is \notrun.
+
+\section{Phase 5: The SSH console}
+\resetsteps
+\step{In Terminal C, connect}
+\begin{lstlisting}[style=console]
+$ kbctl ssh connect
+\end{lstlisting}
+\verified\ Key accepted, the terminal UI appears with four tabs (\emph{Processes}, \emph{Alerts}, \emph{Agent Activity}, \emph{Query Console}), live link to \cmd{kbd}
+(no \texttt{[OFFLINE]} banner), and it exits cleanly on \texttt{q}. From another machine: \texttt{ssh -t -p 2222 operator@HOST}.
+\step{Drive it}
+\texttt{Tab} through the views; on \emph{Processes} press \texttt{/} and type \texttt{sleep}; on \emph{Query Console} try
+\texttt{help}, \texttt{stats}, \texttt{zone suspicious}. The tab rendering is \verified; the individual query commands are \notrun.
+\step{Show that it is a forced console, not a shell}
+\begin{lstlisting}[style=console]
+$ ssh -p 2222 operator@HOST id
+\end{lstlisting}
+You get the console, not the output of \texttt{id}. \notrun
+
+\section{Phase 6: Contain a process}
+\resetsteps
+\step{Start a harmless victim in Terminal A}
+\begin{lstlisting}[style=console]
+$ sleep 600 &
+[1] 5120
+\end{lstlisting}
+\step{Contain it from the command line}
+\begin{lstlisting}[style=console]
+$ sudo kbctl process isolate --pid 5120 --level CGROUP --reason "demo"
+pid=5120 contained at level CGROUP
+\end{lstlisting}
+\fromsrc\ The output format is taken from the source. Escalation order: \texttt{CGROUP}, \texttt{SECCOMP}, \texttt{NAMESPACE}, \texttt{TERMINATE}.
+\step{Show it in the console}
+In Terminal C: \emph{Processes}, filter \texttt{sleep}; the \textsc{Containment} column shows the level. Or contain from the TUI: select the row,
+press \texttt{c}, choose a level (\texttt{1}--\texttt{4}), confirm with \texttt{y}. \notrun
+\step{Release and clean up}
+\begin{lstlisting}[style=console]
+$ kill 5120
+\end{lstlisting}
+
+\section{Phase 7: The audit proof}
+\resetsteps
+\step{Verify the hash chain}
+\begin{lstlisting}[style=console]
+$ kbctl audit verify
+chain intact - 1763 entries verified
+\end{lstlisting}
+\verified\ (the count differs per host). Every record hashes the one before it; one altered byte breaks the chain.
+\step{Export a copy}
+\begin{lstlisting}[style=console]
+$ kbctl audit export --out /tmp/demo-audit.json
+wrote 1763 entries to /tmp/demo-audit.json
+\end{lstlisting}
+\fromsrc
+
+\section{Phase 8: Change policy live}
+\resetsteps
+\step{Edit and reload}
+\begin{lstlisting}[style=console]
+$ sudo $EDITOR /etc/kb/policy.yaml      # e.g. lower bash's suspicious threshold
+$ sudo kbctl policy reload
+\end{lstlisting}
+\notrun\ for \cmd{kbctl policy reload} (gRPC). The same reload through the HTTP API with the token is \verified\ (Phase~4).
+
+\section{Phase 9: Failure and recovery}
+\resetsteps
+\step{Stop the control plane under the console}
+\begin{lstlisting}[style=console]
+$ sudo systemctl stop kbd
+\end{lstlisting}
+In Terminal C the TUI shows the \texttt{[OFFLINE] kbd unreachable} banner and fictional \texttt{[DEMO DATA]} rows. Point out that the banner is the
+honest signal and the rows are not live. \notrun\ for stopping \cmd{kbd} under a live console. The banner itself was seen on the VM when the link to \cmd{kbd} failed (before the socket-group fix) and in unprivileged runs.
+\step{Bring it back}
+\begin{lstlisting}[style=console]
+$ sudo kbctl up
+$ kbctl status
+\end{lstlisting}
+\cmd{kbctl up} after a stop is \verified. Whether an already-open console reconnects on its own is \notrun; if it does not, quit with \texttt{q} and run \texttt{kbctl ssh connect} again.
+
+\section{Phase 10: Optional, the agent swarm}
+Only if the demo audience wants it, and only on a host where you have built the virtualenv (Chapter~\ref{ch:aads}).
+\begin{lstlisting}[style=console]
+$ sudo systemctl start kbagents
+$ curl -s http://127.0.0.1:8601/agents | head -c 300
+\end{lstlisting}
+Running the launcher by hand against an existing venv is \verified\ (nine agents, zero errors); running it as the systemd unit is \notrun.
+
+\section{Phase 11: Stop everything}
+\begin{lstlisting}[style=console]
+$ sudo kbctl down
+$ kbctl status
+kbd.service                  inactive
+...
+kb-checker.service           UNDER MAINTENANCE AND REPAIRS (kept down)
+\end{lstlisting}
+\verified\ (\cmd{kbctl down} stops in reverse boot order.) To also stop them from starting at boot:
+\texttt{sudo kbctl dashboard down; sudo kbctl ssh down}.
+
+\section{Phase 12: Uninstall}
+\resetsteps
+\step{Remove the package}
+\ifarch
+\begin{lstlisting}[style=console]
+$ sudo pacman -R kernel-borderlands
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+$ sudo apt remove kernel-borderlands        # keeps config you changed
+$ sudo apt purge  kernel-borderlands        # also removes config files the package owns
+\end{lstlisting}
+\fi
+\notrun\ for the removal itself (the pre-removal hook disables and stops the units). The service-stopping part is the same logic as
+\texttt{kbuninstaller.sh}.
+\step{See what is deliberately left behind}
+\begin{lstlisting}[style=console]
+$ ls /etc/kb /var/lib/kbd
+$ getent passwd operator; getent group kb
+$ ls /etc/systemd/system/*.pre-migration 2>/dev/null      # only if a dev install was migrated
+\end{lstlisting}
+These hold keys, the token, the audit chain and the account; a package manager should not destroy them.
+\step{Wipe everything (only if you want a truly clean host)}
+\begin{lstlisting}[style=console]
+$ sudo rm -rf /etc/kb /var/lib/kbd /opt/kb
+$ sudo rm -f /etc/systemd/system/*.pre-migration
+$ sudo userdel operator && sudo groupdel kb
+$ sudo systemctl daemon-reload
+\end{lstlisting}
+\notrun
+\step{Confirm}
+\begin{lstlisting}[style=console]
+$ ss -ltn | grep -E ':(8080|8082|2222)\b' || echo "ports free"
+$ command -v kbd kbctl || echo "binaries gone"
+\end{lstlisting}
+\notrun
+
+\section{Phase 13: Reset between demonstrations}
+To repeat the demonstration from nothing, either do Phase~12 and Phase~1 again, or use the two scripts (next section) which do the same on the Ubuntu VM.
+
+\section{Running install and checks automatically}
+\label{sec:rb-auto}
+The repository ships two scripts in \file{packaging/vm-test/}; they prompt for \cmd{sudo} once and must be run with a terminal.
+\begin{lstlisting}[style=console]
+$ ssh -t HOST 'bash ~/kbuninstaller.sh --remove-package'   # stop services, remove the package (keeps data)
+$ ssh -t HOST 'bash ~/kbinstaller.sh'                       # install, restart, check everything
+...
+=== SUMMARY ===
+PASS=34 FAIL=0
+\end{lstlisting}
+\verified\ \file{kbinstaller.sh} checks Phases 1--5 and 7 (install, migration, token, CORS and auth, dashboard, services, the SSH console with a live
+\cmd{kbd} link, audit verify, sensor). It does \emph{not} cover contain, policy reload, failure and recovery, the swarm, reboot persistence or
+uninstall; those are the \notrun\ rows above.
+
+\section{The whole demonstration on one page}
+\ifarch
+\begin{lstlisting}[style=console]
+# --- install ---
+sudo pacman -U kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+# --- install ---
+sudo apt install ./kernel-borderlands_0.1.0_amd64.deb
+\end{lstlisting}
+\fi
+\begin{lstlisting}[style=console]
+kbctl status                                   # all inactive, checker labelled
+# --- start ---
+sudo kbctl ssh add-key ~/.ssh/id_ed25519.pub
+sudo kbctl up && kbctl status
+# --- show ---
+sudo journalctl -f -u kb-sensor -u kbd         # terminal B
+sudo cat /etc/shadow > /dev/null               # trigger a detection
+kbctl dashboard open                           # browser
+kbctl ssh connect                              # terminal C
+sleep 600 & sudo kbctl process isolate --pid $! --level CGROUP --reason demo
+kbctl audit verify
+sudo kbctl policy reload
+# --- recover ---
+sudo systemctl stop kbd ; sudo kbctl up
+# --- stop and remove ---
+sudo kbctl down
+\end{lstlisting}
+\ifarch
+\begin{lstlisting}[style=console]
+sudo pacman -R kernel-borderlands
+sudo rm -rf /etc/kb /var/lib/kbd ; sudo userdel operator ; sudo groupdel kb
+\end{lstlisting}
+\else
+\begin{lstlisting}[style=console]
+sudo apt purge kernel-borderlands
+sudo rm -rf /etc/kb /var/lib/kbd ; sudo userdel operator ; sudo groupdel kb
+\end{lstlisting}
+\fi

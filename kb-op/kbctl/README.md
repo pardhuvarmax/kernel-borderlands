@@ -87,3 +87,32 @@ kbctl policy reload --socket /run/kb/kba.sock
 
 ## Owner
 - Rupa — CLI Tooling and Operator Infra.
+
+---
+
+## 3. Service control and operator surfaces (packaged installs)
+
+These commands drive systemd rather than gRPC, so they work even when `kbd` is down. They add `sudo` themselves when not root.
+
+```bash
+sudo kbctl up            # enable --now kbd, kb-sensor, kbopd, sshd@kb-operator (kb-checker is skipped)
+sudo kbctl down          # stop them in reverse boot order (does not disable)
+kbctl status             # unit states; kb-checker shows UNDER MAINTENANCE AND REPAIRS (kept down),
+                         # or "active, STARTED MANUALLY" if someone started it by hand
+
+kbctl dashboard up|down|status|url|open   # kbopd.service, http://127.0.0.1:8082
+kbctl dashboard open     # starts it if needed and opens the browser with the API token as a URL fragment
+kbctl dashboard url --token   # the same URL for another browser; treat the output as a secret
+kbctl tui                # run the terminal UI on this terminal (exec kbopd)
+kbctl ssh up|down|status      # sshd@kb-operator.service on port 2222
+kbctl ssh connect [host] [-i key]   # exec ssh -t -p 2222 operator@host
+sudo kbctl ssh add-key ~/.ssh/id_ed25519.pub   # append one validated public key to /etc/kb/authorized_keys
+```
+
+`dashboard status` and `ssh status` exit 0 only if the unit is active **and** the port answers, 3 otherwise, 1 on error (usable as health gates in scripts).
+
+The dashboard's isolate / restore / policy-reload buttons need `KB_HTTP_API_TOKEN` on `kbd`. The package generates it into `/etc/kb/api.env` (root:kb 0640); `kbd.service` loads it and `kbctl dashboard open` hands it to the browser as a URL fragment (never sent to a server, kept in `sessionStorage`). Members of group `kb` can use `kba.sock` and therefore have full control-plane access.
+
+Build: `cd kb-op/kbctl && go build -o kbctl .` (several files; `go build main.go` no longer works).
+
+See `latex/field-manual/` (Chapters 7-12) for the full workflows.

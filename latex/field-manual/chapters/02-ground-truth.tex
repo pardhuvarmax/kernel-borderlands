@@ -85,7 +85,7 @@ The dashboard and API bind loopback on purpose. Remote humans reach the system t
 \textbf{Object} & \textbf{Definition}\\
 \midrule
 group \texttt{kb} & System group; owns \file{/etc/kb} (mode 0750, \texttt{root:kb}).\\
-user \texttt{operator} & System user, no home, member of \texttt{kb}. The only account the operator \cmd{sshd} accepts (\texttt{Match User operator}).\\
+user \texttt{operator} & System user, shell \file{/bin/sh} (a \texttt{nologin} shell refuses sshd's \texttt{ForceCommand}), home \file{/}, shadow password \texttt{*} (no usable password, but not locked: OpenSSH without PAM refuses a locked account even for key logins). Member of \texttt{kb}. The only account the operator \cmd{sshd} accepts (\texttt{Match User operator}).\\
 \file{/etc/kb/ssh/ssh_host_ed25519_key} & Host key for the operator \cmd{sshd}, generated on first install, never overwritten.\\
 \file{/etc/kb/authorized_keys} & Empty at install, \texttt{operator:kb}, mode 0600. Fill it with \cmd{kbctl ssh add-key}.\\
 Config files in \file{/etc/kb} & Mode 0640 root-owned; \cmd{kbd} runs as root. Listed as package conffiles so your edits survive upgrades.\\

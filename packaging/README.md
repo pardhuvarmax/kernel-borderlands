@@ -18,8 +18,7 @@ copied onto a host.
 | `systemd/kbopd.service` | **Real** (unified `kb-tui` binary serves the embedded dashboard on `127.0.0.1:8082`). Previously: **not yet functional.** `kb-op/kb-dashboard` only runs via `npm run dev` today. Documents the target convention only. |
 | `systemd/sshd@kb-operator.service` + `ssh/kb-operator.conf` + `ssh/kb-tui-session-wrapper.sh` | **Real** — a second, independent `sshd` instance on port 2222, `ForceCommand`-wrapping `kb-tui`. |
 
-`kbagents`/`kbopd` packaging and giving `kbd` a real `--config` flag are
-explicitly deferred to a follow-up pass, not part of this one.
+`kbopd` is now a real, packaged unit (it serves the embedded dashboard). `kbagents` is packaged as a launcher for the Python swarm and is installed but not enabled. Giving `kbd` a real `--config` flag is still not done (`kb.yaml` is not read by any binary).
 
 ## Packages (.deb and Arch)
 
@@ -39,7 +38,12 @@ Install with `sudo apt install ./kernel-borderlands_*.deb` or `sudo pacman -U ke
 - `kbagents` is a launcher for the Python swarm (`/opt/kb/venv` or system python); it is installed but not enabled.
 - Build from a clean `PATH` (system toolchains): a Nix profile's `clang` cannot see `/usr/include/bpf`.
 
-## Installing
+## Real-host testing (Ubuntu VM)
+
+`packaging/vm-test/kbinstaller.sh` installs the `.deb`, restarts the stack and runs 34 checks (installer and migration, API token and CORS, dashboard, services, the SSH console with a live `kbd` link, audit verify, sensor); `kbuninstaller.sh [--remove-package]` stops and disables everything so the next run starts clean. Both need `sudo` and a TTY. Last full run: 34/34 PASS (see `CHANGELOG.md`). The first real-host run found three bugs that were fixed: sshd's empty capability set, the locked `operator` account, and `kba.sock` being `root:root` instead of group `kb`.
+
+## Installing (development flow)
+
 
 Run the whole thing in one shot:
 

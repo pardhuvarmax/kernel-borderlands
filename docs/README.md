@@ -100,7 +100,12 @@ Internal engineering documentation intended for project contributors.
 
 ### `docs/development/developer-commands.md`
 
-Quick reference containing the build, test, and execution commands for every Kernel Borderlands subsystem.
+Quick reference containing the build, test, and execution commands for every Kernel Borderlands subsystem, including packaging (`.deb`, Arch), install/uninstall and the real-host acceptance scripts.
+
+### Packaging and the field manual (outside `docs/`)
+
+* [`packaging/README.md`](../packaging/README.md): what the packages contain, how to build them, what install/upgrade does, `vm-test/` real-host scripts.
+* [`latex/field-manual/`](../latex/field-manual/): *The Kernel Borderlands* field manual (Arch and Ubuntu PDFs), including the step-by-step demonstration runbook from install to uninstall. Prebuilt PDFs and packages are attached to the GitHub release.
 
 ### `docs/development/core-control/`
 

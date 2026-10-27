@@ -105,9 +105,33 @@ layout (no `cmd/` directory, no `main.go`; see `kb-op/kb-tui/Cargo.toml`).
 ### H. `kbctl` (Command Line Client)
 - **Build CLI Client**:
   ```bash
-  cd kb-op/kbctl && go build -o kbctl main.go
+  cd kb-op/kbctl && go build -o kbctl .   # several files now; `go build main.go` fails
   ```
 - **Reload Policies**:
   ```bash
   ./kbctl policy reload
   ```
+
+### I. Packaging, install and real-host testing
+- **Build everything** (system toolchains on `PATH`, e.g. `PATH=/usr/local/bin:/usr/bin`; a Nix `clang` cannot see `/usr/include/bpf`):
+  ```bash
+  make build            # kb-core sensor, kbd, kb-checker, kbctl, mcp-server, dashboard + kbopd
+  ```
+- **Ubuntu `.deb`** (build on the target distro; binaries link the build host's glibc):
+  ```bash
+  packaging/deb/build-deb.sh           # -> dist/kernel-borderlands_0.1.0_amd64.deb
+  ```
+- **Arch package**:
+  ```bash
+  cd packaging/arch && makepkg -f      # -> kernel-borderlands-0.1.0-1-x86_64.pkg.tar.zst
+  ```
+- **Install, start, demo, uninstall** (full runbook with expected output: `latex/field-manual/`, Chapter "Demonstration Runbook"):
+  ```bash
+  sudo apt install ./kernel-borderlands_0.1.0_amd64.deb      # or: sudo pacman -U kernel-borderlands-*.pkg.tar.zst
+  sudo kbctl ssh add-key ~/.ssh/id_ed25519.pub && sudo kbctl up
+  kbctl status && kbctl dashboard open && kbctl ssh connect
+  sudo kbctl down && sudo apt purge kernel-borderlands       # or: sudo pacman -R kernel-borderlands
+  ```
+- **Real-host acceptance scripts** (Ubuntu VM, need sudo and a TTY): `ssh -t HOST 'bash ~/kbinstaller.sh'` and `ssh -t HOST 'bash ~/kbuninstaller.sh [--remove-package]'`, sources in `packaging/vm-test/`.
+- **Build the field manuals** (LuaLaTeX): `cd latex/field-manual && make` -> `build/KB-Field-Manual-{Arch,Ubuntu}.pdf`; `make help` regenerates the CLI reference from the binaries.
+

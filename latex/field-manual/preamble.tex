@@ -120,3 +120,8 @@
 % ---- checklist marks ---------------------------------------------------------
 \newcommand{\chk}{\tikz[baseline=-0.7ex]\draw[line width=1pt] (0,0) rectangle (2.4mm,2.4mm);}
 \newcommand{\kbstar}{\tikz[baseline=-0.55ex]\node[star,star points=5,fill=ink,draw=ink,inner sep=1.5pt]{};}
+
+% ---- runbook status tags -------------------------------------------------------
+\newcommand{\verified}{\tikz[baseline=-0.6ex]\node[fill=ink,text=white,font=\bfseries\sffamily\tiny,inner sep=2pt]{VERIFIED ON VM};}
+\newcommand{\notrun}{\tikz[baseline=-0.6ex]\node[draw=ink,line width=0.6pt,font=\bfseries\sffamily\tiny,inner sep=2pt]{NOT YET RUN};}
+\newcommand{\fromsrc}{\tikz[baseline=-0.6ex]\node[draw=ink,dashed,font=\bfseries\sffamily\tiny,inner sep=2pt]{FROM SOURCE, NOT RUN};}

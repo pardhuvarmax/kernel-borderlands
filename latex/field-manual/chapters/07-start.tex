@@ -29,10 +29,10 @@ maintenance condition.}
 \toprule
 \textbf{Unit} & \textbf{Runs} & \textbf{Notes}\\
 \midrule
-\unit{kbd.service} & \cmd{kbd} with \texttt{--db} \file{/var/lib/kbd/state.db} and \texttt{--policy}, \texttt{--rules}, \texttt{--workloads} from \file{/etc/kb} & \texttt{Type=notify}; \texttt{RuntimeDirectory=kb}; \texttt{StateDirectory=kbd}; sets \texttt{KB\_HTTP\_CORS\_ORIGIN}. Conservative hardening only.\\
+\unit{kbd.service} & \cmd{kbd} with \texttt{--db} \file{/var/lib/kbd/state.db} and \texttt{--policy}, \texttt{--rules}, \texttt{--workloads} from \file{/etc/kb} & \texttt{Type=notify}; \texttt{RuntimeDirectory=kb}; \texttt{StateDirectory=kbd}; sets \texttt{KB\_HTTP\_CORS\_ORIGIN}; loads \file{/etc/kb/api.env}; after readiness runs \texttt{chgrp kb /run/kb/kba.sock}. Conservative hardening only.\\
 \unit{kb-sensor.service} & \cmd{kbd\_sensor} & Root, no capability dropping (needs CAP\_BPF/PERFMON/SYS\_ADMIN). Loads the eBPF hooks; connects to \file{kbd.sock}.\\
 \unit{kbopd.service} & \cmd{kbopd} headless & Serves the dashboard on 127.0.0.1:8082 and spawns \cmd{mcp-server}. Fully hardened (\texttt{ProtectSystem=strict}, empty capability set).\\
-\unit{sshd@kb-operator.service} & \cmd{sshd -D -f} \file{/etc/kb/sshd_kb-operator.conf} & Dedicated instance on port 2222, key-only, forces the wrapper script.\\
+\unit{sshd@kb-operator.service} & \cmd{sshd -D -f} \file{/etc/kb/sshd_kb-operator.conf} & Dedicated instance on port 2222, key-only, forces the wrapper script. Runs with a minimal capability set (\texttt{CAP\_SYS\_CHROOT}, \texttt{SETUID}, \texttt{SETGID}, \texttt{CHOWN}, \texttt{KILL}, \texttt{AUDIT\_WRITE}); an empty set breaks sshd's privilege separation.\\
 \unit{kb-checker.service} & \cmd{kb-checker monitor --all} & \textbf{Held down}: never enabled or auto-started; runs only if you start it by hand.\\
 \unit{kbagents.service} & \cmd{kbagents} & Installed, not enabled; see Chapter~\ref{ch:aads}.\\
 \bottomrule

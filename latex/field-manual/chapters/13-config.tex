@@ -30,6 +30,7 @@ compiled result when it connects.}
 \file{agents.yaml} & \cmd{kbagents} \texttt{--config} & On \cmd{kbagents} start & Swarm composition.\\
 \file{allowlist.yaml} (repo only) & \textbf{nothing today} & -- & Its own header says ``Not yet consumed by the daemon''. \textbf{Not installed.}\\
 \file{kb.yaml} (repo only) & \textbf{nothing today} & -- & No code references it; \cmd{kbd} has no \texttt{--config} flag. Not installed.\\
+\file{api.env} (generated) & \unit{kbd.service} via \texttt{EnvironmentFile} & \cmd{kbd} restart & Dashboard API token, \texttt{root:kb} 0640, created once at install, never overwritten (Section~\ref{sec:token}).\\
 \file{sshd_kb-operator.conf} & operator \cmd{sshd} & \texttt{systemctl reload sshd@kb-operator} & Chapter~\ref{ch:ssh}.\\
 \bottomrule
 \end{tabularx}

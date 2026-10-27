@@ -126,7 +126,9 @@ These are the \emph{source} units from \file{packaging/systemd/}. The packages i
 \file{/usr/bin/kb-checker} & 0755 & Watchdog (held down)\\
 \file{/usr/bin/kbagents} & 0755 & Swarm launcher\\
 \file{/usr/bin/kb-tui-session-wrapper.sh} & 0755 & SSH ForceCommand target\\
-\file{/usr/lib/kb/provision.sh} & 0755 & Host provisioning\\
+\file{/usr/lib/kb/provision.sh} & 0755 & Host provisioning (group, \texttt{operator} account, host key)\\
+\file{/usr/lib/kb/migrate-legacy.sh} & 0755 & Install/upgrade step: API token, operator unlock, legacy-install repair, \cmd{kb-checker} autostart removal\\
+\file{/etc/kb/api.env} (generated) & 0640 \texttt{root:kb} & Dashboard API token\\
 \file{/usr/lib/kb/aads/**} & 0644 & kb-aads sources and the containment checkpoint (with \file{marl/checkpoints/SHA256SUMS})\\
 \file{/usr/lib/systemd/system/*.service} (6) & 0644 & Unit files\\
 \file{/etc/kb/policy.yaml}, \file{rules.yaml}, \file{workloads.yaml}, \file{agents.yaml} & 0640 & Default configs (protected)\\

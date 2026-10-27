@@ -68,6 +68,8 @@ error: not an OpenSSH public key (want ssh-ed25519/ecdsa-sha2-*/sk-*/ssh-rsa ...
 \texttt{AuthorizedKeysFile /etc/kb/authorized\_keys} & Keys live outside any home directory.\\
 \texttt{X11Forwarding no}, \texttt{AllowTcpForwarding no} & No tunnels through the console.\\
 \texttt{PermitTTY yes} & The TUI needs a PTY.\\
+\texttt{PidFile none} & The unit makes \file{/run} read-only (\texttt{ProtectSystem=strict}), so sshd cannot write a PID file; systemd tracks the process itself.\\
+\texttt{PrintLastLog no} & \file{/var/log/lastlog} is read-only for the same reason.\\
 \bottomrule
 \end{tabularx}
 \end{center}

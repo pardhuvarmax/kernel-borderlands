@@ -1,0 +1,12 @@
+Print the dashboard URL (--token adds the API token fragment; treat the output as a secret)
+
+Usage:
+  kbctl dashboard url [flags]
+
+Flags:
+  -h, --help    help for url
+      --token   include the API token as a URL fragment
+
+Global Flags:
+      --port int        dashboard port (kbopd's embedded server is fixed at 8082; change only if you rebuilt it) (default 8082)
+      --socket string   path to kbd's gRPC Unix domain socket (default "/run/kb/kba.sock")
