@@ -54,6 +54,8 @@ A security platform must be immune to disabling itself, whether by external atta
 ### 2.5 Every rejection is observable
 A silent rejection is indistinguishable from a bug. Every time CPM blocks a containment request, it must produce an auditable record explaining what was blocked and why.
 
+*Implementation note (2026-10-28):* the sensor reports each CPM and CWP decision back to `kbd` as a `CONTAINMENT_ACK` (`wire-protocol.md`, msg_type 10), and `kbd` audits every refusal as `CONTAINMENT_REFUSED_BY_SENSOR`. The TERMINATE path (SIGKILL) additionally runs the same classification in `kbd` before sending the command and only kills after the sensor acknowledged level 4 as applied, so a rejected containment can never turn into a kill (`kb-control-plane/internal/enforcement/{guard,acks}.go`).
+
 ### 2.6 Minimal, fast-path evaluation
 Because CPM sits directly in the containment decision path, its checks must be O(1) or close to it (map lookups, pointer checks) so that it introduces negligible latency into the enforcement pipeline.
 

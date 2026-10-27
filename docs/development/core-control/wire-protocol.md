@@ -18,6 +18,7 @@ Payload types:
   msg_type=7 → CPM protected-exec registry  (kbd → sensor, no sender yet)
   msg_type=8 → CWP protected-workload registry (kbd → sensor, no sender yet)
   msg_type=9 → net flow sample (sensor → kbd, exfiltration detection)
+  msg_type=10 → kb_wire_containment_ack      (sensor → kbd, reply to every msg_type=5)
 
 Every payload starts with kb_wire_header:
   uint16 magic   = 0x4B42 ("KB")
@@ -152,6 +153,45 @@ out-of-band beaconing/exfiltration detector, `kb-control-plane/internal/
 detection/exfil.go`). Carries no byte-count field — `connect()` doesn't
 have one; see that doc's fidelity-limitation note.
 
+## msg_type = 10 — ContainmentAck (sensor → kbd, over `/run/kb/kbd.sock`)
+Packed struct (`kb_wire_containment_ack`, `kb_bridge.h`), all little-endian:
+```
+kb_wire_header hdr        4
+uint32 pid                 4   // echoes the command's pid
+uint32 level                4   // echoes the command's level
+uint32 decision              4   // enum kb_ack_decision, below
+```
+Total: 16 bytes. Sent by `handle_incoming_containment_cmd()` in `kbd_sensor.c`
+once per processed `msg_type = 5` command, after the CPM and CWP gates and
+the `contained_pids_map` write/delete have run. The gates refuse silently
+otherwise: the command frame is delivered either way, so without this reply
+`kbd` cannot tell "contained" from "refused".
+
+```
+0 = APPLIED                    map entry written (level > 0) or removed (level 0)
+1 = REJECT_CPM_KERNEL_THREAD   CPM.md §3.2
+2 = REJECT_CPM_PID1
+3 = REJECT_CPM_PROTECTED_PID
+4 = REJECT_CPM_PROTECTED_EXEC
+5 = REJECT_CWP_PATH            CWP.md, path tier
+6 = REJECT_CWP_HASH            CWP.md, hash tier (identity verified)
+7 = MAP_UPDATE_FAILED          gates passed, the bpf map operation failed
+```
+Any other value must be treated as "not applied". Go side:
+`ipc.ContainmentAck*` in `kb-control-plane/internal/ipc/types.go`, parsed in
+`wire.go` and delivered through the optional `ContainmentAckHandler`.
+
+Consumers: `internal/enforcement/acks.go` matches an ack to a waiting
+TERMINATE on `(pid, level)` (the command carries no sequence number) and
+SIGKILLs only on `APPLIED`; a refusal, a missing ack (timeout, 3 s) or a
+sensor that predates acks means no kill. A pid whose TERMINATE went
+unanswered is locked out for 30 s so a late ack cannot be mistaken for the
+answer to a newer request. `ControlPlane.OnContainmentAck` audits every
+non-`APPLIED` decision as `CONTAINMENT_REFUSED_BY_SENSOR`.
+
+Compatibility: additive. `KB_WIRE_VERSION` stays 3, the `msg_type = 5` layout
+is unchanged, and a `kbd` that does not know `msg_type = 10` ignores it.
+
 ## Dimension Index Map
   0 = KB_DIM_PROCESS    weight=0.20
   1 = KB_DIM_SYSCALL    weight=0.25
@@ -166,7 +206,7 @@ have one; see that doc's fidelity-limitation note.
   2 = BORDERLANDS
 
 ## Socket Paths
-  /run/kb/kbd.sock   Telemetry only, sensor → kbd (msg_type 1, 2, 4).
+  /run/kb/kbd.sock   Telemetry only, sensor → kbd (msg_type 1, 2, 4, 9, 10).
   /run/kb/kbct.sock  Control only, kbd → sensor (msg_type 5, 6, 7, 8) — split
                      from kbd.sock so a telemetry burst can never stall or kill
                      containment delivery. See

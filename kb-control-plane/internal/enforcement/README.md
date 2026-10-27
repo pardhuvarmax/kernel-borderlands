@@ -11,7 +11,9 @@ Applies graduated containment to processes based on zone classification.
 Terminate is the only level that kills. `Enforcer.Contain` first runs the Go-side CPM/CWP gate (`guard.go`):
 PID 1, kernel threads, protected executables and registered workloads are refused, and anything it cannot
 identify is refused too. Only then does it send level 4 to the sensor (which applies its own CPM/CWP gates
-before writing `contained_pids_map`) and, once that command was sent, SIGKILL the process through a pidfd.
+before writing `contained_pids_map`), waits for the sensor's `CONTAINMENT_ACK` and, only if it reports the
+command applied, SIGKILLs the process through a pidfd. A refusal, no ack within 3 s, or a sensor that predates
+acks means no kill (`acks.go`, `wire-protocol.md` msg_type 10).
 The dashboard's Isolate button uses level 3 (Namespace), which does not kill; Kill is a separate action
 (`POST /api/kill`).
 

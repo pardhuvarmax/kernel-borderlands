@@ -65,6 +65,27 @@
 // as its volume proxy instead, not real byte volume; see that file's
 // doc comment for the accuracy trade-off this implies.
 #define KB_WIRE_MSG_NET_FLOW  9
+// Sensor -> kbd reply to every containment command (KB_WIRE_MSG_CONTAINMENT_CMD)
+// it processes, over the telemetry socket (kbd.sock). Tells kbd what the
+// sensor's CPM/CWP gates and the contained_pids_map write actually did, so
+// kbd never has to guess from "the frame was written": the TERMINATE path
+// only SIGKILLs after a KB_ACK_APPLIED for that pid. Additive: kbd versions
+// that predate it ignore unknown msg_types. docs/development/core-control/
+// wire-protocol.md, msg_type = 10.
+#define KB_WIRE_MSG_CONTAINMENT_ACK  10
+
+// Containment ack decision codes (kb_wire_containment_ack.decision). Keep in
+// sync with ContainmentAck* in kb-control-plane/internal/ipc/types.go.
+enum kb_ack_decision {
+    KB_ACK_APPLIED                   = 0, // map entry written (level > 0) or removed (level 0)
+    KB_ACK_REJECT_CPM_KERNEL_THREAD  = 1,
+    KB_ACK_REJECT_CPM_PID1           = 2,
+    KB_ACK_REJECT_CPM_PROTECTED_PID  = 3,
+    KB_ACK_REJECT_CPM_PROTECTED_EXEC = 4,
+    KB_ACK_REJECT_CWP_PATH           = 5,
+    KB_ACK_REJECT_CWP_HASH           = 6,
+    KB_ACK_MAP_UPDATE_FAILED         = 7, // gates passed, bpf map write/delete failed
+};
 
 #pragma pack(push, 1)
 struct kb_wire_header {
@@ -85,6 +106,13 @@ struct kb_wire_process_exit {
     uint32_t pid;
     uint64_t exit_time_ns;
     uint32_t exit_code;
+};
+
+struct kb_wire_containment_ack {
+    struct kb_wire_header hdr;
+    uint32_t pid;      // echoes the command's pid
+    uint32_t level;    // echoes the command's level (0=None .. 4=Terminate)
+    uint32_t decision; // enum kb_ack_decision
 };
 
 struct kb_wire_net_flow {
@@ -128,6 +156,8 @@ int kb_bridge_send_zone_transition(int fd, uint32_t pid, uint64_t start_time_ns,
 int kb_bridge_send_process_exit(int fd, uint32_t pid, uint64_t exit_time_ns, uint32_t exit_code);
 
 int kb_bridge_send_net_flow(int fd, uint32_t pid, uint32_t daddr, uint16_t dport, uint64_t ts_ns);
+
+int kb_bridge_send_containment_ack(int fd, uint32_t pid, uint32_t level, uint32_t decision);
 
 #define KB_BRIDGE_DEFAULT_SOCK   "/run/kb/kbd.sock"
 // KB_BRIDGE_CONTROL_SOCK carries every Go -> sensor control push

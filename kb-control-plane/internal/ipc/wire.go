@@ -87,6 +87,14 @@ type NetFlowMsg struct {
     TsNs  uint64
 }
 
+// ContainmentAckHandler is an optional extension of MessageHandler: a handler
+// that also implements it receives the sensor's reply to each containment
+// command (msg_type 10). Kept separate so existing handlers and test fakes
+// keep compiling, and so an older kbd-side handler simply ignores acks.
+type ContainmentAckHandler interface {
+    OnContainmentAck(msg *ContainmentAckMsg)
+}
+
 type MessageHandler interface {
     OnProcessState(msg *ProcessStateMsg)
     OnZoneTransition(msg *ZoneTransitionMsg)
@@ -167,6 +175,19 @@ func parseProcessExit(buf []byte) (*ProcessExitMsg, error) {
     return msg, nil
 }
 
+func parseContainmentAck(buf []byte) (*ContainmentAckMsg, error) {
+    const expected = 16 // hdr(4) + pid(4) + level(4) + decision(4)
+    if len(buf) < expected {
+        return nil, fmt.Errorf("containment ack: want %d bytes got %d", expected, len(buf))
+    }
+    off := 4 // skip header
+    msg := &ContainmentAckMsg{}
+    msg.PID      = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.Level    = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.Decision = binary.LittleEndian.Uint32(buf[off:])
+    return msg, nil
+}
+
 func parseNetFlow(buf []byte) (*NetFlowMsg, error) {
     const expected = 22 // hdr(4) + pid(4) + daddr(4) + dport(2) + reserved(2) + ts_ns(8)
     if len(buf) < expected {
@@ -226,6 +247,12 @@ func (r *Reader) ReadLoop() error {
         case WireMsgNetFlow:
             if msg, err := parseNetFlow(buf); err == nil {
                 r.handler.OnNetFlow(msg)
+            }
+        case MsgTypeContainmentAck:
+            if h, ok := r.handler.(ContainmentAckHandler); ok {
+                if msg, err := parseContainmentAck(buf); err == nil {
+                    h.OnContainmentAck(msg)
+                }
             }
         }
     }

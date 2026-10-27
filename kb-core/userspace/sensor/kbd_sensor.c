@@ -1253,6 +1253,40 @@ static void cwp_sweep_orphaned_entries(struct kbd_sensor_bpf *skel)
                swept, swept == 1 ? "y" : "ies");
 }
 
+// Tells kbd what a containment command actually did (KB_WIRE_MSG_CONTAINMENT_ACK,
+// over the telemetry socket). The CPM/CWP gates below refuse silently from
+// kbd's point of view -- the command frame was delivered either way -- so
+// without this reply kbd cannot tell "contained" from "refused", and its
+// TERMINATE path (which SIGKILLs) would get past both gates. Best effort: if
+// the telemetry connection is down the ack is lost and kbd, which waits for
+// it with a timeout, fails closed (no kill).
+static void send_containment_ack(uint32_t pid, uint32_t level, enum kb_ack_decision decision)
+{
+    bridge_ensure_connected();
+    if (bridge_fd < 0)
+        return;
+    if (kb_bridge_send_containment_ack(bridge_fd, pid, level, (uint32_t)decision) != 0) {
+        kb_bridge_close(bridge_fd);
+        bridge_fd = -1;
+    }
+}
+
+static enum kb_ack_decision cpm_decision_to_ack(enum cpm_decision d)
+{
+    switch (d) {
+        case CPM_REJECT_KERNEL_THREAD:  return KB_ACK_REJECT_CPM_KERNEL_THREAD;
+        case CPM_REJECT_PID1:           return KB_ACK_REJECT_CPM_PID1;
+        case CPM_REJECT_PROTECTED_PID:  return KB_ACK_REJECT_CPM_PROTECTED_PID;
+        case CPM_REJECT_PROTECTED_EXEC: return KB_ACK_REJECT_CPM_PROTECTED_EXEC;
+        default:                        return KB_ACK_REJECT_CPM_PROTECTED_PID; // never CPM_ALLOW here; fail closed
+    }
+}
+
+static enum kb_ack_decision cwp_decision_to_ack(enum cwp_decision d)
+{
+    return d == CWP_REJECT_PROTECTED_HASH ? KB_ACK_REJECT_CWP_HASH : KB_ACK_REJECT_CWP_PATH;
+}
+
 // Only ever called with control_fd (see main()'s poll loop) — resets that
 // global specifically on a dead connection, not bridge_fd, so the two
 // connections' reconnect tracking never cross-contaminate.
@@ -1295,6 +1329,10 @@ static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
     uint32_t pid   = cmd->pid;
     uint32_t level = cmd->level;
     int map_fd = bpf_map__fd(skel->maps.contained_pids_map);
+    if (map_fd < 0) {
+        send_containment_ack(pid, level, KB_ACK_MAP_UPDATE_FAILED);
+        return;
+    }
     if (map_fd >= 0) {
         if (level == 0) {
             /* level 0 == ContainmentNone: remove the map entry entirely so the
@@ -1305,8 +1343,10 @@ static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
              * map for any future PID reuse of this slot. */
             if (bpf_map_delete_elem(map_fd, &pid) != 0 && errno != ENOENT) {
                 fprintf(stderr, "[SENSOR] delete_elem failed for PID %u: %s\n", pid, strerror(errno));
+                send_containment_ack(pid, level, KB_ACK_MAP_UPDATE_FAILED);
             } else {
                 printf("[SENSOR] Cleared containment for PID %u (Reason: %.64s)\n", pid, cmd->reason);
+                send_containment_ack(pid, level, KB_ACK_APPLIED);
             }
         } else {
             /* CPM gate (docs/features/CPM.md): every write that would ADD
@@ -1324,6 +1364,7 @@ static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
                 }
                 printf("[CPM] Containment Prevented\nPID: %u\nExec: %s\nReason: %s\n",
                        pid, exec_path, cpm_decision_reason(decision));
+                send_containment_ack(pid, level, cpm_decision_to_ack(decision));
                 return;
             }
             // CWP gate (docs/features/CWP.md §8): evaluated strictly
@@ -1339,12 +1380,15 @@ static void handle_incoming_containment_cmd(int fd, struct kbd_sensor_bpf *skel)
                 }
                 printf("[CWP] Containment Prevented\nPID: %u\nExecutable: %s\nReason: %s\n",
                        pid, exec_path, cwp_decision_reason(wdecision));
+                send_containment_ack(pid, level, cwp_decision_to_ack(wdecision));
                 return;
             }
             if (bpf_map_update_elem(map_fd, &pid, &level, BPF_ANY) != 0) {
                 fprintf(stderr, "[SENSOR] update_elem failed for PID %u with level %u: %s\n", pid, level, strerror(errno));
+                send_containment_ack(pid, level, KB_ACK_MAP_UPDATE_FAILED);
             } else {
                 printf("[SENSOR] Applied containment level %u to PID %u (Reason: %.64s)\n", level, pid, cmd->reason);
+                send_containment_ack(pid, level, KB_ACK_APPLIED);
             }
         }
     }

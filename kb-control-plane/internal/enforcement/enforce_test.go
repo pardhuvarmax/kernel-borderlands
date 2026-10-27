@@ -26,6 +26,7 @@ func (f fakeTarget) Close()      {}
 // TestMain replaces prepareTerminate for the whole package so no test can
 // ever SIGKILL a real PID (several tests contain made-up PIDs at level 4).
 func TestMain(m *testing.M) {
+	ackTimeout = 300 * time.Millisecond // tests that expect no ack must not wait 3 s
 	var sink []int
 	prepareTerminate = func(_ *Enforcer, pid uint32) (terminateTarget, error) {
 		return fakeTarget{pid: pid, killed: &sink}, nil
@@ -125,6 +126,9 @@ func TestContain_ValidLevelsSendCmd(t *testing.T) {
 			if _, err := readFull(clientConn, frame); err != nil {
 				t.Fatalf("reading frame: %v", err)
 			}
+
+			// The sensor would now answer a level-4 command; TERMINATE waits for it.
+			e.OnContainmentAck(&ipc.ContainmentAckMsg{PID: 1234, Level: level, Decision: ipc.ContainmentAckApplied})
 
 			// Payload starts after the 4-byte header: pid(4) + level(4) + reason(64)
 			gotPID := binary.LittleEndian.Uint32(frame[4:8])
@@ -364,6 +368,14 @@ func TestContain_RestoreExemptFromProtectedPidGate(t *testing.T) {
 // the sensor would receive, so the send completes.
 func containAndDrain(t *testing.T, pid, level uint32) error {
 	t.Helper()
+	applied := ipc.ContainmentAckApplied
+	return containAndDrainAck(t, pid, level, &applied)
+}
+
+// containAndDrainAck is containAndDrain with the fake sensor's reply chosen:
+// nil means it never answers.
+func containAndDrainAck(t *testing.T, pid, level uint32, ack *uint32) error {
+	t.Helper()
 	l, clientConn, cleanup := newListenerWithConn(t)
 	defer cleanup()
 	e := NewEnforcer(l, nil)
@@ -377,6 +389,9 @@ func containAndDrain(t *testing.T, pid, level uint32) error {
 	}
 	if _, err := readFull(clientConn, make([]byte, length)); err != nil {
 		t.Fatalf("reading frame: %v", err)
+	}
+	if ack != nil {
+		e.OnContainmentAck(&ipc.ContainmentAckMsg{PID: pid, Level: level, Decision: *ack})
 	}
 	select {
 	case err := <-errCh:
@@ -461,5 +476,93 @@ func TestContain_GateDoesNotApplyToOtherLevels(t *testing.T) {
 	stubGateRefuses(t) // would refuse any TERMINATE; other levels never call it
 	if err := containAndDrain(t, 4321, ipc.ContainmentNamespace); err != nil {
 		t.Fatalf("Contain(Namespace): %v", err)
+	}
+}
+
+// --- The sensor's verdict decides whether the kill happens ---
+
+func TestContain_SensorRefusalMeansNoKill(t *testing.T) {
+	for _, d := range []uint32{
+		ipc.ContainmentAckCPMProtectedExec,
+		ipc.ContainmentAckCPMProtectedPID,
+		ipc.ContainmentAckCWPPath,
+		ipc.ContainmentAckCWPHash,
+		ipc.ContainmentAckMapUpdateFailed,
+		99, // unknown decisions are never read as "applied"
+	} {
+		killed := stubKill(t, nil)
+		d := d
+		err := containAndDrainAck(t, 4321, ipc.ContainmentTerminate, &d)
+		if err == nil || !strings.Contains(err.Error(), "sensor refused") {
+			t.Fatalf("decision %d: got %v, want a sensor refusal", d, err)
+		}
+		if len(*killed) != 0 {
+			t.Fatalf("decision %d: killed %v although the sensor did not apply level 4", d, *killed)
+		}
+	}
+}
+
+func TestContain_NoAckMeansNoKillAndLocksOutThePid(t *testing.T) {
+	killed := stubKill(t, nil)
+	err := containAndDrainAck(t, 4321, ipc.ContainmentTerminate, nil)
+	if err == nil || !strings.Contains(err.Error(), "did not acknowledge") {
+		t.Fatalf("got %v, want a missing-ack error", err)
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("killed %v without an ack", *killed)
+	}
+
+	// A new request for the same pid is refused while the old one is unresolved,
+	// so a late ack for the first cannot be taken as the answer to the second.
+	l, _, cleanup := newListenerWithConn(t)
+	defer cleanup()
+	e := NewEnforcer(l, nil)
+	e.acks.markUnresolved(4321)
+	err = e.Contain(4321, ipc.ContainmentTerminate, "again")
+	if err == nil || !strings.Contains(err.Error(), "never acknowledged") {
+		t.Fatalf("got %v, want the unresolved-pid lockout", err)
+	}
+}
+
+func TestContain_AckForAnotherPidIsIgnored(t *testing.T) {
+	killed := stubKill(t, nil)
+	l, clientConn, cleanup := newListenerWithConn(t)
+	defer cleanup()
+	e := NewEnforcer(l, nil)
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- e.Contain(4321, ipc.ContainmentTerminate, "test") }()
+
+	var length uint32
+	if err := binary.Read(clientConn, binary.LittleEndian, &length); err != nil {
+		t.Fatalf("reading length prefix: %v", err)
+	}
+	if _, err := readFull(clientConn, make([]byte, length)); err != nil {
+		t.Fatalf("reading frame: %v", err)
+	}
+	e.OnContainmentAck(&ipc.ContainmentAckMsg{PID: 9999, Level: ipc.ContainmentTerminate, Decision: ipc.ContainmentAckApplied})
+	e.OnContainmentAck(&ipc.ContainmentAckMsg{PID: 4321, Level: ipc.ContainmentNamespace, Decision: ipc.ContainmentAckApplied})
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("an ack for another pid/level was taken as the answer")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Contain did not return in time")
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("killed %v on an unrelated ack", *killed)
+	}
+}
+
+func TestContain_NonTerminateLevelsDoNotWaitForAcks(t *testing.T) {
+	// No ack is ever sent; Namespace must still return promptly.
+	start := time.Now()
+	if err := containAndDrainAck(t, 4321, ipc.ContainmentNamespace, nil); err != nil {
+		t.Fatalf("Contain(Namespace): %v", err)
+	}
+	if time.Since(start) >= ackTimeout {
+		t.Fatal("non-terminate containment waited for an ack")
 	}
 }

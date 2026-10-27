@@ -103,3 +103,25 @@ func TestHandleKill_RejectsNonPost(t *testing.T) {
 		t.Errorf("status = %d, want 405", rec.Code)
 	}
 }
+
+// Every containment the sensor refuses must be observable (CPM.md §2.5); an
+// applied one must not add noise to the audit log.
+func TestOnContainmentAck_AuditsRefusalsOnly(t *testing.T) {
+	cp := newTestControlPlane(t)
+	count := func() int {
+		var n int
+		if err := cp.store.DB().QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'CONTAINMENT_REFUSED_BY_SENSOR'`).Scan(&n); err != nil {
+			t.Fatalf("query audit_log: %v", err)
+		}
+		return n
+	}
+
+	cp.OnContainmentAck(&ipc.ContainmentAckMsg{PID: 10, Level: 4, Decision: ipc.ContainmentAckApplied})
+	if n := count(); n != 0 {
+		t.Fatalf("applied ack audited as a refusal (%d entries)", n)
+	}
+	cp.OnContainmentAck(&ipc.ContainmentAckMsg{PID: 10, Level: 4, Decision: ipc.ContainmentAckCPMProtectedExec})
+	if n := count(); n != 1 {
+		t.Fatalf("refusal audit entries = %d, want 1", n)
+	}
+}

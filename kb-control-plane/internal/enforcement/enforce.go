@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
@@ -25,6 +26,10 @@ type Enforcer struct {
 	// gate (guard.go). Set once by the control plane.
 	cwpMu     sync.RWMutex
 	cwpSource func() []ipc.CWPWorkloadEntry
+
+	// acks matches the sensor's CONTAINMENT_ACK replies to waiting Contain
+	// calls (acks.go).
+	acks *ackTracker
 }
 
 // NewEnforcer builds an Enforcer. store may be nil (comm-based protection
@@ -42,7 +47,7 @@ func NewEnforcer(l *ipc.Listener, s *store.Store) *Enforcer {
 			protected[n] = true
 		}
 	}
-	return &Enforcer{listener: l, store: s, protectedComm: protected}
+	return &Enforcer{listener: l, store: s, protectedComm: protected, acks: newAckTracker()}
 }
 
 // Contain routes an operator-triggered containment request to the C sensor
@@ -74,11 +79,13 @@ func (e *Enforcer) Contain(pid uint32, level uint32, reason string) error {
 	switch level {
 	case ipc.ContainmentNone, ipc.ContainmentCgroup, ipc.ContainmentSeccomp,
 		ipc.ContainmentNamespace, ipc.ContainmentTerminate:
-		// TERMINATE kills, so it must pass CPM and CWP in kbd as well as in
-		// the sensor (the sensor refuses silently and kbd cannot tell). The
-		// target is pinned and checked BEFORE level 4 is sent: a protected
+		// TERMINATE kills, so it must pass CPM and CWP in kbd (guard.go) as
+		// well as in the sensor, whose verdict comes back as an ack (acks.go).
+		// The target is pinned and checked BEFORE level 4 is sent: a protected
 		// process is neither contained at level 4 nor killed.
 		var target terminateTarget
+		var ackCh <-chan uint32
+		var cancelAck func()
 		if level == ipc.ContainmentTerminate {
 			t, err := prepareTerminate(e, pid)
 			if err != nil {
@@ -86,6 +93,13 @@ func (e *Enforcer) Contain(pid uint32, level uint32, reason string) error {
 			}
 			defer t.Close()
 			target = t
+			// Register for the sensor's reply BEFORE sending, so a fast ack
+			// cannot be missed.
+			ackCh, cancelAck, err = e.acks.expect(pid, level)
+			if err != nil {
+				return err
+			}
+			defer cancelAck()
 		}
 		if err := e.listener.SendContainmentCmd(pid, level, reason); err != nil {
 			return fmt.Errorf("enforcement: failed to send containment cmd: %w", err)
@@ -94,12 +108,24 @@ func (e *Enforcer) Contain(pid uint32, level uint32, reason string) error {
 		// sensor records level 4 in contained_pids_map so the LSM hooks deny
 		// everything, and kbd then SIGKILLs the process (see the Level 4
 		// comment in kb-core/ebpf/kbd_sensor.bpf.c). The kill only happens
-		// once the command reached the sensor and the process passed the
-		// gate above, and goes through the pidfd so it hits exactly the
-		// process that was checked. ESRCH means it already exited.
+		// once the process passed the Go-side gate above AND the sensor
+		// reported that it applied level 4 (its own CPM/CWP gates ran and the
+		// map write succeeded). A refusal, a missing ack (timeout, or a
+		// sensor that predates acks) means no kill. The kill goes through the
+		// pidfd so it hits exactly the process that was checked; ESRCH means
+		// it already exited.
 		if target != nil {
+			select {
+			case decision := <-ackCh:
+				if decision != ipc.ContainmentAckApplied {
+					return fmt.Errorf("enforcement: sensor refused terminate of pid %d (%s); not killing", pid, ipc.AckDecisionString(decision))
+				}
+			case <-time.After(ackTimeout):
+				e.acks.markUnresolved(pid)
+				return fmt.Errorf("enforcement: sensor did not acknowledge terminate of pid %d within %s; not killing (fail closed)", pid, ackTimeout)
+			}
 			if err := target.Kill(); err != nil && !errors.Is(err, syscall.ESRCH) {
-				return fmt.Errorf("enforcement: terminate cmd sent but SIGKILL to pid %d failed: %w", pid, err)
+				return fmt.Errorf("enforcement: terminate acknowledged but SIGKILL to pid %d failed: %w", pid, err)
 			}
 		}
 		return nil

@@ -230,6 +230,20 @@ int kb_bridge_send_process_exit(int fd, uint32_t pid, uint64_t exit_time_ns, uin
     return send_framed(fd, &w, sizeof(w));
 }
 
+int kb_bridge_send_containment_ack(int fd, uint32_t pid, uint32_t level, uint32_t decision)
+{
+    struct kb_wire_containment_ack w = {0};
+    w.hdr.magic    = KB_WIRE_MAGIC;
+    w.hdr.version  = KB_WIRE_VERSION;
+    w.hdr.msg_type = KB_WIRE_MSG_CONTAINMENT_ACK;
+
+    w.pid      = pid;
+    w.level    = level;
+    w.decision = decision;
+
+    return send_framed(fd, &w, sizeof(w));
+}
+
 int kb_bridge_send_net_flow(int fd, uint32_t pid, uint32_t daddr, uint16_t dport, uint64_t ts_ns)
 {
     struct kb_wire_net_flow w = {0};

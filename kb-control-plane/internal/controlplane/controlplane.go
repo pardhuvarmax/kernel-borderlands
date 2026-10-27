@@ -536,6 +536,25 @@ func (cp *ControlPlane) OnProcessExit(msg *ipc.ProcessExitMsg) {
 // 0-1 confidence figure for the alert, not a detection threshold itself.
 const maxTimingEntropyForConfidence = 2.3219
 
+// OnContainmentAck receives the sensor's reply to a containment command
+// (wire-protocol.md, msg_type 10). A Contain call waiting on a TERMINATE gets
+// it first; every refusal is also audited, because CPM.md §2.5 requires that
+// each blocked containment be observable (the sensor itself only prints it).
+func (cp *ControlPlane) OnContainmentAck(msg *ipc.ContainmentAckMsg) {
+	waited := cp.enforcer.OnContainmentAck(msg)
+	if msg.Decision == ipc.ContainmentAckApplied {
+		return
+	}
+	reason := ipc.AckDecisionString(msg.Decision)
+	log.Printf("[KB] Sensor did not apply containment level %d to PID %d: %s (awaited=%v)", msg.Level, msg.PID, reason, waited)
+	cp.audit.Log(
+		"CONTAINMENT_REFUSED_BY_SENSOR",
+		fmt.Sprintf("pid=%d level=%d", msg.PID, msg.Level),
+		"SENSOR",
+		reason,
+	)
+}
+
 // OnNetFlow feeds one connect-event sample into the slow-exfiltration/
 // beaconing detector (docs/development/control-aads/
 // dev-exfiltration-detection.md, internal/detection/exfil.go) and raises

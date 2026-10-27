@@ -1,5 +1,7 @@
 package ipc
 
+import "fmt"
+
 // ContainmentCmdMsg mirrors C's `struct kb_wire_containment_cmd` exactly.
 // C side: uint32_t pid; uint32_t level; char reason[64];
 // Total payload size = 4 + 4 + 64 = 72 bytes.
@@ -13,6 +15,54 @@ type ProcessExitMsg struct {
 	PID        uint32
 	ExitTimeNs int64
 	ExitCode   uint32
+}
+
+// ContainmentAckMsg mirrors C's `struct kb_wire_containment_ack`
+// (kb_bridge.h), msg_type 10, sensor -> kbd on kbd.sock: what the sensor did
+// with one containment command. Payload after the 4-byte header is
+// pid(4) + level(4) + decision(4) = 12 bytes.
+type ContainmentAckMsg struct {
+	PID      uint32
+	Level    uint32
+	Decision uint32
+}
+
+// Containment ack decisions — keep in sync with enum kb_ack_decision in
+// kb-core/userspace/bridge/kb_bridge.h.
+const (
+	ContainmentAckApplied          uint32 = 0 // map entry written (level > 0) or removed (level 0)
+	ContainmentAckCPMKernelThread  uint32 = 1
+	ContainmentAckCPMPid1          uint32 = 2
+	ContainmentAckCPMProtectedPID  uint32 = 3
+	ContainmentAckCPMProtectedExec uint32 = 4
+	ContainmentAckCWPPath          uint32 = 5
+	ContainmentAckCWPHash          uint32 = 6
+	ContainmentAckMapUpdateFailed  uint32 = 7
+)
+
+// AckDecisionString names an ack decision for logs, audit entries and errors.
+// Unknown values are reported as such, never as applied.
+func AckDecisionString(d uint32) string {
+	switch d {
+	case ContainmentAckApplied:
+		return "applied"
+	case ContainmentAckCPMKernelThread:
+		return "CPM: kernel thread"
+	case ContainmentAckCPMPid1:
+		return "CPM: PID 1"
+	case ContainmentAckCPMProtectedPID:
+		return "CPM: protected PID"
+	case ContainmentAckCPMProtectedExec:
+		return "CPM: protected executable"
+	case ContainmentAckCWPPath:
+		return "CWP: protected workload (path)"
+	case ContainmentAckCWPHash:
+		return "CWP: protected workload (hash-verified)"
+	case ContainmentAckMapUpdateFailed:
+		return "sensor failed to update contained_pids_map"
+	default:
+		return fmt.Sprintf("unknown decision %d", d)
+	}
 }
 
 // Containment levels — keep in sync with kb_common.h
@@ -40,6 +90,8 @@ const (
 	MsgMagic              uint16 = 0x4B42
 	MsgTypeContainmentCmd byte   = 5
 	MsgTypeProcessExit    byte   = 4
+	// MsgTypeContainmentAck is sensor -> kbd (kbd.sock), unlike msg_type 5.
+	MsgTypeContainmentAck byte = 10
 
 	headerSize     = 4  // magic(2) + version(1) + msgtype(1)
 	cmdPayloadSize = 72 // 4 + 4 + 64
