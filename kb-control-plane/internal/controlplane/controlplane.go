@@ -211,6 +211,8 @@ func New(dbPath, policyPath, rulesPath, workloadsPath, workloadsPubKeyPath strin
 
 	// Enforcer routes containment commands to the C sensor via the control listener.
 	cp.enforcer = enforcement.NewEnforcer(controlListener, s)
+	// Go-side CWP gate for TERMINATE reads the same registry the severity logic uses.
+	cp.enforcer.SetCWPSource(cp.cwpRegistrySnapshot)
 
 	return cp, nil
 }

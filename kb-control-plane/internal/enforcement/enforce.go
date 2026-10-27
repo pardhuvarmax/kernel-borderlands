@@ -5,18 +5,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 )
-
-// killProcess delivers SIGKILL to pid. It is a variable so tests can replace
-// it: the level-4 tests use real-looking PIDs and must never signal a live
-// process on the machine running them.
-var killProcess = func(pid int) error {
-	return syscall.Kill(pid, syscall.SIGKILL)
-}
 
 type Enforcer struct {
 	listener *ipc.Listener
@@ -26,6 +20,11 @@ type Enforcer struct {
 	// does downstream over kbct.sock (BUG-011 — the Go side previously had
 	// no exemption logic of its own, relying entirely on that one hop).
 	protectedComm map[string]bool
+
+	// cwpSource supplies the loaded CWP registry for the Go-side TERMINATE
+	// gate (guard.go). Set once by the control plane.
+	cwpMu     sync.RWMutex
+	cwpSource func() []ipc.CWPWorkloadEntry
 }
 
 // NewEnforcer builds an Enforcer. store may be nil (comm-based protection
@@ -75,18 +74,31 @@ func (e *Enforcer) Contain(pid uint32, level uint32, reason string) error {
 	switch level {
 	case ipc.ContainmentNone, ipc.ContainmentCgroup, ipc.ContainmentSeccomp,
 		ipc.ContainmentNamespace, ipc.ContainmentTerminate:
+		// TERMINATE kills, so it must pass CPM and CWP in kbd as well as in
+		// the sensor (the sensor refuses silently and kbd cannot tell). The
+		// target is pinned and checked BEFORE level 4 is sent: a protected
+		// process is neither contained at level 4 nor killed.
+		var target terminateTarget
+		if level == ipc.ContainmentTerminate {
+			t, err := prepareTerminate(e, pid)
+			if err != nil {
+				return err
+			}
+			defer t.Close()
+			target = t
+		}
 		if err := e.listener.SendContainmentCmd(pid, level, reason); err != nil {
 			return fmt.Errorf("enforcement: failed to send containment cmd: %w", err)
 		}
-		// Level 4 (Terminate) is the userspace half of a belt-and-suspenders
-		// pair: the sensor records level 4 in contained_pids_map so the LSM
-		// hooks deny everything, and kbd then SIGKILLs the process (see the
-		// Level 4 comment in kb-core/ebpf/kbd_sensor.bpf.c). The kill only
-		// happens once the command reached the sensor, so a failed send never
-		// kills a process that was not also contained in the kernel. ESRCH
-		// means the process already exited, which is the outcome we wanted.
-		if level == ipc.ContainmentTerminate {
-			if err := killProcess(int(pid)); err != nil && !errors.Is(err, syscall.ESRCH) {
+		// Level 4 is the userspace half of a belt-and-suspenders pair: the
+		// sensor records level 4 in contained_pids_map so the LSM hooks deny
+		// everything, and kbd then SIGKILLs the process (see the Level 4
+		// comment in kb-core/ebpf/kbd_sensor.bpf.c). The kill only happens
+		// once the command reached the sensor and the process passed the
+		// gate above, and goes through the pidfd so it hits exactly the
+		// process that was checked. ESRCH means it already exited.
+		if target != nil {
+			if err := target.Kill(); err != nil && !errors.Is(err, syscall.ESRCH) {
 				return fmt.Errorf("enforcement: terminate cmd sent but SIGKILL to pid %d failed: %w", pid, err)
 			}
 		}

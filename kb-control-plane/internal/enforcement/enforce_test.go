@@ -13,25 +13,47 @@ import (
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/store"
 )
 
-// TestMain replaces killProcess for the whole package so no test can ever
-// SIGKILL a real PID (several tests contain made-up PIDs at level 4).
+// fakeTarget stands in for a pinned process so tests never signal a real PID.
+type fakeTarget struct {
+	pid    uint32
+	result error
+	killed *[]int
+}
+
+func (f fakeTarget) Kill() error { *f.killed = append(*f.killed, int(f.pid)); return f.result }
+func (f fakeTarget) Close()      {}
+
+// TestMain replaces prepareTerminate for the whole package so no test can
+// ever SIGKILL a real PID (several tests contain made-up PIDs at level 4).
 func TestMain(m *testing.M) {
-	killProcess = func(int) error { return nil }
+	var sink []int
+	prepareTerminate = func(_ *Enforcer, pid uint32) (terminateTarget, error) {
+		return fakeTarget{pid: pid, killed: &sink}, nil
+	}
 	os.Exit(m.Run())
 }
 
-// stubKill swaps killProcess for the duration of one test and returns the
-// PIDs it was asked to kill.
+// stubKill swaps prepareTerminate for one test: the gate passes, Kill
+// records the PID and returns result. It returns the recorded PIDs.
 func stubKill(t *testing.T, result error) *[]int {
 	t.Helper()
-	var killed []int
-	prev := killProcess
-	killProcess = func(pid int) error {
-		killed = append(killed, pid)
-		return result
+	killed := new([]int)
+	prev := prepareTerminate
+	prepareTerminate = func(_ *Enforcer, pid uint32) (terminateTarget, error) {
+		return fakeTarget{pid: pid, result: result, killed: killed}, nil
 	}
-	t.Cleanup(func() { killProcess = prev })
-	return &killed
+	t.Cleanup(func() { prepareTerminate = prev })
+	return killed
+}
+
+// stubGateRefuses makes the Go-side CPM/CWP gate refuse every TERMINATE.
+func stubGateRefuses(t *testing.T) {
+	t.Helper()
+	prev := prepareTerminate
+	prepareTerminate = func(_ *Enforcer, pid uint32) (terminateTarget, error) {
+		return nil, refuse("CPM", pid, "Protected Executable /usr/lib/systemd/systemd-logind")
+	}
+	t.Cleanup(func() { prepareTerminate = prev })
 }
 
 // newListenerWithConn builds an *ipc.Listener wired to a net.Pipe() server
@@ -413,5 +435,31 @@ func TestContain_TerminateKillFailureIsReported(t *testing.T) {
 	err := containAndDrain(t, 4321, ipc.ContainmentTerminate)
 	if err == nil || !strings.Contains(err.Error(), "SIGKILL") {
 		t.Fatalf("got %v, want an error mentioning SIGKILL", err)
+	}
+}
+
+// --- The Go-side gate stops the kill and the level-4 command ---
+
+func TestContain_TerminateRefusedByGateSendsNothingAndKillsNothing(t *testing.T) {
+	stubGateRefuses(t)
+	l, clientConn, cleanup := newListenerWithConn(t)
+	defer cleanup()
+	e := NewEnforcer(l, nil)
+
+	err := e.Contain(4321, ipc.ContainmentTerminate, "test")
+	if err == nil || !strings.Contains(err.Error(), "CPM") {
+		t.Fatalf("got %v, want a CPM refusal", err)
+	}
+	// Nothing may have been written to the sensor.
+	clientConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	if n, _ := clientConn.Read(make([]byte, 1)); n != 0 {
+		t.Fatal("a refused TERMINATE still sent a containment frame to the sensor")
+	}
+}
+
+func TestContain_GateDoesNotApplyToOtherLevels(t *testing.T) {
+	stubGateRefuses(t) // would refuse any TERMINATE; other levels never call it
+	if err := containAndDrain(t, 4321, ipc.ContainmentNamespace); err != nil {
+		t.Fatalf("Contain(Namespace): %v", err)
 	}
 }
