@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this work, please cite the research paper below."
+title: "Kernel Borderlands: An eBPF-Based Behavioral Detection and Multi-Agent Containment Architecture for Linux Server Workloads"
+type: article
+authors:
+
+- family-names: "Konduru"
+  given-names: "Pardhu Sri Rushi Varma"
+  orcid: "https://orcid.org/0009-0005-3251-9944"
+- family-names: "Kandukoori"
+  given-names: "Tejaswini"
+- family-names: "Kanne"
+  given-names: "Karthik"
+- family-names: "Karedla"
+  given-names: "Rupa Yeshvitha"
+  doi: "10.20944/preprints202610.2818.v1"
+  url: "https://doi.org/10.20944/preprints202610.2818.v1"
+  repository-code: "https://github.com/pardhuvarmax/kernel-borderlands"
+  date-released: "2026-10-28"
+  year: 2026
+  month: 10
+  publisher: "Preprints"
