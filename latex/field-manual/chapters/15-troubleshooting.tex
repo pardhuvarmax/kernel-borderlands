@@ -16,6 +16,9 @@ $ ss -ltnp | grep -E ':(8080|8082|2222|8601)\b'
 \toprule
 \textbf{Symptom} & \textbf{Cause and fix}\\
 \midrule
+\texttt{kb-sensor} journal is nearly empty and the per-event lines the older manual showed are missing & Intended since 1.1.0: per-event output is off by default (it flooded the journal). A summary line is logged every 30~s. Set \texttt{KB\_SENSOR\_VERBOSE=1} (\texttt{systemctl edit kb-sensor}) to get per-event lines, capped at 200/s.\\
+Journal shows \texttt{[SENSOR][CRITICAL] activity by the sensor process itself} & Treat as an incident. The sensor does not normally open sensitive files, connect out, exec, change credentials or map executable memory; this line means one of those happened inside the sensor process (possible hijack). It is limited to 5 lines/s; the 30~s summary counts the rest. Its own syscall samples are skipped in the kernel and are not an alarm.\\
+\texttt{kb-sensor} shows \texttt{failed (start-limit-hit)} after crashing & Restarts are bounded to 5 per 120~s on purpose, so a crash loop cannot keep reopening a visibility gap. Find the cause in \texttt{journalctl -u kb-sensor}, then \texttt{sudo systemctl reset-failed kb-sensor \&\& sudo systemctl start kb-sensor}.\\
 \texttt{kbd} sits in \texttt{activating (start)} forever; sensor says ``Dependency failed'' & \texttt{kbd.service} is \texttt{Type=notify} and never got \texttt{READY=1}. Fixed in this release (kbd notifies after its sockets exist). If you see it, you are running an old \cmd{kbd}.\\
 \texttt{unable to open database file} crash loop & \file{/var/lib/kbd} missing. The unit now sets \texttt{StateDirectory=kbd}; an old unit does not.\\
 \texttt{dial unix /run/kb/kba.sock: no such file} from \cmd{kbctl} & \cmd{kbd} is not running (\file{/run/kb} is removed when it stops). \texttt{sudo kbctl up}.\\

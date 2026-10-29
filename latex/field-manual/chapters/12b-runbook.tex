@@ -151,7 +151,14 @@ $ ss -ltn | grep -E ':(8080|8082|2222)\b'
 \begin{lstlisting}[style=console]
 $ sudo journalctl -f -u kb-sensor -u kbd
 \end{lstlisting}
-You will see a stream of \texttt{[process\_exec]}, \texttt{[process\_exit]} and \texttt{[privilege\_change]} lines from the sensor.
+Since 1.1.0 the sensor is \emph{quiet by default}: it logs startup, the occasional state transition, and one summary line every 30 seconds
+(events seen, lines suppressed, its own syscalls skipped in the kernel, critical self-activity). It no longer prints one line per event: on a busy
+host that flooded the journal. To see the old per-event stream while demonstrating, turn it on (it is capped at 200 lines per second):
+\begin{lstlisting}[style=console]
+$ sudo systemctl edit kb-sensor      # add:  [Service]  Environment=KB_SENSOR_VERBOSE=1
+$ sudo systemctl restart kb-sensor
+\end{lstlisting}
+Remove the override afterwards. With it on you will see \texttt{[process\_exec]}, \texttt{[process\_exit]} and \texttt{[privilege\_change]} lines.
 \verified
 \step{In Terminal A, show the live counters}
 \begin{lstlisting}[style=console]
@@ -165,13 +172,14 @@ Reading a credential file is something the sensor always flags. Do it from Termi
 \begin{lstlisting}[style=console]
 $ sudo cat /etc/shadow > /dev/null
 \end{lstlisting}
-In Terminal B you should see lines like these (observed during the VM test, produced by \cmd{sudo} itself):
+In Terminal B you should see lines like these (observed on the VM with the 1.1.0 defaults, produced by \cmd{sudo} and \cmd{cat} themselves):
 \begin{lstlisting}[style=console]
-kbd_sensor: [file_access] PID=28539 UID=1000 COMM=sudo file=/etc/shadow SENSITIVE
-kbd_sensor: [BEHAVIOR ENGINE] PID=28539 COMM=sudo State transition: OBSERVED -> SUSPICIOUS (Reason: CRED_FILE_ACCESS ...)
-kbd: [KB] Zone PID=28555 SAFE->SUSPICIOUS score=9.8
-kbd: [AUDIT] ZONE_SAFE_TO_SUSPICIOUS | pid=28555 ... score=9.81 ...
+[BEHAVIOR ENGINE] PID=60970 COMM=sudo State transition: OBSERVED -> SUSPICIOUS (Reason: CRED_FILE_ACCESS, ...)
+[BEHAVIOR ENGINE] PID=60972 COMM=cat  State transition: OBSERVED -> SUSPICIOUS (Reason: CRED_FILE_ACCESS, ...)
+[KB] Zone PID=60970 COMM= SAFE->SUSPICIOUS score=18.0
+[AUDIT] ZONE_SAFE_TO_SUSPICIOUS | pid=60970 comm= score=18.03 ...
 \end{lstlisting}
+The raw \texttt{[file\_access] ... file=/etc/shadow} line appears only with \texttt{KB\_SENSOR\_VERBOSE=1}.
 \verified\ Say what happened: the kernel hook saw the file open, the behavior engine moved the process to a higher state, and
 \cmd{kbd} recorded the zone change in the tamper-evident audit log. This is a \emph{detection}, not a block: containment is an operator
 decision (Phase 6).
