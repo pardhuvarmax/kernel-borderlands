@@ -72,6 +72,9 @@ type ControlPlane struct {
 	telemetryListener *ipc.Listener
 	controlListener   *ipc.Listener
 
+	// observeOnly: see autoContain.
+	observeOnly bool
+
 	// comm cache — pid → comm (populated by ProcessState messages)
 	commCache sync.Map
 
@@ -168,6 +171,7 @@ func New(dbPath, policyPath, rulesPath, workloadsPath, workloadsPubKeyPath strin
 	// Build cp first (handler must exist before NewListener so it can be
 	// passed as the MessageHandler), then wire the enforcer to the listener.
 	cp := &ControlPlane{
+		observeOnly:    os.Getenv("KB_OBSERVE_ONLY") == "1",
 		store:          s,
 		audit:          audit.New(s.DB()),
 		policy:         p,
@@ -287,6 +291,9 @@ func (cp *ControlPlane) Start(httpAddr, grpcSocketPath string) error {
 		log.Printf("[KB] WARNING: audit log hash chain is BROKEN (verified %d entries before break: %v) — audit_log may have been tampered with", count, err)
 	}
 
+	if cp.observeOnly {
+		log.Println("[KB] WARNING: KB_OBSERVE_ONLY=1 — policy-driven containment (BORDERLANDS throttle, auto_terminate, exfil auto-namespace) is DISABLED; detections are audited as OBSERVE_ONLY_WOULD_*. Operator and agent containment still work. Unset it for normal protection.")
+	}
 	log.Println("[KB] Control plane ready")
 	return nil
 }
@@ -639,11 +646,32 @@ func (cp *ControlPlane) OnNetFlow(msg *ipc.NetFlowMsg) {
 	autoNamespace := cp.policy.AutoNamespaceOnExfilBeacon(comm)
 	cp.policyMu.RUnlock()
 	if autoNamespace {
-		cp.enforcer.Contain(msg.PID, uint32(pb.ContainmentLevel_NAMESPACE), "exfil:beaconing_detected")
-		cp.audit.Log("NAMESPACE_CONTAIN",
-			fmt.Sprintf("pid=%d comm=%s", msg.PID, comm),
-			"SYSTEM_AUTO", "policy:auto_namespace_on_exfil_beacon=true")
+		cp.autoContain(msg.PID, comm, pb.ContainmentLevel_NAMESPACE, "exfil:beaconing_detected",
+			"NAMESPACE_CONTAIN", "policy:auto_namespace_on_exfil_beacon=true")
 	}
+}
+
+// observeOnly is set by KB_OBSERVE_ONLY=1 (read once in New). In that mode kbd
+// still scores, alerts and audits, but applies NO policy-driven containment:
+// the zone-BORDERLANDS CGROUP throttle, policy auto_terminate and the
+// exfil auto-NAMESPACE are replaced by an OBSERVE_ONLY_WOULD_<ACTION> audit
+// entry. Explicit calls (operator SetContainment/dashboard/kbctl and agent
+// SubmitAgentDecision) are NOT affected. Intended for lab telemetry capture,
+// where automatic response would truncate the behaviour being recorded, and as
+// the "shadow" stage before enabling a learned policy.
+//
+// autoContain applies one policy-driven containment (or, observe-only, records
+// that it would have) and writes the matching audit entry. The audit entry
+// names what actually happened: it never claims a throttle in observe-only mode.
+func (cp *ControlPlane) autoContain(pid uint32, comm string, level pb.ContainmentLevel, reason, auditAction, auditReason string) {
+	subject := fmt.Sprintf("pid=%d comm=%s", pid, comm)
+	if cp.observeOnly {
+		cp.audit.Log("OBSERVE_ONLY_WOULD_"+auditAction, subject, "SYSTEM_AUTO",
+			fmt.Sprintf("%s (level=%s, not applied: KB_OBSERVE_ONLY=1)", auditReason, level))
+		return
+	}
+	cp.enforcer.Contain(pid, uint32(level), reason)
+	cp.audit.Log(auditAction, subject, "SYSTEM_AUTO", auditReason)
 }
 
 func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
@@ -709,15 +737,11 @@ func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
 		autoTerminate := cp.policy.AutoTerminate(comm)
 		cp.policyMu.RUnlock()
 		if autoTerminate {
-			cp.enforcer.Contain(msg.PID, uint32(pb.ContainmentLevel_TERMINATE), "policy:auto_terminate=true")
-			cp.audit.Log("AUTO_TERMINATE",
-				fmt.Sprintf("pid=%d comm=%s", msg.PID, comm),
-				"SYSTEM_AUTO", "policy:auto_terminate=true")
+			cp.autoContain(msg.PID, comm, pb.ContainmentLevel_TERMINATE, "policy:auto_terminate=true",
+				"AUTO_TERMINATE", "policy:auto_terminate=true")
 		} else {
-			cp.enforcer.Contain(msg.PID, uint32(pb.ContainmentLevel_CGROUP), "zone=BORDERLANDS")
-			cp.audit.Log("CGROUP_THROTTLE",
-				fmt.Sprintf("pid=%d comm=%s", msg.PID, comm),
-				"SYSTEM_AUTO", "zone=BORDERLANDS")
+			cp.autoContain(msg.PID, comm, pb.ContainmentLevel_CGROUP, "zone=BORDERLANDS",
+				"CGROUP_THROTTLE", "zone=BORDERLANDS")
 		}
 	}
 

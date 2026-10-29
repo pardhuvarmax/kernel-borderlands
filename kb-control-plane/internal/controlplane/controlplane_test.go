@@ -2,7 +2,10 @@ package controlplane
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/enforcement"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -10,10 +13,10 @@ import (
 	"testing"
 	"time"
 
+	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
-	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/test/bufconn"
 
@@ -663,5 +666,122 @@ func TestOnProcessState_EmitsFeatureSchemaV1(t *testing.T) {
 		if got := ev.Metadata["dim_"+name]; got != want {
 			t.Errorf("dim_%s = %q, want %q", name, got, want)
 		}
+	}
+}
+
+// --- observe-only mode (KB_OBSERVE_ONLY=1): policy-driven containment is
+// replaced by an OBSERVE_ONLY_WOULD_* audit entry; normal mode is unchanged. ---
+
+func enterBorderlands(t *testing.T, observeOnly bool) (*ControlPlane, chan []byte) {
+	t.Helper()
+	cp := newTestControlPlane(t)
+	cp.observeOnly = observeOnly
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close(); client.Close() })
+	l, _ := ipc.NewTestListener(server)
+	cp.enforcer = enforcement.NewEnforcer(l, cp.store)
+	cp.store.UpsertProcessState(&ipc.ProcessStateMsg{PID: 777, Comm: "evil", StartTimeNs: 100})
+
+	got := make(chan []byte, 1)
+	go func() {
+		buf := make([]byte, 4+4+4+4+64)
+		if _, err := io.ReadFull(client, buf); err == nil {
+			got <- buf
+		}
+	}()
+	cp.OnZoneTransition(&ipc.ZoneTransitionMsg{
+		PID: 777, StartTimeNs: 100, FromZone: ipc.ZoneSuspicious, ToZone: ipc.ZoneBorderlands, Score: 90, TsNs: 5})
+	return cp, got
+}
+
+func auditActions(t *testing.T, cp *ControlPlane) []string {
+	t.Helper()
+	rows, err := cp.store.DB().Query(`SELECT action FROM audit_log ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var a string
+		rows.Scan(&a)
+		out = append(out, a)
+	}
+	return out
+}
+
+func hasAction(actions []string, want string) bool {
+	for _, a := range actions {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBorderlandsEntry_NormalModeThrottlesAndAudits(t *testing.T) {
+	cp, got := enterBorderlands(t, false)
+	select {
+	case f := <-got:
+		if lvl := binary.LittleEndian.Uint32(f[12:16]); lvl != uint32(ipc.ContainmentCgroup) {
+			t.Errorf("sensor got level %d, want CGROUP", lvl)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("normal mode must send the CGROUP throttle to the sensor")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !hasAction(auditActions(t, cp), "CGROUP_THROTTLE") {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if a := auditActions(t, cp); !hasAction(a, "CGROUP_THROTTLE") {
+		t.Errorf("want CGROUP_THROTTLE audited, got %v", a)
+	}
+}
+
+func TestBorderlandsEntry_ObserveOnlyAppliesNothingAndSaysSo(t *testing.T) {
+	cp, got := enterBorderlands(t, true)
+	select {
+	case <-got:
+		t.Fatal("observe-only must NOT send any containment to the sensor")
+	case <-time.After(500 * time.Millisecond):
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !hasAction(auditActions(t, cp), "OBSERVE_ONLY_WOULD_CGROUP_THROTTLE") {
+		time.Sleep(20 * time.Millisecond)
+	}
+	a := auditActions(t, cp)
+	if !hasAction(a, "OBSERVE_ONLY_WOULD_CGROUP_THROTTLE") {
+		t.Errorf("want OBSERVE_ONLY_WOULD_CGROUP_THROTTLE audited, got %v", a)
+	}
+	if hasAction(a, "CGROUP_THROTTLE") {
+		t.Errorf("observe-only must never audit a throttle as applied, got %v", a)
+	}
+}
+
+// Explicit operator containment is unaffected by observe-only mode.
+func TestObserveOnly_DoesNotBlockExplicitOperatorContainment(t *testing.T) {
+	cp := newTestControlPlane(t)
+	cp.observeOnly = true
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	l, _ := ipc.NewTestListener(server)
+	cp.enforcer = enforcement.NewEnforcer(l, cp.store)
+	cp.store.UpsertProcessState(&ipc.ProcessStateMsg{PID: 31, Comm: "x"})
+	got := make(chan struct{}, 1)
+	go func() {
+		buf := make([]byte, 4+4+4+4+64)
+		if _, err := io.ReadFull(client, buf); err == nil {
+			got <- struct{}{}
+		}
+	}()
+	resp, err := cp.SetContainment(context.Background(), &pb.ContainmentRequest{Pid: 31, Level: pb.ContainmentLevel_CGROUP, Reason: "operator"})
+	if err != nil || !resp.Success {
+		t.Fatalf("SetContainment: %+v %v", resp, err)
+	}
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("explicit containment must still reach the sensor in observe-only mode")
 	}
 }

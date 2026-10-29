@@ -40,6 +40,10 @@ Candidate features that do **not** exist in the sensor yet (implement before add
 6. **Serve through the real path.** Export the model with `feature_schema.json` (`schema.write_schema`), run the offline evaluation through the same `build_vector` + agent inference code the swarm uses, and include the `score=92 / BORDERLANDS` case. A score of 92 does not by itself imply TERMINATE; the test checks the decision is evidence-based and proportionate (root, dimension mix, telemetry gap, process criticality), not one fixed output.
 7. **Shadow mode.** Run the learned policy beside the deterministic one, log both decisions and disagreements (audited, no enforcement), then isolated-VM enforcement tests with rollback.
 
+## 4b. Capture tooling and observe-only mode (implemented)
+
+`scripts/attack-lab/` (`runner.py`, `payloads.py`, `capture.py`, `labeling.py`; see its README) produces the corpus described above. Captures must run with `kbd` in **observe-only** mode (`KB_OBSERVE_ONLY=1`): automatic containment would truncate the attacks and bias the data toward already-contained behaviour. The same mode is the "shadow" stage later: the learned policy runs, `kbd` audits `OBSERVE_ONLY_WOULD_*`, nothing is enforced. Not yet done: the sensor does not yet export per-window drop counts per process (`telemetry_gap` is derived from stream gaps and missing dimensions only), the candidate features listed in section 3 do not exist yet, and no full corpus has been captured.
+
 ## 5. Gates before `policy.use_learned: true`
 
 Evaluated on independent executions/scenarios, with confidence intervals and repeated trials, against deterministic and supervised baselines:
