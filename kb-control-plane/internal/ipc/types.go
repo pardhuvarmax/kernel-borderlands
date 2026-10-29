@@ -18,7 +18,7 @@ type ProcessExitMsg struct {
 }
 
 // ContainmentAckMsg mirrors C's `struct kb_wire_containment_ack`
-// (kb_bridge.h), msg_type 10, sensor -> kbd on kbd.sock: what the sensor did
+// (kb_bridge.h), msg_type 10, sensor -> kbd on kbct.sock (the control connection the command arrived on; accepted on kbd.sock too for older sensors): what the sensor did
 // with one containment command. Payload after the 4-byte header is
 // pid(4) + level(4) + decision(4) = 12 bytes.
 type ContainmentAckMsg struct {
@@ -90,7 +90,7 @@ const (
 	MsgMagic              uint16 = 0x4B42
 	MsgTypeContainmentCmd byte   = 5
 	MsgTypeProcessExit    byte   = 4
-	// MsgTypeContainmentAck is sensor -> kbd (kbd.sock), unlike msg_type 5.
+	// MsgTypeContainmentAck is sensor -> kbd (kbct.sock, kbd.sock for older sensors), unlike msg_type 5.
 	MsgTypeContainmentAck byte = 10
 
 	headerSize     = 4  // magic(2) + version(1) + msgtype(1)

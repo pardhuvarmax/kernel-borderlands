@@ -8,6 +8,7 @@ from agents.containment import ContainmentAgent
 from agents.executor import ExecutorAgent
 from agents.militia import MilitiaSquadLeadAgent
 from agents.signal_relay import SignalRelayAgent
+from agents.ingest import IngestAgent
 from consensus.jje import JudgeAgent
 from swarm.registry import SwarmRegistry
 
@@ -40,6 +41,7 @@ class RaySwarmOrchestrator:
         self.agents = {}
         self.agent_counter = 0
         self.judge = None
+        self.ingest = None
         self.executor = None
         self.grpc_socket = None
         # SwarmRegistry backs JJE's courthouse oversight (see
@@ -67,7 +69,8 @@ class RaySwarmOrchestrator:
         return agent_actor
 
     async def start_swarm(self, config: dict, grpc_socket: str = "/run/kb/kba.sock", jury_pool_size: int = 5,
-                           patroller_suspicious_threshold: float = 40.0):
+                           patroller_suspicious_threshold: float = 40.0, ingest_enabled: bool = True,
+                           use_learned_policy: bool = False):
         # Executor and Judge are singletons — JJE consensus routes through
         # one gateway back to kb-control-plane. Jury actors are spawned
         # dynamically per round by JudgeAgent.coordinate_consensus (see
@@ -86,16 +89,32 @@ class RaySwarmOrchestrator:
         # Executor/Judge above, just for a non-singleton role. Config
         # dict iteration order (from agents.yaml) is not trusted for this.
         remaining = dict(config)
+        # Containment agents first: Hunters ask them for the PPO level.
+        containment_count = remaining.pop("containment", 0)
+        containment_pool = [self.spawn_agent(AgentRole.CONTAINMENT) for _ in range(containment_count)]
+
         hunter_count = remaining.pop("hunter", 0)
-        hunter_pool = [self.spawn_agent(AgentRole.HUNTER) for _ in range(hunter_count)]
+        hunter_pool = [
+            self.spawn_agent(AgentRole.HUNTER, judge=self.judge, containment_pool=containment_pool,
+                             state_socket=grpc_socket, use_learned_policy=use_learned_policy)
+            for _ in range(hunter_count)
+        ]
 
         patroller_count = remaining.pop("patroller", 0)
+        patroller_pool = []
         for _ in range(patroller_count):
-            self.spawn_agent(
+            patroller_pool.append(self.spawn_agent(
                 AgentRole.PATROLLER,
                 hunter_pool=hunter_pool,
                 suspicious_threshold=patroller_suspicious_threshold,
-            )
+            ))
+
+        # The live feed (kbd StreamEvents -> Patrollers). Only when there is
+        # someone to feed; a bare ingest agent would stream into the void.
+        if patroller_pool and ingest_enabled:
+            self.ingest = IngestAgent.remote("ingest-1", patrollers=patroller_pool, socket_path=grpc_socket)
+            self.agents["ingest-1"] = self.ingest
+            self.registry.register.remote("ingest-1", "ingest", self.ingest)
 
         # Signal relays route to the hunter pool by name — the one
         # concrete route wired up today (see agents/signal_relay.py's

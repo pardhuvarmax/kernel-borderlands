@@ -2,9 +2,9 @@
 #
 # Builds from the surrounding working tree (no tarball), so run from here:
 #   cd packaging/arch && makepkg -f
-# -> kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst
+# -> kernel-borderlands-1.1.0-1-x86_64.pkg.tar.zst
 pkgname=kernel-borderlands
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
 pkgdesc='Kernel-level runtime defense framework: eBPF sensor, Go control plane, SSH TUI and web dashboard'
 arch=('x86_64')

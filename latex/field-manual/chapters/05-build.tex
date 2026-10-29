@@ -44,23 +44,23 @@ CHANGELOG.md  Makefile  kb-aads  kb-checker  kb-control-plane  kb-core  kb-op  p
 \begin{lstlisting}[style=console]
 $ cd packaging/arch
 $ makepkg -f
-==> Making package: kernel-borderlands 1.0.0-1
+==> Making package: kernel-borderlands 1.1.0-1
 ==> Starting build()...
 [Stage-1/5] Build C-based low-level eBPF core library bindings
 [Stage-2/5] Build the main Go system daemon (kbd) into the root bin/
 ...
 ==> Starting package()...
 ==> Creating package "kernel-borderlands"...
-==> Finished making: kernel-borderlands 1.0.0-1
+==> Finished making: kernel-borderlands 1.1.0-1
 \end{lstlisting}
 The first build compiles the Go standard library (\texttt{-a}) and every Rust dependency; expect several
 minutes. Later builds are incremental.
 
 \step{Locate and fingerprint the artifact}
 \begin{lstlisting}[style=console]
-$ ls -l kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst
--rw-r--r-- 1 you you 25211681 ... kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst
-$ sha256sum kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst
+$ ls -l kernel-borderlands-1.1.0-1-x86_64.pkg.tar.zst
+-rw-r--r-- 1 you you 25211681 ... kernel-borderlands-1.1.0-1-x86_64.pkg.tar.zst
+$ sha256sum kernel-borderlands-1.1.0-1-x86_64.pkg.tar.zst
 \end{lstlisting}
 
 \subsection{Why the PKGBUILD is unusual}
@@ -140,16 +140,16 @@ Stage 5 runs \texttt{npm ci} automatically when \file{kb-op/kb-dashboard/node_mo
 \begin{lstlisting}[style=console]
 $ packaging/deb/build-deb.sh
 make install-pkg PREFIX=/usr DESTDIR=.../dist/deb-stage
-dpkg-deb: building package 'kernel-borderlands' in '.../dist/kernel-borderlands_1.0.0_amd64.deb'.
-built .../dist/kernel-borderlands_1.0.0_amd64.deb
+dpkg-deb: building package 'kernel-borderlands' in '.../dist/kernel-borderlands_1.1.0_amd64.deb'.
+built .../dist/kernel-borderlands_1.1.0_amd64.deb
 \end{lstlisting}
 Set \texttt{VERSION=0.1.1 packaging/deb/build-deb.sh} to change the version string.
 
 \step{Fingerprint the artifact}
 \begin{lstlisting}[style=console]
-$ ls -l dist/kernel-borderlands_1.0.0_amd64.deb
--rw-r--r-- 1 you you 20802812 ... kernel-borderlands_1.0.0_amd64.deb
-$ sha256sum dist/kernel-borderlands_1.0.0_amd64.deb
+$ ls -l dist/kernel-borderlands_1.1.0_amd64.deb
+-rw-r--r-- 1 you you 20802812 ... kernel-borderlands_1.1.0_amd64.deb
+$ sha256sum dist/kernel-borderlands_1.1.0_amd64.deb
 \end{lstlisting}
 
 \subsection{What \cmd{build-deb.sh} guards against}
@@ -168,7 +168,7 @@ Never install a package you have not looked inside. These four checks take secon
 \step{List the contents}
 \ifarch
 \begin{lstlisting}[style=console]
-$ pacman -Qlp kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst | grep -v '/aads/'
+$ pacman -Qlp kernel-borderlands-1.1.0-1-x86_64.pkg.tar.zst | grep -v '/aads/'
 kernel-borderlands /etc/kb/agents.yaml
 kernel-borderlands /etc/kb/policy.yaml
 ...
@@ -179,7 +179,7 @@ kernel-borderlands /usr/lib/systemd/system/kbd.service
 \end{lstlisting}
 \else
 \begin{lstlisting}[style=console]
-$ dpkg-deb -c kernel-borderlands_1.0.0_amd64.deb | grep -v '/aads/'
+$ dpkg-deb -c kernel-borderlands_1.1.0_amd64.deb | grep -v '/aads/'
 -rw-r----- root/root  ./etc/kb/policy.yaml
 -rwxr-xr-x root/root  ./usr/bin/kbctl
 -rwxr-xr-x root/root  ./usr/bin/kbd
@@ -190,17 +190,17 @@ $ dpkg-deb -c kernel-borderlands_1.0.0_amd64.deb | grep -v '/aads/'
 \step{Read the metadata}
 \ifarch
 \begin{lstlisting}[style=console]
-$ pacman -Qip kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst
+$ pacman -Qip kernel-borderlands-1.1.0-1-x86_64.pkg.tar.zst
 Name            : kernel-borderlands
-Version         : 1.0.0-1
+Version         : 1.1.0-1
 Depends On      : glibc  systemd  openssh  libelf  zlib
 Installed Size  : 61.10 MiB
 \end{lstlisting}
 \else
 \begin{lstlisting}[style=console]
-$ dpkg-deb -I kernel-borderlands_1.0.0_amd64.deb
+$ dpkg-deb -I kernel-borderlands_1.1.0_amd64.deb
  Package: kernel-borderlands
- Version: 1.0.0
+ Version: 1.1.0
  Architecture: amd64
  Depends: libc6, systemd, openssh-server, libelf1t64 | libelf1, zlib1g
 \end{lstlisting}

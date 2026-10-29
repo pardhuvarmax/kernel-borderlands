@@ -58,7 +58,7 @@ further hooks (\texttt{process\_vm\_writev}, \texttt{security\_capable}, \texttt
 \begin{lstlisting}[style=console]
 arch$ sudo pacman -S --needed base-devel go rust clang bpf libbpf nodejs npm libelf zlib
 arch$ cd packaging/arch && makepkg -f
-arch$ sudo pacman -U kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst
+arch$ sudo pacman -U kernel-borderlands-1.1.0-1-x86_64.pkg.tar.zst
 \end{lstlisting}
 \section{Build the Ubuntu package}
 \begin{lstlisting}[style=console]
@@ -66,7 +66,7 @@ ubuntu$ sudo apt install -y build-essential clang llvm libelf-dev zlib1g-dev lib
           nodejs npm golang-go linux-tools-common linux-tools-$(uname -r)
 ubuntu$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh && . ~/.cargo/env
 ubuntu$ make build && packaging/deb/build-deb.sh
-ubuntu$ sudo apt install ./dist/kernel-borderlands_1.0.0_amd64.deb
+ubuntu$ sudo apt install ./dist/kernel-borderlands_1.1.0_amd64.deb
 \end{lstlisting}
 \section{Differences in one table}
 \begin{center}\small

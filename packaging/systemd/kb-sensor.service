@@ -9,6 +9,11 @@ Description=Kernel Borderlands eBPF Sensor (kbd_sensor) - Ring 0 Telemetry Loade
 # kbd_sensor, it just binds kbd.sock first so kbd_sensor has something to
 # connect to. This unit is what actually loads the eBPF hooks into the
 # kernel; without it, "the boot sequence" never runs the sensor at all.
+# Bounded restarts: 5 starts per 120 s, then the unit stays failed (visible in
+# `systemctl status`) instead of flapping forever and re-opening a visibility
+# gap on every cycle. Reset with `systemctl reset-failed kb-sensor`.
+StartLimitIntervalSec=120
+StartLimitBurst=5
 After=kbd.service
 Requires=kbd.service
 DefaultDependencies=no
@@ -17,7 +22,13 @@ DefaultDependencies=no
 Type=simple
 ExecStart=/usr/local/bin/kbd_sensor
 Restart=always
-RestartSec=3
+RestartSec=5
+# Backstop against log feedback (the sensor's output must never be able to
+# starve journald again): cap this unit's journal lines regardless of what the
+# sensor prints. The sensor itself is quiet by default (KB_SENSOR_VERBOSE=1
+# turns per-event lines on, rate-capped).
+LogRateLimitIntervalSec=10s
+LogRateLimitBurst=200
 
 # No hardening beyond the universally-safe directives below: loading eBPF
 # programs and attaching LSM hooks needs CAP_BPF/CAP_PERFMON/CAP_SYS_ADMIN

@@ -56,14 +56,14 @@ class PatrollerAgent(BaseAgent):
         self.monitored_pids[pid] = score
 
         if score >= self.suspicious_threshold and pid not in self._escalated_pids:
-            await self._escalate(pid, score)
+            await self._escalate(pid, score, message)
         elif score < self.suspicious_threshold and pid in self._escalated_pids:
             # Score dropped back below threshold — allow a future
             # re-crossing to escalate again instead of being permanently
             # silenced for this PID.
             self._escalated_pids.discard(pid)
 
-    async def _escalate(self, pid: int, score: float):
+    async def _escalate(self, pid: int, score: float, message: dict = None):
         self._escalated_pids.add(pid)
         self.state.last_action = f"Escalating PID {pid} (score={score:.1f}) to Hunter"
         if self._hunter_cycle is None:
@@ -75,4 +75,6 @@ class PatrollerAgent(BaseAgent):
             "to_zone": "SUSPICIOUS",
             "pid": pid,
             "score": score,
+            # Context the live ingest path knows; absent in synthetic callers.
+            **{k: message[k] for k in ("comm", "zone", "zone_id", "uid") if message and k in message},
         })

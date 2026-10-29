@@ -26,8 +26,8 @@ copied onto a host.
 
 | Target | Build on | Command | Output |
 | --- | --- | --- | --- |
-| Ubuntu / Debian | the target distro (glibc must not be newer than the target's) | `make build && packaging/deb/build-deb.sh` | `dist/kernel-borderlands_1.0.0_amd64.deb` |
-| Arch | Arch | `cd packaging/arch && makepkg -f` | `packaging/arch/kernel-borderlands-1.0.0-1-x86_64.pkg.tar.zst` |
+| Ubuntu / Debian | the target distro (glibc must not be newer than the target's) | `make build && packaging/deb/build-deb.sh` | `dist/kernel-borderlands_1.1.0_amd64.deb` |
+| Arch | Arch | `cd packaging/arch && makepkg -f` | `packaging/arch/kernel-borderlands-1.1.0-1-x86_64.pkg.tar.zst` |
 
 Install with `sudo apt install ./kernel-borderlands_*.deb` or `sudo pacman -U kernel-borderlands-*.pkg.tar.zst`. Nothing is started on install: run `sudo kbctl up`, then `kbctl dashboard open` or `kbctl ssh connect`. See `latex/field-manual/` for the full manual.
 

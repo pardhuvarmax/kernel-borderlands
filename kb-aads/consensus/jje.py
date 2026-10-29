@@ -2,6 +2,7 @@ import os
 
 import ray
 import asyncio
+from pipeline.flow import level_for
 from agents.base_agent import BaseAgent, AgentRole
 
 # confidence is a 0.0-1.0 float everywhere else in the system (see
@@ -38,6 +39,11 @@ def _load_jury_policy(checkpoint_dir: str = JURY_CHECKPOINT_DIR):
     """
     rl_module_path = os.path.join(checkpoint_dir, _RL_MODULE_SUBPATH)
     if not os.path.isdir(rl_module_path):
+        return None
+    from features.schema import gate_checkpoint
+    ok, reason = gate_checkpoint(checkpoint_dir)
+    if not ok:
+        print(f"[JuryAgent] learned policy NOT loaded: {reason}; using the confidence-threshold vote", flush=True)
         return None
     from ray.rllib.core.rl_module.rl_module import RLModule
     return RLModule.from_checkpoint(rl_module_path)
@@ -96,7 +102,8 @@ class JuryAgent(BaseAgent):
 class JudgeAgent(BaseAgent):
     """Orchestrates consensus rounds when Patrollers raise anomaly alerts."""
     def __init__(self, agent_id: str, executor_ref, jury_pool_size: int = 5, jury_agent_cls=None, registry=None,
-                 error_count_threshold: int = 5, liveness_check_seconds: float = 3.0):
+                 error_count_threshold: int = 5, liveness_check_seconds: float = 3.0,
+                 round_deadline_seconds: float = 10.0):
         super().__init__(agent_id, AgentRole.JUDGE)
         self.executor = executor_ref
         self.jury_pool_size = jury_pool_size
@@ -118,6 +125,10 @@ class JudgeAgent(BaseAgent):
         # the liveness-check path.
         self.error_count_threshold = error_count_threshold
         self.liveness_check_seconds = liveness_check_seconds
+        # Hard cap on one consensus round (jury spawn + votes). A hung juror
+        # must not pin an incident forever; the round is abandoned and counted.
+        self.round_deadline_seconds = round_deadline_seconds
+        self.rounds = {"quorum": 0, "no_quorum": 0, "timeout": 0, "no_votes": 0}
 
     async def coordinate_consensus(self, alert_payload: dict):
         # Dynamically spawn a Jury pool sized from config/agents.yaml's
@@ -138,7 +149,13 @@ class JudgeAgent(BaseAgent):
         # ray.get(vote_futures) would raise and abort consensus entirely on
         # a single failure (BUG-007).
         vote_futures = [jury.evaluate_and_vote.remote(alert_payload) for jury in jury_pool]
-        results = await asyncio.gather(*vote_futures, return_exceptions=True)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*vote_futures, return_exceptions=True), self.round_deadline_seconds)
+        except asyncio.TimeoutError:
+            self.rounds["timeout"] += 1
+            print(f"[JudgeAgent] consensus round exceeded {self.round_deadline_seconds}s — abandoned, no action")
+            return {"decision": "timeout"}
         votes = []
         for result in results:
             if isinstance(result, Exception):
@@ -148,11 +165,27 @@ class JudgeAgent(BaseAgent):
 
         if not votes:
             print("[JudgeAgent] no jury votes collected — skipping consensus round")
-            return
+            self.rounds["no_votes"] += 1
+            return {"decision": "no_votes"}
 
         if quorum_reached(votes):
-            # Trigger containment via the Executor
-            await self.executor.execute_quarantine.remote(alert_payload)
+            self.rounds["quorum"] += 1
+            # Stage containment via the Executor. The level comes from the
+            # payload (Hunter asked the PPO Containment policy) or the
+            # deterministic fallback; it is capped by zone/confidence rules.
+            payload = dict(alert_payload)
+            if "level" not in payload and "zone_id" in payload:
+                payload["level"] = level_for(
+                    payload, float(payload.get("confidence", 0.0)), payload.get("model_level"))
+            payload["level"] = max(int(payload.get("level", 1)), 1)
+            payload.setdefault("authorized_by", ["judge", "jury"])
+            result = await self.executor.execute_quarantine.remote(payload)
+            return {"decision": "contain", "result": result}
+        self.rounds["no_quorum"] += 1
+        return {"decision": "allow"}
+
+    def get_round_stats(self) -> dict:
+        return dict(self.rounds)
 
     # ---- JJE courthouse oversight -----------------------------------
     # Per docs/development/control-aads/aads-intelligence-roadmap.md's

@@ -2,7 +2,7 @@
 # kbinstaller.sh — installs the kernel-borderlands .deb on THIS host and checks it end to end.
 # Run with a TTY so sudo can prompt once:  ssh -t kbvm 'bash ~/kbinstaller.sh'
 # Backs up the legacy dev install first. Does not uninstall anything.
-DEB=${DEB:-$HOME/kb-pkg-build/dist/kernel-borderlands_1.0.0_amd64.deb}
+DEB=${DEB:-$HOME/kb-pkg-build/dist/kernel-borderlands_1.1.0_amd64.deb}
 TS=$(date +%Y%m%d-%H%M%S); BK=$HOME/kb-backup-$TS; LOG=$HOME/kb-test-$TS.log
 PASS=0; FAIL=0; FAILS=()
 exec > >(tee -a "$LOG") 2>&1

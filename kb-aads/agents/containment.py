@@ -32,6 +32,11 @@ def _load_policy(checkpoint_dir: str = CHECKPOINT_DIR):
     rl_module_path = os.path.join(checkpoint_dir, RL_MODULE_SUBPATH)
     if not os.path.isdir(rl_module_path):
         return None
+    from features.schema import gate_checkpoint
+    ok, reason = gate_checkpoint(checkpoint_dir)
+    if not ok:
+        print(f"[ContainmentAgent] learned policy NOT loaded: {reason}; deterministic levels only", flush=True)
+        return None
     from ray.rllib.core.rl_module.rl_module import RLModule
     return RLModule.from_checkpoint(rl_module_path)
 

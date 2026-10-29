@@ -3,6 +3,7 @@ package controlplane
 import (
 	"crypto/ed25519"
 	"fmt"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/logx"
 	"log"
 	"net"
 	"os"
@@ -34,10 +35,10 @@ const storeFailureThreshold = 5
 
 type ControlPlane struct {
 	pb.UnimplementedKernelBorderlandsServer
-	store        *store.Store
-	healthServer *health.Server
-	audit        *audit.Logger
-	enforcer     *enforcement.Enforcer
+	store         *store.Store
+	healthServer  *health.Server
+	audit         *audit.Logger
+	enforcer      *enforcement.Enforcer
 	policyMu      sync.RWMutex
 	policy        *policy.Engine
 	policyPath    string
@@ -95,8 +96,8 @@ type ControlPlane struct {
 	// Per-agent-ID minimum-interval throttle for SubmitAgentDecision/
 	// SetContainment (BUG-012) — a buggy or compromised client looping on
 	// these RPCs previously had no backpressure at all.
-	rateLimitMu   sync.Mutex
-	lastDecision  map[string]time.Time
+	rateLimitMu  sync.Mutex
+	lastDecision map[string]time.Time
 
 	// exfilDetector implements the slow-exfiltration/beaconing detector
 	// from docs/development/control-aads/dev-exfiltration-detection.md —
@@ -167,13 +168,13 @@ func New(dbPath, policyPath, rulesPath, workloadsPath, workloadsPubKeyPath strin
 	// Build cp first (handler must exist before NewListener so it can be
 	// passed as the MessageHandler), then wire the enforcer to the listener.
 	cp := &ControlPlane{
-		store:         s,
-		audit:         audit.New(s.DB()),
-		policy:        p,
-		policyPath:    policyPath,
-		workloadsPath: workloadsPath,
-		cwpPubKey:     cwpPubKey,
-		healthServer:  health.NewServer(),
+		store:          s,
+		audit:          audit.New(s.DB()),
+		policy:         p,
+		policyPath:     policyPath,
+		workloadsPath:  workloadsPath,
+		cwpPubKey:      cwpPubKey,
+		healthServer:   health.NewServer(),
 		lastDecision:   make(map[string]time.Time),
 		exfilDetector:  detection.NewDetector(detection.DefaultEntropyThreshold),
 		lastExfilAlert: make(map[string]time.Time),
@@ -191,7 +192,9 @@ func New(dbPath, policyPath, rulesPath, workloadsPath, workloadsPubKeyPath strin
 	// the MessageHandler on both, but controlListener's ReadLoop will just
 	// block on reads since the sensor never writes anything back on that
 	// connection — same idle-until-close behavior telemetryListener
-	// already tolerates today, just on the other side.
+	// already tolerates today, just on the other side. The one exception:
+	// the sensor writes CONTAINMENT_ACK replies back on this connection
+	// (kept off kbd.sock so a telemetry flood cannot delay them).
 	telemetryListener, err := ipc.NewListener(ipc.GetSocketPath(), cp)
 	if err != nil {
 		return nil, fmt.Errorf("ipc telemetry listener: %w", err)
@@ -490,6 +493,11 @@ func (cp *ControlPlane) recordStoreResult(err error) {
 	}
 }
 
+// chatter rate-limits per-event log lines (one per key per 5 s, with a
+// suppressed count) so a telemetry flood cannot flood the journal.
+// Security-relevant lines deliberately do not use it.
+var chatter = logx.New(5*time.Second, 4096)
+
 // ── MessageHandler (called by IPC listener) ──
 
 func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
@@ -498,10 +506,27 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 
 	err := cp.store.UpsertProcessState(msg)
 	if err != nil {
-		log.Printf("[KB] store: %v", err)
+		chatter.Printf("store", "[KB] store: %v", err)
 	}
 	cp.recordStoreResult(err)
 
+	// Feature schema v1 (kb-aads/features/schema.py): every field below is a
+	// value the sensor actually computed for this process, so a learned
+	// policy can be trained and served on the same inputs. Keep the keys in
+	// sync with that file. The legacy dim_syscall/dim_privilege/composite/
+	// zone/uid keys stay for existing consumers.
+	md := map[string]string{
+		"feature_schema": "1",
+		"zone":           ipc.KBZone(msg.Zone).String(),
+		"composite":      fmt.Sprintf("%.2f", msg.CompositeScore),
+		"dim_syscall":    fmt.Sprintf("%.2f", msg.DimScore[ipc.DimCount-5]),
+		"dim_privilege":  fmt.Sprintf("%.2f", msg.DimScore[2]),
+		"uid":            fmt.Sprintf("%d", msg.UID),
+		"event_count":    fmt.Sprintf("%d", msg.EventCount),
+	}
+	for i, name := range ipc.DimNames {
+		md["dim_"+name] = fmt.Sprintf("%.2f", msg.DimScore[i])
+	}
 	cp.fanOutEvent(&pb.KBEvent{
 		Pid:        msg.PID,
 		Ppid:       msg.PPID,
@@ -509,13 +534,7 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 		EventType:  "process_state",
 		ScoreDelta: float32(msg.EMAScore),
 		Timestamp:  int64(msg.LastUpdatedNs),
-		Metadata: map[string]string{
-			"zone":          ipc.KBZone(msg.Zone).String(),
-			"composite":     fmt.Sprintf("%.2f", msg.CompositeScore),
-			"dim_syscall":   fmt.Sprintf("%.2f", msg.DimScore[ipc.DimCount-5]),
-			"dim_privilege": fmt.Sprintf("%.2f", msg.DimScore[2]),
-			"uid":           fmt.Sprintf("%d", msg.UID),
-		},
+		Metadata:   md,
 	})
 }
 
@@ -525,9 +544,9 @@ func (cp *ControlPlane) OnProcessExit(msg *ipc.ProcessExitMsg) {
 
 	// Push exit details to L2 DB
 	if err := cp.store.TerminateProcessState(msg.PID, msg.ExitTimeNs, msg.ExitCode); err != nil {
-		log.Printf("[KB] store term: %v", err)
+		chatter.Printf("storeterm", "[KB] store term: %v", err)
 	}
-	log.Printf("[KB] Process PID=%d terminated (Code: %d)", msg.PID, msg.ExitCode)
+	chatter.Printf("exit", "[KB] Process PID=%d terminated (Code: %d)", msg.PID, msg.ExitCode)
 }
 
 // maxTimingEntropyForConfidence is log2(5) — the ceiling for
@@ -634,15 +653,15 @@ func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
 		comm = v.(string)
 	}
 
-	log.Printf("[KB] Zone PID=%d COMM=%s %s→%s score=%.1f",
+	chatter.Printf(fmt.Sprintf("zone:%d", msg.PID), "[KB] Zone PID=%d COMM=%s %s→%s score=%.1f",
 		msg.PID, comm, msg.FromZone, msg.ToZone, msg.Score)
 
 	// PID-reuse guard — L1-backed, ~30-50ns per ADR-1.
 	ok, err := cp.store.VerifyStartTime(msg.PID, msg.StartTimeNs)
 	if err != nil {
-		log.Printf("[KB] start_time verify: %v — allowing", err)
+		chatter.Printf("verify", "[KB] start_time verify: %v — allowing", err)
 	} else if !ok {
-		log.Printf("[KB] PID=%d start_time mismatch — stale transition, skipping enforcement", msg.PID)
+		chatter.Printf("stale", "[KB] PID=%d start_time mismatch — stale transition, skipping enforcement", msg.PID)
 		return
 	}
 

@@ -27,6 +27,34 @@
 #include <limits.h>
 #include <sys/types.h>
 
+// State-transition lines ([BEHAVIOR ENGINE]) are security-relevant, but one is
+// printed per NEW process that changes state, so a burst of short-lived
+// processes (a package install, a shell loop, journald's own helpers) would
+// otherwise write one journal line each. Capped at TRANSITION_LOG_PER_SEC with
+// the remainder counted (reported in the 30 s summary); the transitions
+// themselves are still scored and sent to kbd, which audits zone changes.
+#define TRANSITION_LOG_PER_SEC 20
+static uint64_t transition_suppressed;
+static int transition_log_allowed(void)
+{
+    static double tokens = TRANSITION_LOG_PER_SEC;
+    static uint64_t last_ns;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint64_t now = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+    if (last_ns)
+        tokens += (double)(now - last_ns) / 1e9 * TRANSITION_LOG_PER_SEC;
+    last_ns = now;
+    if (tokens > TRANSITION_LOG_PER_SEC)
+        tokens = TRANSITION_LOG_PER_SEC;
+    if (tokens >= 1.0) {
+        tokens -= 1.0;
+        return 1;
+    }
+    transition_suppressed++;
+    return 0;
+}
+
 // Timestamp source for sends not triggered by a live kb_unified_event
 static uint64_t now_ns(void)
 {
@@ -403,13 +431,14 @@ static void scan_syscall_entropy(struct kbd_sensor_bpf *skel)
 
                         kb_behavior_result_t r_beh = kb_behavior_evaluate(ev);
                         if (r_beh.state_changed) {
-                            printf("[BEHAVIOR ENGINE] PID=%u COMM=%s State transition (entropy): %s -> %s (Reason: %s, Chain: %s)\n",
-                                   pid, r.state->comm,
-                                   kb_state_name(r_beh.prev_state),
-                                   kb_state_name(r_beh.new_state),
-                                   r_beh.reason_str,
-                                   r_beh.chain_name ? r_beh.chain_name : "none");
-                        }
+                            if (transition_log_allowed())
+                                printf("[BEHAVIOR ENGINE] PID=%u COMM=%s State transition (entropy): %s -> %s (Reason: %s, Chain: %s)\n",
+                                       pid, r.state->comm,
+                                       kb_state_name(r_beh.prev_state),
+                                       kb_state_name(r_beh.new_state),
+                                       r_beh.reason_str,
+                                       r_beh.chain_name ? r_beh.chain_name : "none");
+                            }
 
                         kb_zone_t next_zone = map_state_to_zone(r_beh.record->state);
                         kb_zone_t prev_zone = r.state->zone;
@@ -1253,22 +1282,35 @@ static void cwp_sweep_orphaned_entries(struct kbd_sensor_bpf *skel)
                swept, swept == 1 ? "y" : "ies");
 }
 
-// Tells kbd what a containment command actually did (KB_WIRE_MSG_CONTAINMENT_ACK,
-// over the telemetry socket). The CPM/CWP gates below refuse silently from
-// kbd's point of view -- the command frame was delivered either way -- so
-// without this reply kbd cannot tell "contained" from "refused", and its
-// TERMINATE path (which SIGKILLs) would get past both gates. Best effort: if
-// the telemetry connection is down the ack is lost and kbd, which waits for
-// it with a timeout, fails closed (no kill).
-static void send_containment_ack(uint32_t pid, uint32_t level, enum kb_ack_decision decision)
+// Tells kbd what a containment command actually did (KB_WIRE_MSG_CONTAINMENT_ACK).
+// The CPM/CWP gates below refuse silently from kbd's point of view -- the
+// command frame was delivered either way -- so without this reply kbd cannot
+// tell "contained" from "refused", and its TERMINATE path (which SIGKILLs)
+// would get past both gates.
+//
+// Sent on control_fd (kbct.sock), the same connection the command arrived
+// on, NOT on the telemetry socket: under a telemetry flood bridge_fd's send
+// buffer is full and a non-blocking ack write there fails (and used to tear
+// the telemetry connection down), delaying or losing exactly the message
+// that confirms enforcement. control_fd carries no bulk traffic, so the ack
+// always has buffer space.
+//
+// A lost ack means "enforcement status unknown", never "applied": kbd waits
+// with a timeout and fails closed (no kill). Returns 0 if the ack was fully
+// written, -1 otherwise (logged once per failure, not per attempt).
+static int send_containment_ack(uint32_t pid, uint32_t level, enum kb_ack_decision decision)
 {
-    bridge_ensure_connected();
-    if (bridge_fd < 0)
-        return;
-    if (kb_bridge_send_containment_ack(bridge_fd, pid, level, (uint32_t)decision) != 0) {
-        kb_bridge_close(bridge_fd);
-        bridge_fd = -1;
+    if (control_fd < 0) {
+        fprintf(stderr, "[SENSOR] ack for PID %u level %u not sent: control channel down (kbd will treat it as unacknowledged)\n", pid, level);
+        return -1;
     }
+    if (kb_bridge_send_containment_ack(control_fd, pid, level, (uint32_t)decision) != 0) {
+        fprintf(stderr, "[SENSOR] ack for PID %u level %u failed on control channel: %s\n", pid, level, strerror(errno));
+        close(control_fd);
+        control_fd = -1;
+        return -1;
+    }
+    return 0;
 }
 
 static enum kb_ack_decision cpm_decision_to_ack(enum cpm_decision d)
@@ -1486,13 +1528,14 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
 
         kb_behavior_result_t r_beh = kb_behavior_evaluate(ev);
         if (r_beh.state_changed) {
-            printf("[BEHAVIOR ENGINE] PID=%u COMM=%s State transition: %s -> %s (Reason: %s, Chain: %s)\n",
-                   pid, r.state->comm,
-                   kb_state_name(r_beh.prev_state),
-                   kb_state_name(r_beh.new_state),
-                   r_beh.reason_str,
-                   r_beh.chain_name ? r_beh.chain_name : "none");
-        }
+            if (transition_log_allowed())
+                printf("[BEHAVIOR ENGINE] PID=%u COMM=%s State transition: %s -> %s (Reason: %s, Chain: %s)\n",
+                       pid, r.state->comm,
+                       kb_state_name(r_beh.prev_state),
+                       kb_state_name(r_beh.new_state),
+                       r_beh.reason_str,
+                       r_beh.chain_name ? r_beh.chain_name : "none");
+            }
 
         kb_zone_t next_zone = map_state_to_zone(r_beh.record->state);
         kb_zone_t prev_zone = r.state->zone;
@@ -1790,6 +1833,76 @@ static void prot_str(__u32 prot, char *buf)
     buf[3] = '\0';
 }
 
+// ---- event log sink -------------------------------------------------------
+// handle_event used to printf every event. Under systemd stdout is the journal,
+// and journald's own file/socket activity (and sshd's, and anything reading the
+// journal) generates more events, which print more lines: a self-feeding loop
+// that produced ~50k lines in two minutes and starved the guest. Per-event
+// text is now OPT-IN (KB_SENSOR_VERBOSE=1), hard-capped by a token bucket
+// even then, and the sensor ignores its own PID. By default the only periodic
+// output is one summary line. Telemetry to kbd and scoring are unaffected.
+#define EV_LOG_RATE_PER_SEC   200
+#define EV_SUMMARY_INTERVAL_S 30
+
+static pid_t self_pid;
+static int   ev_verbose;
+static FILE *ev_null;
+static struct {
+    uint64_t seen, logged, suppressed, self_skipped;
+    double   tokens;
+    uint64_t last_refill_ns, last_summary_ns, summary_seen, summary_suppressed;
+} ev_stats = { .tokens = EV_LOG_RATE_PER_SEC };
+
+static uint64_t mono_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+static FILE *event_sink(void)
+{
+    uint64_t now = mono_ns();
+
+    if (ev_stats.last_summary_ns == 0) {
+        ev_stats.last_summary_ns = ev_stats.last_refill_ns = now;
+    } else if (now - ev_stats.last_summary_ns >= (uint64_t)EV_SUMMARY_INTERVAL_S * 1000000000ull) {
+        printf("[SENSOR] last %ds: %llu events seen, %llu logged, %llu log lines suppressed, %llu transition lines suppressed, %llu self events skipped%s\n",
+               EV_SUMMARY_INTERVAL_S,
+               (unsigned long long)(ev_stats.seen - ev_stats.summary_seen),
+               (unsigned long long)ev_stats.logged,
+               (unsigned long long)(ev_stats.suppressed - ev_stats.summary_suppressed),
+               (unsigned long long)transition_suppressed,
+               (unsigned long long)ev_stats.self_skipped,
+               ev_verbose ? "" : " (per-event log off; set KB_SENSOR_VERBOSE=1)");
+        fflush(stdout);
+        ev_stats.summary_seen = ev_stats.seen;
+        ev_stats.summary_suppressed = ev_stats.suppressed;
+        ev_stats.logged = ev_stats.self_skipped = 0;
+        transition_suppressed = 0;
+        ev_stats.last_summary_ns = now;
+    }
+
+    if (!ev_verbose) {
+        ev_stats.suppressed++;
+        goto null_sink;
+    }
+    ev_stats.tokens += (double)(now - ev_stats.last_refill_ns) / 1e9 * EV_LOG_RATE_PER_SEC;
+    if (ev_stats.tokens > EV_LOG_RATE_PER_SEC)
+        ev_stats.tokens = EV_LOG_RATE_PER_SEC;
+    ev_stats.last_refill_ns = now;
+    if (ev_stats.tokens >= 1.0) {
+        ev_stats.tokens -= 1.0;
+        ev_stats.logged++;
+        return stdout;
+    }
+    ev_stats.suppressed++;
+null_sink:
+    if (!ev_null)
+        ev_null = fopen("/dev/null", "w");
+    return ev_null ? ev_null : stdout;
+}
+
 static int handle_event(void *ctx, void *data, size_t sz)
 {
     struct kbd_sensor_bpf *skel = ctx;
@@ -1797,6 +1910,15 @@ static int handle_event(void *ctx, void *data, size_t sz)
 
     if (e->event_type == KB_EVT_SYSCALL)
         return 0;
+
+    // Never observe ourselves: our own stdout/journal writes, /proc reads and
+    // socket traffic would otherwise generate events about our own activity.
+    if (e->pid == self_pid) {
+        ev_stats.self_skipped++;
+        return 0;
+    }
+    ev_stats.seen++;
+    FILE *evout = event_sink();
 
     if (e->event_type != 9 && e->event_type != 10) {
         kb_scoring_result_t r = process_behavior_and_score(e);
@@ -1808,7 +1930,7 @@ static int handle_event(void *ctx, void *data, size_t sz)
     char prot[4];
 
     if (e->event_type != 10) {
-        printf("[%-17s] PID=%-6u PPID=%-6u UID=%-5u COMM=%-16s ",
+        fprintf(evout, "[%-17s] PID=%-6u PPID=%-6u UID=%-5u COMM=%-16s ",
                event_type_name(e->event_type),
                e->pid, e->ppid, e->uid, e->comm);
     }
@@ -1816,11 +1938,11 @@ static int handle_event(void *ctx, void *data, size_t sz)
     switch (e->event_type) {
         case KB_EVT_PROCESS_EXEC:
             try_attach_go_tls(skel, e->pid, (const char *)e->comm);
-            printf("\n");
+            fprintf(evout, "\n");
             break;
 
         case 10:
-            printf("Overloaded Batch: PID %u occurred %llu times in the last second, %llu events dropped\n", e->pid, 100 + (unsigned long long)e->length, (unsigned long long)e->length);
+            fprintf(evout, "Overloaded Batch: PID %u occurred %llu times in the last second, %llu events dropped\n", e->pid, 100 + (unsigned long long)e->length, (unsigned long long)e->length);
             break;
 
         case KB_EVT_PROCESS_EXIT:
@@ -1828,23 +1950,23 @@ static int handle_event(void *ctx, void *data, size_t sz)
             if (bridge_fd >= 0) {
                 kb_bridge_send_process_exit(bridge_fd, e->pid, e->ts_ns, e->syscall_nr);
             }
-            printf("exit_code=%d\n", e->syscall_nr);
+            fprintf(evout, "exit_code=%d\n", e->syscall_nr);
             break;
 
         case KB_EVT_SYSCALL:
-            printf("nr=%u\n", e->syscall_nr);
+            fprintf(evout, "nr=%u\n", e->syscall_nr);
             break;
 
         case KB_EVT_PRIVILEGE_CHANGE:
             if (e->new_euid == 0xFFFFFFFF) {
-                printf("🔴 SENSITIVE CAPABILITY PROBE: Cap=%u (%s)\n",
+                fprintf(evout, "🔴 SENSITIVE CAPABILITY PROBE: Cap=%u (%s)\n",
                        e->old_euid,
                        e->old_euid == 21 ? "CAP_SYS_ADMIN" :
                        e->old_euid == 19 ? "CAP_SYS_PTRACE" :
                        e->old_euid == 17 ? "CAP_SYS_RAWIO" :
                        e->old_euid == 1 ? "CAP_DAC_OVERRIDE" : "unknown");
             } else {
-                printf("uid:%u->%u euid:%u->%u %s\n",
+                fprintf(evout, "uid:%u->%u euid:%u->%u %s\n",
                        e->old_uid, e->new_uid,
                        e->old_euid, e->new_euid,
                        e->escalation ? "🔴 ESCALATION" : "");
@@ -1852,14 +1974,14 @@ static int handle_event(void *ctx, void *data, size_t sz)
             break;
 
         case KB_EVT_FILE_ACCESS:
-            printf("file=%s %s\n",
+            fprintf(evout, "file=%s %s\n",
                    e->filename,
                    e->sensitive ? "🔴 SENSITIVE" : "");
             break;
 
         case KB_EVT_NETWORK_CONNECT:
             inet_ntop(AF_INET, &e->daddr, dst, sizeof(dst));
-            printf("-> %s:%u\n", dst, e->dport);
+            fprintf(evout, "-> %s:%u\n", dst, e->dport);
             // Forward to kbd for out-of-band beaconing/exfiltration
             // detection (docs/development/control-aads/
             // dev-exfiltration-detection.md) — userspace-only, no eBPF
@@ -1873,16 +1995,16 @@ static int handle_event(void *ctx, void *data, size_t sz)
 
         case KB_EVT_NETWORK_BIND:
             inet_ntop(AF_INET, &e->saddr, src, sizeof(src));
-            printf("listen %s:%u\n", src, e->sport);
+            fprintf(evout, "listen %s:%u\n", src, e->sport);
             break;
 
         case KB_EVT_MEMORY_MMAP:
         case KB_EVT_MEMORY_MPROTECT:
             if (e->addr == 0 && e->rwx) {
-                printf("🔴 CROSS-PROCESS MEMORY INJECTION! TargetPID=%llu\n", (unsigned long long)e->length);
+                fprintf(evout, "🔴 CROSS-PROCESS MEMORY INJECTION! TargetPID=%llu\n", (unsigned long long)e->length);
             } else {
                 prot_str(e->prot, prot);
-                printf("addr=0x%llx len=%llu prot=%s %s%s\n",
+                fprintf(evout, "addr=0x%llx len=%llu prot=%s %s%s\n",
                        (unsigned long long)e->addr,
                        (unsigned long long)e->length,
                        prot,
@@ -1892,11 +2014,11 @@ static int handle_event(void *ctx, void *data, size_t sz)
             break;
 
         case 9: // KB_EVT_TLS_PLAINTEXT
-            printf("payload=\"%s\" (len=%u)\n", e->filename, e->flags);
+            fprintf(evout, "payload=\"%s\" (len=%u)\n", e->filename, e->flags);
             break;
 
         default:
-            printf("\n");
+            fprintf(evout, "\n");
     }
 
     return 0;
@@ -1908,6 +2030,10 @@ int main(void)
     struct ring_buffer    *rb = NULL;
     int err;
 
+    self_pid = getpid();
+    ev_verbose = getenv("KB_SENSOR_VERBOSE") && getenv("KB_SENSOR_VERBOSE")[0] == '1';
+    // Line-buffer stdout so a journal pipe gets whole lines, not block flushes.
+    setvbuf(stdout, NULL, _IOLBF, 0);
     signal(SIGINT, handle_sigint);
     // write() to bridge_fd/control_fd after the Go peer has closed its end
     // raises SIGPIPE, whose default disposition kills the whole process —

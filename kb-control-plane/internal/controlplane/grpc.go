@@ -245,6 +245,14 @@ func (cp *ControlPlane) SubmitAgentDecision(
 		containErr = cp.enforcer.Contain(d.Pid, uint32(pb.ContainmentLevel_SECCOMP), agentReason)
 	case "CGROUP":
 		containErr = cp.enforcer.Contain(d.Pid, uint32(pb.ContainmentLevel_CGROUP), agentReason)
+	default:
+		// An action with no enforcement path must never report "executed":
+		// the old QUARANTINE (what the swarm Executor used to send) fell
+		// through here, logged AGENT_QUARANTINE and enforced nothing.
+		return &pb.DecisionAck{
+			Success: false,
+			Message: fmt.Sprintf("unknown action %q: no enforcement performed (supported: TERMINATE, NAMESPACE, SECCOMP, CGROUP)", d.Action),
+		}, nil
 	}
 	if containErr != nil {
 		return &pb.DecisionAck{Success: false, Message: containErr.Error()}, nil

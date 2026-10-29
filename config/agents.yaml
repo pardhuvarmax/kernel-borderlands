@@ -38,5 +38,13 @@ jury:
 patroller:
   suspicious_threshold: 40.0
 
+# policy.use_learned: let the PPO Jury/Containment policies decide. Keep false
+# until they are retrained on sensor-derived features: the shipped checkpoints
+# need a label-derived event_type that kbd never emits, so on live data they
+# answer ALLOW/NONE for everything. false = Jury confidence threshold + the
+# deterministic level policy in pipeline/flow.py.
+policy:
+  use_learned: false
+
 control_plane:
   grpc_socket: /run/kb/kba.sock

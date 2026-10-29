@@ -5,11 +5,11 @@
 # distro will not run on an older one.
 #
 #   make build                       # compiles everything (needs go, cargo, npm, clang, bpftool)
-#   packaging/deb/build-deb.sh       # -> dist/kernel-borderlands_1.0.0_amd64.deb
+#   packaging/deb/build-deb.sh       # -> dist/kernel-borderlands_1.1.0_amd64.deb
 set -eu
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.1.0}"
 ARCH="$(dpkg --print-architecture)"
 STAGE="$REPO_ROOT/dist/deb-stage"
 OUT="$REPO_ROOT/dist"

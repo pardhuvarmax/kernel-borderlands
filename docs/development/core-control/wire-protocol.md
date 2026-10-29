@@ -153,7 +153,8 @@ out-of-band beaconing/exfiltration detector, `kb-control-plane/internal/
 detection/exfil.go`). Carries no byte-count field — `connect()` doesn't
 have one; see that doc's fidelity-limitation note.
 
-## msg_type = 10 — ContainmentAck (sensor → kbd, over `/run/kb/kbd.sock`)
+## msg_type = 10 — ContainmentAck (sensor → kbd, over `/run/kb/kbct.sock`)
+**Transport (changed after 1.0.0):** the ack is written back on the control connection (`kbct.sock`) the command arrived on, not on the telemetry socket. Under a telemetry flood the telemetry connection's send buffer is full, so an ack written there could be delayed or lost, and a failed write used to tear the telemetry connection down. `kbct.sock` carries no bulk traffic. A missing ack still means *enforcement status unknown* (kbd fails closed: no kill, 3 s timeout), never success. Frame layout and `KB_WIRE_VERSION` are unchanged; a `kbd` accepts the ack on either listener, so a sensor built before this change (ack on `kbd.sock`) still works.
 Packed struct (`kb_wire_containment_ack`, `kb_bridge.h`), all little-endian:
 ```
 kb_wire_header hdr        4

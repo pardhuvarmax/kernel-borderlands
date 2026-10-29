@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
+	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/test/bufconn"
 
@@ -637,4 +638,30 @@ func TestRecordStoreResult_ConcurrentCallsDontRace(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// The learned-policy feature contract (schema v1) is served from this event:
+// all six sensor dimension scores must be present, by name.
+func TestOnProcessState_EmitsFeatureSchemaV1(t *testing.T) {
+	cp := newTestControlPlane(t)
+	ch := make(chan *pb.KBEvent, 1)
+	cp.subMu.Lock()
+	cp.eventSubs = append(cp.eventSubs, ch)
+	cp.subMu.Unlock()
+
+	var dims [ipc.DimCount]float64
+	for i := range dims {
+		dims[i] = float64(10 * (i + 1))
+	}
+	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 5, UID: 0, Comm: "x", DimScore: dims, EMAScore: 55, EventCount: 7})
+	ev := <-ch
+	if ev.Metadata["feature_schema"] != "1" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
+		t.Fatalf("missing schema/event_count/uid: %v", ev.Metadata)
+	}
+	for i, name := range ipc.DimNames {
+		want := fmt.Sprintf("%.2f", dims[i])
+		if got := ev.Metadata["dim_"+name]; got != want {
+			t.Errorf("dim_%s = %q, want %q", name, got, want)
+		}
+	}
 }

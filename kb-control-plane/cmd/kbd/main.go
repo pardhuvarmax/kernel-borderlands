@@ -68,7 +68,7 @@ func init() {
 func runDaemon(cmd *cobra.Command, args []string) {
 	fmt.Println("╔══════════════════════════════════════════╗")
 	fmt.Println("║   Kernel Borderlands Control Plane       ║")
-	fmt.Println("║   kbd v1.0.0                              ║")
+	fmt.Println("║   kbd v1.1.0                              ║")
 	fmt.Println("╚══════════════════════════════════════════╝")
 
 	cp, err := controlplane.New(dbPath, policyPath, rulesPath, workloadsPath, workloadsPubKeyPath)

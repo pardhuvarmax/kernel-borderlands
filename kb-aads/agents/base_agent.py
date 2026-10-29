@@ -14,6 +14,7 @@ class AgentRole(Enum):
     MILITIA_LEAD = "militia_lead"
     MILITIA_MEMBER = "militia_member"
     SIGNAL_RELAY = "signal_relay"
+    INGEST = "ingest"
     IDLE = "idle"
 
 class AgentStatus(Enum):

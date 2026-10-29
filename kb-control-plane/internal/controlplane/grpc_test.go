@@ -2,10 +2,15 @@ package controlplane
 
 import (
 	"context"
+	"encoding/binary"
+	"io"
+	"net"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/enforcement"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
 	pb "github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/proto"
 	"google.golang.org/grpc/codes"
@@ -213,19 +218,59 @@ func TestSubmitAgentDecision_RecognizedAuthorizedByPassesGate(t *testing.T) {
 	}
 }
 
-func TestSubmitAgentDecision_NonDestructiveActionSkipsAllowlistGate(t *testing.T) {
+func TestSubmitAgentDecision_UnknownActionIsRejectedNotExecuted(t *testing.T) {
 	cp := newTestControlPlane(t)
 	cp.store.UpsertProcessState(&ipc.ProcessStateMsg{PID: 1, Comm: "x"})
+	before := auditCount(t, cp)
 
 	resp, err := cp.SubmitAgentDecision(context.Background(), &pb.AgentDecision{
 		Pid: 1, Action: "QUARANTINE", Confidence: 0.9, AgentId: "executor-1",
-		AuthorizedBy: []string{"unrecognized-but-harmless-here"},
 	})
 	if err != nil {
 		t.Fatalf("SubmitAgentDecision: %v", err)
 	}
-	if !resp.Success {
-		t.Errorf("expected Success=true for a non-destructive/unmatched action regardless of authorized_by, got message=%q", resp.Message)
+	if resp.Success || !strings.Contains(resp.Message, "unknown action") {
+		t.Errorf("want Success=false with an unknown-action message, got %+v", resp)
+	}
+	if after := auditCount(t, cp); after != before {
+		t.Errorf("a rejected action must not be audited as executed (audit rows %d -> %d)", before, after)
+	}
+}
+
+// The agent path must reach the sensor: a decision that reports success has
+// to have put a containment frame on the control socket with the right level.
+func TestSubmitAgentDecision_CgroupReachesSensor(t *testing.T) {
+	cp := newTestControlPlane(t)
+	cp.store.UpsertProcessState(&ipc.ProcessStateMsg{PID: 4242, Comm: "x"})
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	l, _ := ipc.NewTestListener(server)
+	cp.enforcer = enforcement.NewEnforcer(l, cp.store)
+
+	got := make(chan []byte, 1)
+	go func() {
+		buf := make([]byte, 4+4+4+4+64)
+		io.ReadFull(client, buf)
+		got <- buf
+	}()
+	resp, err := cp.SubmitAgentDecision(context.Background(), &pb.AgentDecision{
+		Pid: 4242, Action: "CGROUP", Confidence: 0.9, AgentId: "executor-1",
+		AuthorizedBy: []string{"judge"},
+	})
+	if err != nil || !resp.Success {
+		t.Fatalf("want success, got %+v err=%v", resp, err)
+	}
+	select {
+	case f := <-got:
+		if pid := binary.LittleEndian.Uint32(f[8:12]); pid != 4242 {
+			t.Errorf("sensor got pid %d, want 4242", pid)
+		}
+		if lvl := binary.LittleEndian.Uint32(f[12:16]); lvl != uint32(ipc.ContainmentCgroup) {
+			t.Errorf("sensor got level %d, want CGROUP", lvl)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no containment frame reached the sensor")
 	}
 }
 
