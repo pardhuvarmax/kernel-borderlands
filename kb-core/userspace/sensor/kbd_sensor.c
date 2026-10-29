@@ -2093,6 +2093,10 @@ int main(void)
         return 1;
     }
 
+    // Tell the BPF side which thread group is us so it can skip our own
+    // telemetry in-kernel (kb_self_tgid in kbd_sensor.bpf.c). Must precede load.
+    skel->rodata->kb_self_tgid = (__u32)getpid();
+
     bpf_program__set_autoload(skel->progs.kb_ssl_write, true);
     bpf_program__set_autoload(skel->progs.kb_go_tls_write, true);
     bpf_program__set_autoload(skel->progs.kb_lsm_file_open, true);

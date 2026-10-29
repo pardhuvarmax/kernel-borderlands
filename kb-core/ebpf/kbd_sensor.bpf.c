@@ -229,11 +229,34 @@ struct {
     __type(value, struct kb_token_bucket);
 } kb_rate_limit_lru_map SEC(".maps");
 
+// Thread-group id of kbd_sensor itself, written into .rodata by userspace
+// before the programs load (0 = filter off). Telemetry about the sensor's own
+// activity (its /proc reads, map scans, journal writes) was the biggest single
+// source of ring-buffer traffic and fed the journal feedback loop: ~45% of all
+// events on a busy host. Filtering it here, before a ring-buffer slot is
+// reserved, removes that load at the source.
+//
+// Scope: TELEMETRY ONLY. The lsm/* enforcement hooks still evaluate the sensor
+// like any other process; this never short-circuits a deny decision. Events a
+// DIFFERENT process generates about the sensor (e.g. a ptrace or
+// process_vm_writev aimed at it) are untouched: only events whose current task
+// belongs to the sensor's own thread group are dropped.
+const volatile __u32 kb_self_tgid = 0;
+
+static __always_inline int kb_is_self(void)
+{
+    return kb_self_tgid && (__u32)(bpf_get_current_pid_tgid() >> 32) == kb_self_tgid;
+}
+
 #define KB_RL_MAX_TOKENS 100
 #define KB_RL_REFILL_RATE_NS 10000000 // 10ms = 100 tokens/sec
 
 static __always_inline int kb_rate_limit_throttle(__u64 resource_id)
 {
+    // Self telemetry: report "throttled" so the hook exits before it touches
+    // the token-bucket map or reserves anything (see kb_self_tgid).
+    if (kb_is_self())
+        return 1;
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     struct kb_token_bucket *bucket = NULL;
     
@@ -288,6 +311,9 @@ static __always_inline int kb_rate_limit_throttle(__u64 resource_id)
 
 static __always_inline struct kb_unified_event *kb_reserve_event(void)
 {
+    // Not counted as a ring-buffer drop: nothing was lost, it was never wanted.
+    if (kb_is_self())
+        return NULL;
     struct kb_unified_event *e =
         bpf_ringbuf_reserve(&kb_events, sizeof(*e), 0);
     if (!e) {
