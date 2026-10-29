@@ -77,7 +77,7 @@ install-pkg: install
 	install -Dm755 scripts/setup/provision.sh $(DESTDIR)$(LIBDIR)/kb/provision.sh
 	install -Dm755 packaging/scripts/migrate-legacy.sh $(DESTDIR)$(LIBDIR)/kb/migrate-legacy.sh
 	install -dm755 $(DESTDIR)$(LIBDIR)/kb/aads
-	cp -r kb-aads/agents kb-aads/api kb-aads/comms kb-aads/consensus kb-aads/marl kb-aads/swarm $(DESTDIR)$(LIBDIR)/kb/aads/
+	cp -r kb-aads/agents kb-aads/api kb-aads/comms kb-aads/consensus kb-aads/features kb-aads/marl kb-aads/pipeline kb-aads/swarm $(DESTDIR)$(LIBDIR)/kb/aads/
 	install -m644 kb-aads/main.py kb-aads/requirements.txt $(DESTDIR)$(LIBDIR)/kb/aads/
 	find $(DESTDIR)$(LIBDIR)/kb/aads -name __pycache__ -type d -prune -exec rm -rf {} +
 	# Trim dev/training-only content. containment_ppo IS loaded at runtime by
