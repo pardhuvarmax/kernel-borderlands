@@ -230,17 +230,20 @@ struct {
 } kb_rate_limit_lru_map SEC(".maps");
 
 // Thread-group id of kbd_sensor itself, written into .rodata by userspace
-// before the programs load (0 = filter off). Telemetry about the sensor's own
-// activity (its /proc reads, map scans, journal writes) was the biggest single
-// source of ring-buffer traffic and fed the journal feedback loop: ~45% of all
-// events on a busy host. Filtering it here, before a ring-buffer slot is
-// reserved, removes that load at the source.
+// before the programs load (0 = filter off).
 //
-// Scope: TELEMETRY ONLY. The lsm/* enforcement hooks still evaluate the sensor
-// like any other process; this never short-circuits a deny decision. Events a
-// DIFFERENT process generates about the sensor (e.g. a ptrace or
-// process_vm_writev aimed at it) are untouched: only events whose current task
-// belongs to the sensor's own thread group are dropped.
+// SELECTIVE self-filter. Only the syscall-sampling hook (kb_handle_syscall)
+// skips the sensor: the sensor makes tens of thousands of syscalls a second
+// (map scans, /proc reads, journal writes), which produced ~110 sampled
+// KB_EVT_SYSCALL events/s of pure noise (userspace never used them) plus the
+// per-pid count-map updates behind them. Every other hook (sensitive file
+// opens, exec, network connect/bind, executable memory, credential changes,
+// cross-process writes, capability probes, LSM hooks) still reports the
+// sensor like any other process: the sensor never legitimately does those,
+// so any such event is a strong hijack signal, and userspace logs it loudly
+// (see "[SENSOR][CRITICAL]" in kbd_sensor.c). The skipped syscall samples are
+// counted (kb_self_syscalls_skipped) and reported in the 30 s summary.
+// Enforcement (lsm/*) is untouched.
 const volatile __u32 kb_self_tgid = 0;
 
 static __always_inline int kb_is_self(void)
@@ -248,15 +251,20 @@ static __always_inline int kb_is_self(void)
     return kb_self_tgid && (__u32)(bpf_get_current_pid_tgid() >> 32) == kb_self_tgid;
 }
 
+// Syscalls made by the sensor that kb_handle_syscall skipped. Per-CPU so the
+// hot path does a plain increment, no atomics or cross-CPU contention.
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key,   __u32);
+    __type(value, __u64);
+} kb_self_syscalls_skipped SEC(".maps");
+
 #define KB_RL_MAX_TOKENS 100
 #define KB_RL_REFILL_RATE_NS 10000000 // 10ms = 100 tokens/sec
 
 static __always_inline int kb_rate_limit_throttle(__u64 resource_id)
 {
-    // Self telemetry: report "throttled" so the hook exits before it touches
-    // the token-bucket map or reserves anything (see kb_self_tgid).
-    if (kb_is_self())
-        return 1;
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     struct kb_token_bucket *bucket = NULL;
     
@@ -311,9 +319,6 @@ static __always_inline int kb_rate_limit_throttle(__u64 resource_id)
 
 static __always_inline struct kb_unified_event *kb_reserve_event(void)
 {
-    // Not counted as a ring-buffer drop: nothing was lost, it was never wanted.
-    if (kb_is_self())
-        return NULL;
     struct kb_unified_event *e =
         bpf_ringbuf_reserve(&kb_events, sizeof(*e), 0);
     if (!e) {
@@ -422,6 +427,14 @@ int kb_handle_syscall(struct trace_event_raw_sys_enter *ctx)
 
     if (pid == 0 || syscall_nr < 0 || pid != tid)
         return 0;
+
+    if (kb_is_self()) {
+        __u32 zero = 0;
+        __u64 *skipped = bpf_map_lookup_elem(&kb_self_syscalls_skipped, &zero);
+        if (skipped)
+            (*skipped)++;
+        return 0;
+    }
 
     __u64 ckey = ((__u64)pid << 32) | (__u32)syscall_nr;
     __u64 *ccount = bpf_map_lookup_elem(&kb_syscall_counts, &ckey);

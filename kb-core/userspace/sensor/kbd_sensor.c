@@ -1845,10 +1845,11 @@ static void prot_str(__u32 prot, char *buf)
 #define EV_SUMMARY_INTERVAL_S 30
 
 static pid_t self_pid;
+static int   self_skip_map_fd = -1;   // kb_self_syscalls_skipped (per-CPU), set after load
 static int   ev_verbose;
 static FILE *ev_null;
 static struct {
-    uint64_t seen, logged, suppressed, self_skipped;
+    uint64_t seen, logged, suppressed, self_critical, critical_suppressed;
     double   tokens;
     uint64_t last_refill_ns, last_summary_ns, summary_seen, summary_suppressed;
 } ev_stats = { .tokens = EV_LOG_RATE_PER_SEC };
@@ -1860,6 +1861,52 @@ static uint64_t mono_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+// Sum of the per-CPU counter of the sensor's own syscalls that the kernel side
+// skipped since the last call (reads, then the summary reports the delta).
+static uint64_t self_syscalls_skipped_total(void)
+{
+    static uint64_t prev;
+    if (self_skip_map_fd < 0)
+        return 0;
+    int ncpu = libbpf_num_possible_cpus();
+    if (ncpu <= 0)
+        return 0;
+    uint64_t *vals = calloc((size_t)ncpu, sizeof(*vals));
+    if (!vals)
+        return 0;
+    uint32_t key = 0;
+    uint64_t sum = 0;
+    if (bpf_map_lookup_elem(self_skip_map_fd, &key, vals) == 0)
+        for (int i = 0; i < ncpu; i++)
+            sum += vals[i];
+    free(vals);
+    uint64_t delta = sum - prev;
+    prev = sum;
+    return delta;
+}
+
+// Critical own-activity lines: at most 5/s, remainder counted. Rare by
+// construction (the sensor does no network, exec, credential or sensitive-file
+// work), so a burst of these is itself the alarm.
+#define CRITICAL_LOG_PER_SEC 5
+static int critical_log_allowed(void)
+{
+    static double tokens = CRITICAL_LOG_PER_SEC;
+    static uint64_t last_ns;
+    uint64_t now = mono_ns();
+    if (last_ns)
+        tokens += (double)(now - last_ns) / 1e9 * CRITICAL_LOG_PER_SEC;
+    last_ns = now;
+    if (tokens > CRITICAL_LOG_PER_SEC)
+        tokens = CRITICAL_LOG_PER_SEC;
+    if (tokens >= 1.0) {
+        tokens -= 1.0;
+        return 1;
+    }
+    ev_stats.critical_suppressed++;
+    return 0;
+}
+
 static FILE *event_sink(void)
 {
     uint64_t now = mono_ns();
@@ -1867,18 +1914,20 @@ static FILE *event_sink(void)
     if (ev_stats.last_summary_ns == 0) {
         ev_stats.last_summary_ns = ev_stats.last_refill_ns = now;
     } else if (now - ev_stats.last_summary_ns >= (uint64_t)EV_SUMMARY_INTERVAL_S * 1000000000ull) {
-        printf("[SENSOR] last %ds: %llu events seen, %llu logged, %llu log lines suppressed, %llu transition lines suppressed, %llu self events skipped%s\n",
+        printf("[SENSOR] last %ds: %llu events seen, %llu logged, %llu log lines suppressed, %llu transition lines suppressed, %llu own syscalls skipped in-kernel, %llu CRITICAL own-activity events (%llu log lines suppressed)%s\n",
                EV_SUMMARY_INTERVAL_S,
                (unsigned long long)(ev_stats.seen - ev_stats.summary_seen),
                (unsigned long long)ev_stats.logged,
                (unsigned long long)(ev_stats.suppressed - ev_stats.summary_suppressed),
                (unsigned long long)transition_suppressed,
-               (unsigned long long)ev_stats.self_skipped,
+               (unsigned long long)self_syscalls_skipped_total(),
+               (unsigned long long)ev_stats.self_critical,
+               (unsigned long long)ev_stats.critical_suppressed,
                ev_verbose ? "" : " (per-event log off; set KB_SENSOR_VERBOSE=1)");
         fflush(stdout);
         ev_stats.summary_seen = ev_stats.seen;
         ev_stats.summary_suppressed = ev_stats.suppressed;
-        ev_stats.logged = ev_stats.self_skipped = 0;
+        ev_stats.logged = ev_stats.self_critical = ev_stats.critical_suppressed = 0;
         transition_suppressed = 0;
         ev_stats.last_summary_ns = now;
     }
@@ -1911,11 +1960,17 @@ static int handle_event(void *ctx, void *data, size_t sz)
     if (e->event_type == KB_EVT_SYSCALL)
         return 0;
 
-    // Never observe ourselves: our own stdout/journal writes, /proc reads and
-    // socket traffic would otherwise generate events about our own activity.
-    if (e->pid == self_pid) {
-        ev_stats.self_skipped++;
-        return 0;
+    // The sensor's own SYSCALL samples are dropped in-kernel and never get here.
+    // Anything else attributed to the sensor itself is NOT routine: it never
+    // connects out, execs, changes credentials, maps executable memory or opens
+    // sensitive files. Report it to kbd like any process (scoring + audit) AND
+    // log it loudly, whatever KB_SENSOR_VERBOSE says. type 10 is the kernel's
+    // own "telemetry dropped" marker, not sensor activity.
+    if (e->pid == self_pid && e->event_type != 10) {
+        ev_stats.self_critical++;
+        if (critical_log_allowed())
+            fprintf(stdout, "[SENSOR][CRITICAL] activity by the sensor process itself: %s PID=%u COMM=%s file=%.64s -- the sensor does not normally do this; investigate (possible hijack)\n",
+                    event_type_name(e->event_type), e->pid, e->comm, e->filename);
     }
     ev_stats.seen++;
     FILE *evout = event_sink();
@@ -2102,6 +2157,8 @@ int main(void)
     bpf_program__set_autoload(skel->progs.kb_lsm_file_open, true);
 
     err = kbd_sensor_bpf__load(skel);
+    if (!err)
+        self_skip_map_fd = bpf_map__fd(skel->maps.kb_self_syscalls_skipped);
     if (err) {
         fprintf(stderr, "Failed to load BPF skeleton: %d\n", err);
         kbd_sensor_bpf__destroy(skel);
