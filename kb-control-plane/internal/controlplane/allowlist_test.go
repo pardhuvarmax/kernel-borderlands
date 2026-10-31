@@ -38,9 +38,10 @@ func withAllowlist(t *testing.T, cp *ControlPlane, comm string, exe string, exeE
 		t.Fatal(err)
 	}
 	cp.SetAllowlist(p, a)
-	prev := resolveExe
+	prev, prevOwn := resolveExe, exeOwnedByRoot
 	resolveExe = func(uint32) (string, error) { return exe, exeErr }
-	t.Cleanup(func() { resolveExe = prev })
+	exeOwnedByRoot = func(string) bool { return true }
+	t.Cleanup(func() { resolveExe, exeOwnedByRoot = prev, prevOwn })
 }
 
 // enterBorderlands (controlplane_test.go) uses comm "evil".
@@ -98,5 +99,48 @@ func TestAllowlisted_ExitedOrUnresolvableProcessFailsClosed(t *testing.T) {
 	case <-got:
 	case <-time.After(2 * time.Second):
 		t.Fatal("when the executable cannot be verified the process must not be exempt")
+	}
+}
+
+// The hole a trusted-DIRECTORY check alone leaves: /usr/bin/python3 renaming its
+// own comm to the allowlisted name via prctl(PR_SET_NAME) must NOT be exempt.
+func TestAllowlisted_TrustedDirectoryBinaryWithAnotherNameIsNotExempt(t *testing.T) {
+	cp := newTestControlPlane(t)
+	withAllowlist(t, cp, "evil", "/usr/bin/python3", nil) // comm "evil", but the binary is python3
+	cp, got := enterBorderlandsWith(t, cp)
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a trusted-directory binary that merely renamed itself must still be contained")
+	}
+}
+
+func TestAllowlisted_NotRootOwnedIsNotExempt(t *testing.T) {
+	cp := newTestControlPlane(t)
+	withAllowlist(t, cp, "evil", "/usr/bin/evil", nil)
+	exeOwnedByRoot = func(string) bool { return false } // planted/replaced by an unprivileged user
+	cp, got := enterBorderlandsWith(t, cp)
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a binary that is not root-owned and sealed must not be exempt")
+	}
+}
+
+func TestExeMatchesName(t *testing.T) {
+	for _, c := range []struct {
+		exe, comm, path string
+		want            bool
+	}{
+		{"/usr/sbin/sshd", "sshd", "", true},
+		{"/usr/lib/systemd/systemd", "systemd", "", true},
+		{"/usr/bin/python3", "sshd", "", false},
+		{"/usr/bin/networkd-dispatcher", "networkd-dispat", "", true}, // comm is truncated to 15 bytes
+		{"/usr/sbin/sshd", "sshd", "/usr/sbin/sshd", true},
+		{"/usr/bin/sshd", "sshd", "/usr/sbin/sshd", false}, // exact path pinned
+	} {
+		if got := exeMatchesName(c.exe, c.comm, c.path); got != c.want {
+			t.Errorf("exeMatchesName(%q,%q,%q) = %v, want %v", c.exe, c.comm, c.path, got, c.want)
+		}
 	}
 }

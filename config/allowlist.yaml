@@ -4,12 +4,18 @@
 # on `kbctl policy reload`.
 #
 # What an entry does, and does not do:
-#   * An entry is honoured ONLY when the running process's real executable
-#     (/proc/<pid>/exe) is under a trusted system directory (/usr/bin, /usr/sbin,
-#     /bin, /sbin, /usr/lib/systemd, /lib/systemd, /usr/libexec). comm is chosen
-#     by the process itself, so a name match alone proves nothing: malware that
-#     calls itself "systemd" from /tmp is NOT exempt, and neither is a process
-#     that has exited or whose binary was deleted (fails closed).
+#   * An entry is honoured ONLY when ALL of these hold for the running process:
+#       - its real executable (/proc/<pid>/exe) is under a trusted system
+#         directory (/usr/bin, /usr/sbin, /bin, /sbin, /usr/lib/systemd,
+#         /lib/systemd, /usr/libexec);
+#       - that executable IS the binary the entry names: its basename equals the
+#         comm (compared at comm's 15-byte limit), or, if the entry sets
+#         `path:`, it equals that exact path. comm is chosen by the process
+#         (prctl PR_SET_NAME), so /usr/bin/python3 calling itself "sshd" is NOT
+#         exempt, and neither is malware calling itself "systemd" from /tmp;
+#       - the file is root-owned and not group- or world-writable;
+#       - the process is still running (an exited process fails closed).
+#     Optional `path: /usr/sbin/sshd` pins an entry to one exact executable.
 #   * It suppresses automatic containment only (the BORDERLANDS throttle,
 #     auto_terminate). Zone changes are still recorded, reported and audited; the
 #     zone_transition event carries allowlisted=<reason>, and an

@@ -23,8 +23,8 @@ func TestLoadAllowlist_ParsesEntriesAndRejectsBadOnes(t *testing.T) {
 	if err != nil || a.Len() != 2 {
 		t.Fatalf("want 2 entries, got %v / %d", err, a.Len())
 	}
-	if r, ok := a.Match("systemd"); !ok || r != "init" {
-		t.Errorf("systemd: %q %v", r, ok)
+	if e, ok := a.Match("systemd"); !ok || e.Reason != "init" || e.Path != "" {
+		t.Errorf("systemd: %+v %v", e, ok)
 	}
 	if _, ok := a.Match("cat"); ok {
 		t.Error("an unlisted comm must not match")
@@ -38,5 +38,20 @@ func TestLoadAllowlist_ParsesEntriesAndRejectsBadOnes(t *testing.T) {
 	os.WriteFile(bad, []byte("allow: [unclosed"), 0o644)
 	if _, err := LoadAllowlist(bad); err == nil {
 		t.Error("malformed YAML must be an error, not a silently empty allowlist")
+	}
+}
+
+func TestLoadAllowlist_OptionalAbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	ok := filepath.Join(dir, "a.yaml")
+	os.WriteFile(ok, []byte("allow:\n  - comm: sshd\n    reason: r\n    path: /usr/sbin/sshd\n"), 0o644)
+	a, err := LoadAllowlist(ok)
+	if e, _ := a.Match("sshd"); err != nil || e.Path != "/usr/sbin/sshd" {
+		t.Fatalf("path not kept: %v %+v", err, e)
+	}
+	bad := filepath.Join(dir, "b.yaml")
+	os.WriteFile(bad, []byte("allow:\n  - comm: sshd\n    path: sbin/sshd\n"), 0o644)
+	if _, err := LoadAllowlist(bad); err == nil {
+		t.Error("a relative path must be rejected")
 	}
 }
