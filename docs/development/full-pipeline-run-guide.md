@@ -71,7 +71,7 @@ cd kb-op/kbctl && go build -o kbctl . && cd ../..
 - `config/policy.yaml` — **live.** Enforcement thresholds, per-process policy overrides, additive sensitive paths. Consumed by `kbd` via `--policy`.
 - `config/agents.yaml` — **live.** AADS swarm composition, Ray mode, `control_plane.grpc_socket`. Consumed by `kb-aads/main.py` (hardcoded relative path `../config/agents.yaml`, no env override).
 - `config/kb.yaml` — **not consumed.** No Go code loads it (grep-verified across `kb-control-plane/`); `cmd/kbd/main.go` only takes `--db`/`--policy` flags. There's also a second, separate, equally-unconsumed `kb-control-plane/config/kb.yaml` with the same example schema — don't confuse the two directories.
-- `config/allowlist.yaml` — **not consumed.** Not wired into the Policy Engine yet (mirrors `kb-control-plane/config/allowlist.yaml`, which says so in its own header).
+- `config/allowlist.yaml` — **consumed by `kbd --allowlist`** (since 1.1.0; installed to `/etc/kb/allowlist.yaml`, re-read on policy reload). Suppresses automatic containment only, and only for executables under trusted system directories; see the file's header.
 - `config/dashboard.yaml` — **not consumed.** `kb-dashboard` has no `.env`/`VITE_*`/config loader in source today; this file records the intended shape only.
 
 This run guide only exercises the two live files. Don't assume `kb.yaml`/`allowlist.yaml`/`dashboard.yaml` change runtime behavior until a loader is actually written for them.

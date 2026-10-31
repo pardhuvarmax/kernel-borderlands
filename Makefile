@@ -70,7 +70,7 @@ install-pkg: install
 	done
 	install -Dm644 packaging/ssh/kb-operator.conf $(DESTDIR)$(SYSCONFDIR)/kb/sshd_kb-operator.conf
 	sed -i 's#/usr/local/bin#$(BINDIR)#g' $(DESTDIR)$(SYSCONFDIR)/kb/sshd_kb-operator.conf
-	for f in policy rules workloads; do \
+	for f in policy rules workloads allowlist; do \
 		install -Dm640 kb-control-plane/config/$$f.yaml $(DESTDIR)$(SYSCONFDIR)/kb/$$f.yaml; \
 	done
 	install -Dm640 config/agents.yaml $(DESTDIR)$(SYSCONFDIR)/kb/agents.yaml

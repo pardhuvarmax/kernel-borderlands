@@ -11,6 +11,7 @@ import (
 	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/controlplane"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/policy"
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +21,7 @@ var (
 	rulesPath           string
 	workloadsPath       string
 	workloadsPubKeyPath string
+	allowlistPath       string
 	httpAddr            string
 	grpcSocket          string
 )
@@ -42,6 +44,8 @@ func init() {
 		"path to rules.yaml (dynamic attack-chain rules pushed to the sensor at connect time); empty disables the push, sensor falls back to compiled-in default rules")
 	rootCmd.Flags().StringVar(&workloadsPath, "workloads", "config/workloads.yaml",
 		"path to workloads.yaml (CWP protected-workload registry, docs/features/CWP.md); empty disables CWP entirely. A missing file is not an error — CWP just has nothing registered")
+	rootCmd.Flags().StringVar(&allowlistPath, "allowlist", "config/allowlist.yaml",
+		"path to allowlist.yaml (comm names exempt from AUTOMATIC containment, honoured only when the running executable is under a trusted system directory; zone changes are still recorded and reported). A missing file is not an error; empty disables")
 	rootCmd.Flags().StringVar(&workloadsPubKeyPath, "workloads-pubkey", "",
 		"path to an Ed25519 public key (hex/base64/raw) that --workloads must be validly signed against (CWP.md §4.3/§11.4, see `kbctl workload sign`); empty (default) keeps CWP unsigned/opt-in")
 
@@ -74,6 +78,15 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	cp, err := controlplane.New(dbPath, policyPath, rulesPath, workloadsPath, workloadsPubKeyPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize control plane: %v", err)
+	}
+
+	al, err := policy.LoadAllowlist(allowlistPath)
+	if err != nil {
+		log.Fatalf("Failed to load allowlist: %v", err)
+	}
+	cp.SetAllowlist(allowlistPath, al)
+	if al.Len() > 0 {
+		log.Printf("[KB] allowlist: %d entr%s from %s (honoured only for executables under trusted system directories)", al.Len(), map[bool]string{true: "y", false: "ies"}[al.Len() == 1], allowlistPath)
 	}
 
 	if err := cp.Start(httpAddr, grpcSocket); err != nil {

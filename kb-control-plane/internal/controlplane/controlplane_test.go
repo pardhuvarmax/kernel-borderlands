@@ -676,11 +676,19 @@ func enterBorderlands(t *testing.T, observeOnly bool) (*ControlPlane, chan []byt
 	t.Helper()
 	cp := newTestControlPlane(t)
 	cp.observeOnly = observeOnly
+	return enterBorderlandsWith(t, cp)
+}
+
+// enterBorderlandsWith drives a SUSPICIOUS -> BORDERLANDS transition for pid 777
+// (comm "evil") on an already-configured control plane.
+func enterBorderlandsWith(t *testing.T, cp *ControlPlane) (*ControlPlane, chan []byte) {
+	t.Helper()
 	server, client := net.Pipe()
 	t.Cleanup(func() { server.Close(); client.Close() })
 	l, _ := ipc.NewTestListener(server)
 	cp.enforcer = enforcement.NewEnforcer(l, cp.store)
 	cp.store.UpsertProcessState(&ipc.ProcessStateMsg{PID: 777, Comm: "evil", StartTimeNs: 100})
+	cp.commCache.Store(uint32(777), "evil") // kbd learns comm from process_state messages
 
 	got := make(chan []byte, 1)
 	go func() {

@@ -1,13 +1,21 @@
-# allowlist.yaml — Process/path allowlist.
+# Process allowlist — comm names exempt from AUTOMATIC containment because they
+# are known, trusted, and have unusual-but-legitimate behaviour (init systems,
+# remote-access daemons, package managers). Read by kbd (--allowlist); re-read
+# on `kbctl policy reload`.
 #
-# SCAFFOLDING: not consumed by kb-control-plane yet — same status as
-# kb-control-plane/config/allowlist.yaml, which says outright "Not yet
-# consumed by the daemon". No Go code reads this file today; wiring it
-# into the Policy Engine alongside policy.yaml is future work, not done.
-#
-# Intent (once wired): comm names exempt from default scoring thresholds
-# because they are known, trusted, and have unusual-but-legitimate
-# behavioral signatures (init systems, package managers, etc.).
+# What an entry does, and does not do:
+#   * An entry is honoured ONLY when the running process's real executable
+#     (/proc/<pid>/exe) is under a trusted system directory (/usr/bin, /usr/sbin,
+#     /bin, /sbin, /usr/lib/systemd, /lib/systemd, /usr/libexec). comm is chosen
+#     by the process itself, so a name match alone proves nothing: malware that
+#     calls itself "systemd" from /tmp is NOT exempt, and neither is a process
+#     that has exited or whose binary was deleted (fails closed).
+#   * It suppresses automatic containment only (the BORDERLANDS throttle,
+#     auto_terminate). Zone changes are still recorded, reported and audited; the
+#     zone_transition event carries allowlisted=<reason>, and an
+#     ALLOWLIST_EXEMPT_* audit entry is written whenever the exemption applies.
+#   * Keep it short. A name like cat, tar or python cannot safely be listed: an
+#     attacker can run those too. Prefer thresholds in policy.yaml for those.
 
 allow:
   - comm: systemd

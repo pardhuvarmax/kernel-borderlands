@@ -13,7 +13,7 @@ license=('GPL3')
 depends=('glibc' 'systemd' 'openssh' 'libelf' 'zlib')
 makedepends=('go' 'rust' 'clang' 'bpf' 'libbpf' 'nodejs' 'npm' 'make')
 optdepends=('python: kb-aads agent swarm (also needs a venv, see README.Debian text in /usr/share/doc)')
-backup=(etc/kb/policy.yaml etc/kb/rules.yaml etc/kb/workloads.yaml
+backup=(etc/kb/policy.yaml etc/kb/rules.yaml etc/kb/workloads.yaml etc/kb/allowlist.yaml
         etc/kb/agents.yaml etc/kb/sshd_kb-operator.conf)
 install=kernel-borderlands.install
 # !lto: makepkg's default -flto turns the C objects of Rust's `ring` crate (kb-checker)

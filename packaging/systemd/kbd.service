@@ -28,7 +28,7 @@ EnvironmentFile=-/etc/kb/api.env
 # host). Give ONLY the gRPC socket to group kb once kbd has signalled ready (Type=notify, so
 # the socket exists). kbd.sock/kbct.sock stay root-only. '-' tolerates a missing kb group.
 ExecStartPost=-/usr/bin/chgrp kb /run/kb/kba.sock
-ExecStart=/usr/local/bin/kbd --db /var/lib/kbd/state.db --policy /etc/kb/policy.yaml --rules /etc/kb/rules.yaml --workloads /etc/kb/workloads.yaml
+ExecStart=/usr/local/bin/kbd --db /var/lib/kbd/state.db --policy /etc/kb/policy.yaml --rules /etc/kb/rules.yaml --workloads /etc/kb/workloads.yaml --allowlist /etc/kb/allowlist.yaml
 Restart=always
 RestartSec=3
 RuntimeDirectory=kb

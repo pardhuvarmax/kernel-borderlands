@@ -103,9 +103,12 @@ static const kb_attack_rule_t rules_table[] = {
     // ── SUSPICIOUS → BORDERLANDS Rules ─────────────────────────────────────────
     {
         .name = "rwx_memory_abuse",
-        .description = "RWX memory mapping or write to proc memory detected",
+        // RWX mapping alone stays gated behind SUSPICIOUS (JITs and browsers map
+        // RWX legitimately). Cross-process memory writes are handled by
+        // proc_mem_write_borderlands below, which does not need SUSPICIOUS first.
+        .description = "RWX memory mapping detected by a suspicious process",
         .required_flags = 0,
-        .optional_flags = KB_EV_RWX_MAPPING | KB_EV_PROC_MEM_WRITE | KB_EV_PROCESS_VM_WRITE,
+        .optional_flags = KB_EV_RWX_MAPPING,
         .optional_min = 1,
         .sequence = NULL,
         .sequence_len = 0,
@@ -142,7 +145,14 @@ static const kb_attack_rule_t rules_table[] = {
     },
     {
         .name = "proc_mem_write_borderlands",
-        .description = "Write to /proc/*/mem by suspicious process",
+        // Cross-process memory write (process_vm_writev / proc mem write). Per
+        // docs/specifications/kernel_borderlands_specification.md (state diagram:
+        // "OBSERVED --> BORDERLANDS : Memory Injection (process_vm_writev)" and
+        // the shellcode_injection sample rule, min_source_state SAFE) this is a
+        // direct promotion from ANY state: requiring SUSPICIOUS first let a
+        // clean process inject undetected. Legitimate users (debuggers, CRIU)
+        // exist; BORDERLANDS applies the containment policy, as the spec intends.
+        .description = "Cross-process memory write (process_vm_writev / proc mem) from any state",
         .required_flags = KB_EV_PROC_MEM_WRITE,
         .optional_flags = 0,
         .optional_min = 0,
@@ -151,7 +161,7 @@ static const kb_attack_rule_t rules_table[] = {
         .window_ns = 0,
         .target_state = KB_STATE_BORDERLANDS,
         .reason = KB_REASON_PROC_MEM_WRITE,
-        .min_source_state = KB_STATE_SUSPICIOUS
+        .min_source_state = KB_STATE_SAFE
     },
     {
         .name = "rapid_connect_burst_borderlands",

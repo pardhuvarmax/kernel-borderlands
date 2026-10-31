@@ -175,6 +175,72 @@ static void test_time_window_validation(void)
     assert(r.new_state != KB_STATE_COMPROMISED);
 }
 
+// Test 5: spec state diagram, "OBSERVED --> BORDERLANDS : Memory Injection (process_vm_writev)"
+// and the shellcode_injection sample rule (min_source_state SAFE): a cross-process
+// memory write promotes straight to BORDERLANDS from a CLEAN process. It used to
+// need SUSPICIOUS first, so a clean process could inject without any zone change.
+static void test_cross_process_write_from_clean_process_is_borderlands(void)
+{
+    kb_evidence_init();
+    kb_behavior_init();
+    kb_scoring_init();
+
+    uint64_t ts = 1000000000ULL;
+    kb_evidence_t *ev = kb_evidence_get_or_create(5001, 1, 1000, "injector", ts);
+    kb_evidence_set_flag(ev, KB_EV_PROC_MEM_WRITE, ts);        // what the sensor sets for process_vm_writev
+    kb_evidence_push_seq(ev, KB_SEQ_PROC_MEM_WRITE);
+
+    kb_behavior_result_t r = kb_behavior_evaluate(ev);
+    assert(r.state_changed == 1);
+    assert(r.prev_state == KB_STATE_SAFE);
+    assert(r.new_state == KB_STATE_BORDERLANDS);
+    assert(r.reason == KB_REASON_PROC_MEM_WRITE);
+}
+
+// Test 6: a plain RWX mapping (JITs, browsers) must NOT jump straight to BORDERLANDS
+// from a clean process; it still needs SUSPICIOUS first.
+static void test_rwx_mapping_alone_from_clean_process_is_not_borderlands(void)
+{
+    kb_evidence_init();
+    kb_behavior_init();
+    kb_scoring_init();
+
+    uint64_t ts = 1000000000ULL;
+    kb_evidence_t *ev = kb_evidence_get_or_create(5002, 1, 1000, "jit", ts);
+    kb_evidence_set_flag(ev, KB_EV_RWX_MAPPING, ts);
+    kb_evidence_push_seq(ev, KB_SEQ_RWX_MAP);
+
+    kb_behavior_result_t r = kb_behavior_evaluate(ev);
+    kb_behavior_record_t *rec = kb_behavior_get(5002);
+    assert(rec != NULL);
+    assert(rec->state != KB_STATE_BORDERLANDS && rec->state != KB_STATE_COMPROMISED);
+    (void)r;
+}
+
+// Test 7: ...but RWX from an already-SUSPICIOUS process still escalates (rwx_memory_abuse).
+static void test_rwx_mapping_from_suspicious_process_is_borderlands(void)
+{
+    kb_evidence_init();
+    kb_behavior_init();
+    kb_scoring_init();
+
+    uint64_t ts = 1000000000ULL;
+    kb_evidence_t *ev = kb_evidence_get_or_create(5003, 1, 1000, "p", ts);
+    kb_evidence_set_flag(ev, KB_EV_SHADOW_ACCESS, ts);          // -> SUSPICIOUS (credential file access)
+    kb_evidence_push_seq(ev, KB_SEQ_SHADOW_ACCESS);
+    kb_behavior_evaluate(ev);
+    kb_behavior_record_t *rec = kb_behavior_get(5003);
+    assert(rec != NULL && rec->state >= KB_STATE_OBSERVED);
+
+    ts += 1000000000ULL;
+    kb_evidence_set_flag(ev, KB_EV_RWX_MAPPING, ts);
+    kb_evidence_push_seq(ev, KB_SEQ_RWX_MAP);
+    for (int i = 0; i < 4; i++)                                  // let the staged machine step up
+        kb_behavior_evaluate(ev);
+    rec = kb_behavior_get(5003);
+    assert(rec->state >= KB_STATE_BORDERLANDS);
+}
+
 int main(void)
 {
     printf("╔══════════════════════════════════════════════╗\n");
@@ -185,6 +251,9 @@ int main(void)
     RUN_TEST(test_sequential_transitions);
     RUN_TEST(test_direct_ioc_compromised);
     RUN_TEST(test_time_window_validation);
+    RUN_TEST(test_cross_process_write_from_clean_process_is_borderlands);
+    RUN_TEST(test_rwx_mapping_alone_from_clean_process_is_not_borderlands);
+    RUN_TEST(test_rwx_mapping_from_suspicious_process_is_borderlands);
 
     printf("\nAll unit tests passed successfully!\n");
     return 0;

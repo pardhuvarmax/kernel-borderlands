@@ -348,6 +348,9 @@ func (cp *ControlPlane) ReloadPolicy(
 	if err != nil {
 		return &pb.ReloadPolicyResponse{Success: false, Message: err.Error()}, nil
 	}
+	if aerr := cp.reloadAllowlist(); aerr != nil {
+		return &pb.ReloadPolicyResponse{Success: false, Message: "policy reloaded but allowlist failed: " + aerr.Error()}, nil
+	}
 	cp.audit.Log("POLICY_RELOAD", cp.policyPath, "OPERATOR", "")
 	return &pb.ReloadPolicyResponse{Success: ok, Message: msg}, nil
 }

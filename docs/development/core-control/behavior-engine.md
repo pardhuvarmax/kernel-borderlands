@@ -27,7 +27,7 @@ graph TD
 
 ## 2. Behavioral States & Rules Mapping
 
-Process states are strictly ordered to prevent detection evasion (except for direct high-confidence compromises). State transitions are driven by specific rules:
+Process states are strictly ordered to prevent detection evasion, except for **direct promotions**: a rule that declares a source state two or more levels below its target (`min_source_state + 1 < target_state`) is exempt from the one-level-at-a-time safety clamp in `kb_behavior_evaluate()`. The shipped direct promotions are `known_ioc_sequence` (SAFE → COMPROMISED) and `proc_mem_write_borderlands` (SAFE → BORDERLANDS; the specification's `OBSERVED --> BORDERLANDS : Memory Injection (process_vm_writev)` edge and its `shellcode_injection` sample rule). State transitions are driven by specific rules:
 
 | Source State | Target State | Rule Name | Matching Criteria | Reason |
 | :--- | :--- | :--- | :--- | :--- |
@@ -37,7 +37,8 @@ Process states are strictly ordered to prevent detection evasion (except for dir
 | **OBSERVED** | **SUSPICIOUS** | `multi_anomaly_suspicious` | 3+ distinct anomalous indicators set | `KB_REASON_MULTI_ANOMALY` |
 | **OBSERVED** | **SUSPICIOUS** | `privilege_plus_network_suspicious` | Privilege change + outbound connect | `KB_REASON_PRIVILEGE_PLUS_NETWORK` |
 | **OBSERVED** | **SUSPICIOUS** | `cred_file_access_suspicious` | Touch shadow, passwd, sudoers, or SSH key | `KB_REASON_CRED_FILE_ACCESS` |
-| **SUSPICIOUS** | **BORDERLANDS** | `rwx_memory_abuse` | RWX mapping or proc memory write | `KB_REASON_RWX_MEMORY` |
+| **SUSPICIOUS** | **BORDERLANDS** | `rwx_memory_abuse` | RWX mapping by an already-suspicious process (a plain RWX mapping from a clean process is not enough: JITs and browsers map RWX) | `KB_REASON_RWX_MEMORY` |
+| **any** (Direct) | **BORDERLANDS** | `proc_mem_write_borderlands` | Cross-process memory write (`process_vm_writev` / proc mem), from any state | `KB_REASON_PROC_MEM_WRITE` |
 | **SUSPICIOUS** | **BORDERLANDS** | `ptrace_injection_borderlands` | Ptrace call from suspicious process | `KB_REASON_PTRACE_INJECTION` |
 | **SUSPICIOUS** | **BORDERLANDS** | `c2_port_connection` | Connection to common C2 port (e.g. 4444) | `KB_REASON_C2_PORT_CONNECT` |
 | **BORDERLANDS** | **COMPROMISED** | `reverse_shell_compromised` | Sequence: Outbound Connect $\rightarrow$ Spawn Shell | `KB_REASON_REVERSE_SHELL_CHAIN` |

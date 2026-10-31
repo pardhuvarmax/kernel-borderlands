@@ -75,11 +75,9 @@ rules:
     min_source_state: KB_STATE_BORDERLANDS
 
   - name: rwx_memory_abuse
-    description: "RWX memory mapping or write to proc memory detected"
+    description: "RWX memory mapping detected by a suspicious process"
     optional_flags:
       - KB_EV_RWX_MAPPING
-      - KB_EV_PROC_MEM_WRITE
-      - KB_EV_PROCESS_VM_WRITE
     optional_min: 1
     target_state: KB_STATE_BORDERLANDS
     reason: KB_REASON_RWX_MEMORY
@@ -103,12 +101,16 @@ rules:
     min_source_state: KB_STATE_SUSPICIOUS
 
   - name: proc_mem_write_borderlands
-    description: "Write to /proc/*/mem by suspicious process"
+    # Direct promotion from ANY state, per the specification's state diagram
+    # (OBSERVED --> BORDERLANDS on process_vm_writev) and its shellcode_injection
+    # sample rule (min_source_state SAFE). Requiring SUSPICIOUS first let a clean
+    # process inject undetected.
+    description: "Cross-process memory write (process_vm_writev / proc mem) from any state"
     required_flags:
       - KB_EV_PROC_MEM_WRITE
     target_state: KB_STATE_BORDERLANDS
     reason: KB_REASON_PROC_MEM_WRITE
-    min_source_state: KB_STATE_SUSPICIOUS
+    min_source_state: KB_STATE_SAFE
 
   - name: rapid_connect_burst_borderlands
     description: "Rapid connections to multiple distinct destination IPs"

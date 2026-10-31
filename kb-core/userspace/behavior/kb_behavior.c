@@ -161,8 +161,19 @@ kb_behavior_result_t kb_behavior_evaluate(const kb_evidence_t *ev)
         kb_behavior_state_t prev = rec->state;
         kb_behavior_state_t next = matched_rule->target_state;
 
-        // Safety clamp: prevent state jumps (unless to COMPROMISED)
-        if (next > prev + 1 && next != KB_STATE_COMPROMISED) {
+        // Safety clamp: prevent state jumps (unless to COMPROMISED), so evidence
+        // has to accumulate in order. EXCEPTION: a rule that explicitly declares
+        // a source state two or more levels below its target
+        // (min_source_state + 1 < target_state) is a documented DIRECT promotion
+        // and is exempt. The clamp used to block these as well, which defeated
+        // the specification's "OBSERVED --> BORDERLANDS : Memory Injection
+        // (process_vm_writev)" edge and let a clean process inject with no zone
+        // change: it advanced one level per evaluation and an injector that
+        // exits after one syscall never finished the climb. In the shipped
+        // rules only proc_mem_write_borderlands (SAFE -> BORDERLANDS) and
+        // known_ioc_sequence (already allowed above) qualify.
+        int direct_promotion = (int)next > (int)matched_rule->min_source_state + 1;
+        if (next > prev + 1 && next != KB_STATE_COMPROMISED && !direct_promotion) {
             next = prev + 1;
         }
 

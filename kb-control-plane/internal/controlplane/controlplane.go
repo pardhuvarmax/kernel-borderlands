@@ -75,6 +75,9 @@ type ControlPlane struct {
 	// observeOnly: see autoContain.
 	observeOnly bool
 
+	// allow: operator allowlist (allowlist.go); trusted-executable gated.
+	allow allowlistHolder
+
 	// comm cache — pid → comm (populated by ProcessState messages)
 	commCache sync.Map
 
@@ -665,6 +668,13 @@ func (cp *ControlPlane) OnNetFlow(msg *ipc.NetFlowMsg) {
 // names what actually happened: it never claims a throttle in observe-only mode.
 func (cp *ControlPlane) autoContain(pid uint32, comm string, level pb.ContainmentLevel, reason, auditAction, auditReason string) {
 	subject := fmt.Sprintf("pid=%d comm=%s", pid, comm)
+	if reason, exe, ok := cp.allowlisted(pid, comm); ok {
+		// Suppresses AUTOMATIC containment only; the zone change was already
+		// recorded and reported, and this entry makes the exemption auditable.
+		cp.audit.Log("ALLOWLIST_EXEMPT_"+auditAction, subject, "SYSTEM_AUTO",
+			fmt.Sprintf("allowlisted (%s; exe=%s); not applied: %s (level=%s)", reason, exe, auditReason, level))
+		return
+	}
 	if cp.observeOnly {
 		cp.audit.Log("OBSERVE_ONLY_WOULD_"+auditAction, subject, "SYSTEM_AUTO",
 			fmt.Sprintf("%s (level=%s, not applied: KB_OBSERVE_ONLY=1)", auditReason, level))
@@ -745,16 +755,22 @@ func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
 		}
 	}
 
+	ztMeta := map[string]string{
+		"from_zone": msg.FromZone.String(),
+		"to_zone":   msg.ToZone.String(),
+	}
+	// Consumers (swarm, operators, lab labels) see the TRUE zone plus the
+	// context that this is an allowlisted, verified system binary.
+	if reason, _, ok := cp.allowlisted(msg.PID, comm); ok {
+		ztMeta["allowlisted"] = reason
+	}
 	cp.fanOutEvent(&pb.KBEvent{
 		Pid:        msg.PID,
 		Comm:       comm,
 		EventType:  "zone_transition",
 		ScoreDelta: float32(msg.Score),
 		Timestamp:  int64(msg.TsNs),
-		Metadata: map[string]string{
-			"from_zone": msg.FromZone.String(),
-			"to_zone":   msg.ToZone.String(),
-		},
+		Metadata:   ztMeta,
 	})
 }
 
