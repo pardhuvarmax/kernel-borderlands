@@ -30,6 +30,8 @@ Benign: `benign_compile`, `benign_database`, `benign_web`, `benign_admin`, `beni
 | tar | `sudo tar czf` | `benign_backup_etc`: whole `/etc` to a normal backup path, checksum-verified, no network | `exfil_staging`: only `/etc/shadow`, `/etc/gshadow`, `/etc/ssh` into a hidden file, then loopback connects |
 | shadow read | root read of `/etc/shadow` | `benign_credential_audit`: `grep -c`, `awk`, `wc -l` (counts only) | `credential_dump`: `cat` written to a file, then a connect to port 4444 |
 
+**Benign work that reads secrets AND uses the network.** The benign halves above make no network connection, so "has network activity" separates them from the attacks by construction. `benign_backup_remote` (the same `sudo tar` over `/etc`, then a real upload to a loopback backup host) and `benign_credential_report` (a counts-only `/etc/shadow` audit whose summary is sent to a loopback monitoring endpoint) read the same secrets and move real bytes. Any "secret read plus network in one process tree" rule has to be tested against them. They differ from the attacks in destination (a loopback "backup host" port, not the C2-style ports) and volume, which today's `process_state` telemetry does not carry.
+
 ## Running a capture
 1. Put `kbd` in **observe-only** mode so automatic containment cannot truncate the attacks (the runner refuses otherwise):
    ```

@@ -190,3 +190,33 @@ def test_matched_pairs_use_the_same_binary_so_a_model_cannot_separate_them_by_na
     # the attack halves of the pairs differ from the benign halves by an outbound connection
     assert "connect_ex" in body("exfil_staging") and "connect_ex" not in body("backup_etc_workload")
     assert "connect_ex" in body("credential_dump") and "connect_ex" not in body("credential_audit_workload")
+
+
+def test_network_using_benign_pair_members_read_secrets_and_connect_like_the_attacks():
+    """A 'secret read + network in one tree' rule must meet benign work that does both, or
+    it looks better than it is. These benign scenarios read /etc/shadow AND really connect
+    and move bytes (to a loopback sink), matched to the attacks by tool."""
+    src = open(os.path.join(LAB, "payloads.py")).read()
+    def body(fn):
+        a = src.index(f"def {fn}(")
+        return src[a:src.index("\ndef ", a + 1)]
+    b1, b2 = body("backup_remote_workload"), body("credential_report_workload")
+    assert '"tar"' in b1 and "/etc" in b1 and "_upload(" in b1          # tar of /etc, then a real upload
+    assert '"/etc/shadow"' in b2 and "_upload(" in b2                    # shadow read, then a real upload
+    assert "127.0.0.3" in b1 and "127.0.0.3" in b2                       # loopback only
+    assert payloads.SCENARIOS["benign_backup_remote"][0] == "benign"
+    assert payloads.SCENARIOS["benign_credential_report"][0] == "benign"
+    s1 = payloads._Sink("127.0.0.1"); s1.start()
+    try:
+        import tempfile
+        f = tempfile.NamedTemporaryFile(delete=False); f.write(b"x" * 100000); f.close()
+        assert payloads._upload("127.0.0.1", s1.port, f.name) == 100000
+        deadline = time.time() + 3
+        while time.time() < deadline and s1.received < 100000:
+            time.sleep(0.05)
+        assert s1.received == 100000
+        os.unlink(f.name)
+    finally:
+        s1.close()
+    with pytest.raises(ValueError):
+        payloads._Sink("8.8.8.8")

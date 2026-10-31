@@ -333,6 +333,86 @@ def credential_audit_workload(wd, rng, act):
             time.sleep(rng.uniform(0.2, 0.6))
 
 
+class _Sink(threading.Thread):
+    """A loopback 'remote host' that accepts a connection and counts what it receives, so
+    the benign upload scenarios make a REAL connection that moves real bytes."""
+
+    def __init__(self, host):
+        super().__init__(daemon=True)
+        assert_loopback(host)
+        self.srv = socket.socket()
+        self.srv.bind((host, 0))
+        self.srv.listen(4)
+        self.srv.settimeout(1.0)
+        self.port = self.srv.getsockname()[1]
+        self.received = 0
+        self._stop_flag = threading.Event()
+
+    def run(self):
+        while not self._stop_flag.is_set():
+            try:
+                c, _ = self.srv.accept()
+            except (socket.timeout, OSError):
+                continue
+            with c:
+                while True:
+                    data = c.recv(65536)
+                    if not data:
+                        break
+                    self.received += len(data)
+
+    def close(self):
+        self._stop_flag.set()
+        self.join(timeout=2)
+        self.srv.close()
+
+
+def _upload(host, port, path):
+    n = 0
+    with socket.create_connection((host, port), timeout=5) as c, open(path, "rb") as f:
+        while chunk := f.read(65536):
+            c.sendall(chunk)
+            n += len(chunk)
+    return n
+
+
+def backup_remote_workload(wd, rng, act):
+    """HARD NEGATIVE for any 'secret read + network' rule, matched to exfil_staging:
+    the same `sudo tar` over /etc (including /etc/shadow), then an upload to a backup
+    host, i.e. a legitimate offsite backup. Reads secrets AND uses the network."""
+    sink = _Sink("127.0.0.3")
+    sink.start()
+    try:
+        for rnd in range(3):
+            archive = os.path.join(wd, f"etc-offsite-{rnd}.tgz")
+            act("backup_etc", round=rnd)
+            run(["sudo", "-n", "tar", "czf", archive, "/etc"], timeout=90)
+            sent = _upload("127.0.0.3", sink.port, archive)
+            act("upload_to_backup_host", round=rnd, bytes=sent)
+            time.sleep(rng.uniform(0.5, 1.5))
+    finally:
+        sink.close()
+
+
+def credential_report_workload(wd, rng, act):
+    """HARD NEGATIVE for 'secret read + network', matched to credential_dump: the same
+    root read of /etc/shadow, but only counts are computed and a small summary is sent
+    to a compliance/monitoring endpoint, as an audit agent would."""
+    sink = _Sink("127.0.0.3")
+    sink.start()
+    try:
+        for rnd in range(3):
+            act("credential_audit", round=rnd)
+            out = os.path.join(wd, f"report-{rnd}.json")
+            with open(out, "w") as f:
+                run(["sudo", "-n", "grep", "-c", "^root:", "/etc/shadow"], stdout=f)
+            sent = _upload("127.0.0.3", sink.port, out)
+            act("report_to_monitoring", round=rnd, bytes=sent)
+            time.sleep(rng.uniform(0.3, 0.8))
+    finally:
+        sink.close()
+
+
 def idle_workload(wd, rng, act):
     act("idle")
     time.sleep(25)
@@ -356,6 +436,8 @@ SCENARIOS = {
     "benign_idle":            ("benign", "idle",                 idle_workload,           26),
     "benign_backup_etc":      ("benign", "backup_etc",           backup_etc_workload,     14),
     "benign_credential_audit":("benign", "credential_audit",     credential_audit_workload, 8),
+    "benign_backup_remote":   ("benign", "backup_remote",        backup_remote_workload,  14),
+    "benign_credential_report":("benign", "credential_report",   credential_report_workload, 8),
 }
 
 
