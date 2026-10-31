@@ -171,3 +171,22 @@ def test_expand_pids_recovers_short_lived_children_through_ppid_chains():
     # and the attribution now picks the grandchild up
     labelled = [(e["pid"], hit is not None) for e, hit, _ in labeling.label_events(events, [out])]
     assert (102, True) in labelled and (200, False) in labelled
+
+
+def test_matched_pairs_use_the_same_binary_so_a_model_cannot_separate_them_by_name():
+    """The first corpus' hard negatives used different tools from the attacks, which lets a
+    model separate them by process name alone. Each pair here shares its tool and differs
+    only in context."""
+    src = open(os.path.join(LAB, "payloads.py")).read()
+    def body(fn):
+        a = src.index(f"def {fn}(")
+        return src[a:src.index("\ndef ", a + 1)]
+    for attack, benign, tool in (("exfil_staging", "backup_etc_workload", '"tar"'),
+                                 ("credential_dump", "credential_audit_workload", '"/etc/shadow"')):
+        assert tool in body(attack) and tool in body(benign), f"{attack} / {benign} must share {tool}"
+    kinds = {n: payloads.SCENARIOS[n][0] for n in ("exfil_staging", "credential_dump", "benign_backup_etc", "benign_credential_audit")}
+    assert kinds == {"exfil_staging": "attack", "credential_dump": "attack",
+                     "benign_backup_etc": "benign", "benign_credential_audit": "benign"}
+    # the attack halves of the pairs differ from the benign halves by an outbound connection
+    assert "connect_ex" in body("exfil_staging") and "connect_ex" not in body("backup_etc_workload")
+    assert "connect_ex" in body("credential_dump") and "connect_ex" not in body("credential_audit_workload")

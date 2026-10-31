@@ -19,9 +19,16 @@ policies and every evaluation depend on (plan: `docs/development/control-aads/le
 | `containment_demo.py` | Older single-process demo; not part of the corpus pipeline. |
 
 ## Scenarios (`runner.py --list`)
-Attacks: `credential_access`, `privilege_escalation`, `process_injection`, `network_c2`, `memory_exploit`, `evasion_slow`.
-Benign: `benign_compile`, `benign_database`, `benign_web`, `benign_admin`, `benign_idle`, and
+Attacks: `credential_access`, `privilege_escalation`, `process_injection`, `network_c2`, `memory_exploit`, `evasion_slow`, `exfil_staging`, `credential_dump`.
+Benign: `benign_compile`, `benign_database`, `benign_web`, `benign_admin`, `benign_idle`, `benign_backup_etc`, `benign_credential_audit`, and
 **`benign_admin_privileged`** (hard negatives: `sudo tar` of `/etc` including `/etc/shadow`, `sudo systemctl status`, ...: legitimate work that touches the same files and privilege paths as the attacks).
+
+**Matched pairs** (added after the first baselines): a model must not be able to separate benign from malicious by process *name*, so each pair uses the same tool and differs only in context.
+
+| Pair | Same tool | Benign | Malicious |
+| --- | --- | --- | --- |
+| tar | `sudo tar czf` | `benign_backup_etc`: whole `/etc` to a normal backup path, checksum-verified, no network | `exfil_staging`: only `/etc/shadow`, `/etc/gshadow`, `/etc/ssh` into a hidden file, then loopback connects |
+| shadow read | root read of `/etc/shadow` | `benign_credential_audit`: `grep -c`, `awk`, `wc -l` (counts only) | `credential_dump`: `cat` written to a file, then a connect to port 4444 |
 
 ## Running a capture
 1. Put `kbd` in **observe-only** mode so automatic containment cannot truncate the attacks (the runner refuses otherwise):
