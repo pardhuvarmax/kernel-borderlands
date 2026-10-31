@@ -127,6 +127,15 @@ kb_scoring_result_t kb_scoring_update_syscall_entropy(uint32_t pid, double entro
 void kb_scoring_set_syscall_entropy_lifetime(uint32_t pid, double entropy_0_100);
 
 kb_process_state_t *kb_scoring_get_state(uint32_t pid);
+
+// Number of in-use slots, and a rebuild that drops entries whose process no
+// longer exists. Exit events are lost when the ring buffer overflows, leaving
+// stale entries that lengthen every linear-probe chain and slow scoring down
+// exactly when the sensor is already behind. alive(pid) returns nonzero if the
+// process still exists. Returns how many entries were dropped.
+int kb_scoring_occupancy(void);
+uint64_t kb_scoring_evictions(void);  // entries evicted because a probe window was full
+int kb_scoring_reap(int (*alive)(uint32_t pid));
 void kb_scoring_remove(uint32_t pid);
 const char *kb_zone_name(kb_zone_t z);
 

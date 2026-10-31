@@ -150,6 +150,26 @@ static int send_framed(int fd, const void *payload, size_t len)
         (uint8_t)((len >> 24) & 0xFF),
     };
 
+    // Common case: the whole frame is small, so send prefix + payload with ONE
+    // write() instead of two (halves the syscalls per event and means the
+    // peer never sees a length prefix without its body from a single send).
+    if (len <= 1024) {
+        uint8_t frame[4 + 1024];
+        memcpy(frame, len_prefix, 4);
+        memcpy(frame + 4, payload, len);
+        size_t total = 4 + len, sent = 0;
+        while (sent < total) {
+            ssize_t n = write(fd, frame + sent, total - sent);
+            if (n < 0) {
+                if (errno == EINTR)
+                    continue;
+                return -1;
+            }
+            sent += (size_t)n;
+        }
+        return 0;
+    }
+
     struct iovec_like { const uint8_t *base; size_t len; } parts[2] = {
         { len_prefix, sizeof(len_prefix) },
         { (const uint8_t *)payload, len },

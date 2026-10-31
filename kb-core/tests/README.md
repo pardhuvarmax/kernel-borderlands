@@ -17,6 +17,12 @@ Tests the core state machine transitions, sequence validation, time windows, and
     -   *Attack Chains*: Matches reverse shell and ptrace injection sequences.
     -   *Timing*: Validates time-window constraints on sequence patterns.
 
+### 1b. Per-pid Table Tests (`test_tables.c`)
+Regression tests for the scoring, evidence and behavior tables (bounded probing, eviction, stale-entry reap, no NULL records under a process storm). No root or kernel needed; the build line is in the file header.
+
+### 1c. ELF Symbol Offset Test (`test_elf_symbols.c`)
+Regression test for the uprobe offset bug (virtual address vs file offset for static non-PIE binaries such as Go's `tailscaled`). Builds fixtures with `gcc`; no root or kernel needed; the build line is in the file header.
+
 ### 2. Live Hook Verification Script (`test_all_hooks.sh`)
 Integration script that triggers all 9 telemetry event types sequentially to check live sensor performance.
 *   **Passwordless Sudo Bypass**: Includes a helper `run_sudo_optional` that prompts for sudo authorization but gracefully times out after 5 seconds to bypass password blocks, continuing without sudo (failed opens still trigger VFS alerts!).

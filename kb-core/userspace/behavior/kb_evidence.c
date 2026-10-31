@@ -13,20 +13,31 @@ void kb_evidence_init(void)
     memset(store, 0, sizeof(store));
 }
 
+// Bounded-probe table. The old table probed linearly over the WHOLE table with
+// hash = pid % N: sequential pids formed one giant cluster, so a lookup under a
+// process storm (or after lost exit events left stale entries) scanned
+// thousands of slots per event, 40-55% of the sensor's CPU, which made it slower
+// exactly when it was behind. Now: scatter hash, look at KB_PROBE_MAX slots at
+// most, and when that window is full evict its least-evidenced entry (never an
+// entry with more evidence while a quieter one is available). Lookup cost is
+// constant. It also no longer stops at an empty slot, so a freed slot cannot
+// hide entries behind it.
+#define KB_PROBE_MAX 64
+static uint64_t evictions;
+uint64_t kb_evidence_evictions(void) { return evictions; }
+
 static uint32_t ev_slot(uint32_t pid)
 {
-    return pid % KB_EVIDENCE_MAX_PROCS;
+    return (uint32_t)(((uint64_t)pid * 2654435761u) % KB_EVIDENCE_MAX_PROCS);
 }
 
 kb_evidence_t *kb_evidence_get(uint32_t pid)
 {
     uint32_t idx = ev_slot(pid);
-    for (uint32_t i = 0; i < KB_EVIDENCE_MAX_PROCS; i++) {
+    for (uint32_t i = 0; i < KB_PROBE_MAX; i++) {
         uint32_t s = (idx + i) % KB_EVIDENCE_MAX_PROCS;
         if (store[s].in_use && store[s].pid == pid)
             return &store[s];
-        if (!store[s].in_use)
-            return NULL;
     }
     return NULL;
 }
@@ -36,23 +47,70 @@ kb_evidence_t *kb_evidence_get_or_create(uint32_t pid, uint32_t ppid,
                                            uint64_t start_time_ns)
 {
     uint32_t idx = ev_slot(pid);
-    for (uint32_t i = 0; i < KB_EVIDENCE_MAX_PROCS; i++) {
+    int free_slot = -1, victim = -1;
+    int victim_imp = 1 << 30;
+    for (uint32_t i = 0; i < KB_PROBE_MAX; i++) {
         uint32_t s = (idx + i) % KB_EVIDENCE_MAX_PROCS;
-        if (store[s].in_use && store[s].pid == pid)
-            return &store[s];
-        if (!store[s].in_use) {
-            memset(&store[s], 0, sizeof(kb_evidence_t));
-            store[s].pid           = pid;
-            store[s].ppid          = ppid;
-            store[s].uid           = uid;
-            store[s].start_time_ns = start_time_ns;
-            store[s].in_use        = 1;
-            if (comm)
-                strncpy(store[s].comm, comm, sizeof(store[s].comm) - 1);
-            return &store[s];
+        if (store[s].in_use) {
+            if (store[s].pid == pid)
+                return &store[s];
+            int imp = __builtin_popcountll(store[s].flags);
+            if (imp < victim_imp) { victim_imp = imp; victim = (int)s; }
+        } else if (free_slot < 0) {
+            free_slot = (int)s;
         }
     }
-    return NULL; // table full
+    int s = free_slot >= 0 ? free_slot : victim;
+    if (free_slot < 0)
+        evictions++;
+    memset(&store[s], 0, sizeof(kb_evidence_t));
+    store[s].pid           = pid;
+    store[s].ppid          = ppid;
+    store[s].uid           = uid;
+    store[s].start_time_ns = start_time_ns;
+    store[s].in_use        = 1;
+    if (comm)
+        strncpy(store[s].comm, comm, sizeof(store[s].comm) - 1);
+    return &store[s];
+}
+
+int kb_evidence_occupancy(void)
+{
+    int n = 0;
+    for (uint32_t i = 0; i < KB_EVIDENCE_MAX_PROCS; i++)
+        if (store[i].in_use) n++;
+    return n;
+}
+
+// Linear probing without tombstones: rebuild the table from the survivors.
+// (kb_evidence_remove below has the same chain-breaking weakness; a rebuild
+// also repairs chains it damaged.)
+int kb_evidence_reap(int (*alive)(uint32_t pid))
+{
+    static kb_evidence_t keep[KB_EVIDENCE_MAX_PROCS];
+    int kept = 0, dropped = 0;
+    for (uint32_t i = 0; i < KB_EVIDENCE_MAX_PROCS; i++) {
+        if (!store[i].in_use)
+            continue;
+        if (alive(store[i].pid))
+            keep[kept++] = store[i];
+        else
+            dropped++;
+    }
+    if (!dropped)
+        return 0;
+    memset(store, 0, sizeof(store));
+    for (int k = 0; k < kept; k++) {
+        uint32_t idx = ev_slot(keep[k].pid);
+        for (uint32_t i = 0; i < KB_PROBE_MAX; i++) {
+            uint32_t s = (idx + i) % KB_EVIDENCE_MAX_PROCS;
+            if (!store[s].in_use) {
+                store[s] = keep[k];
+                break;
+            }
+        }
+    }
+    return dropped;
 }
 
 void kb_evidence_remove(uint32_t pid)

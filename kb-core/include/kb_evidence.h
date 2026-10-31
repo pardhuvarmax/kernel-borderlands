@@ -142,6 +142,11 @@ typedef struct {
 // ── Evidence store API ────────────────────────────────────────────────────
 #define KB_EVIDENCE_MAX_PROCS 10240
 
+// See kb_scoring_reap in kb_scoring.h: same stale-entry problem, same fix.
+int kb_evidence_occupancy(void);
+uint64_t kb_evidence_evictions(void);  // entries evicted because a probe window was full
+int kb_evidence_reap(int (*alive)(uint32_t pid));
+
 void         kb_evidence_init(void);
 kb_evidence_t *kb_evidence_get(uint32_t pid);
 kb_evidence_t *kb_evidence_get_or_create(uint32_t pid, uint32_t ppid,

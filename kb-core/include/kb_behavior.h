@@ -114,6 +114,11 @@ typedef struct {
 // ── Behavior Engine API ───────────────────────────────────────────────────
 #define KB_BEHAVIOR_MAX_PROCS 10240
 
+// See kb_scoring_reap in kb_scoring.h: same stale-entry problem, same fix.
+int kb_behavior_occupancy(void);
+uint64_t kb_behavior_evictions(void);  // records evicted because a probe window was full
+int kb_behavior_reap(int (*alive)(uint32_t pid));
+
 void kb_behavior_init(void);
 
 // Primary entry point: evaluate evidence for a process and return transition result.

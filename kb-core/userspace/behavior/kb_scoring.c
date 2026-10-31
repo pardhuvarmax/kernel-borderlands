@@ -17,33 +17,84 @@ static kb_process_state_t table[KB_MAX_TRACKED_PROCS];
 
 void kb_scoring_init(void) { memset(table, 0, sizeof(table)); }
 
+// Bounded-probe table with eviction: see kb_evidence.c for the reasoning.
+#define KB_PROBE_MAX 64
+static uint64_t evictions;
+uint64_t kb_scoring_evictions(void) { return evictions; }
+
+static uint32_t score_slot(uint32_t pid)
+{
+    return (uint32_t)(((uint64_t)pid * 2654435761u) % KB_MAX_TRACKED_PROCS);
+}
+
 static kb_process_state_t *find_or_create(uint32_t pid)
 {
-    uint32_t idx = pid % KB_MAX_TRACKED_PROCS;
-    for (uint32_t i = 0; i < KB_MAX_TRACKED_PROCS; i++) {
+    uint32_t idx = score_slot(pid);
+    int free_slot = -1, victim = -1;
+    double victim_imp = 1e18;
+    for (uint32_t i = 0; i < KB_PROBE_MAX; i++) {
         uint32_t slot = (idx + i) % KB_MAX_TRACKED_PROCS;
-        if (table[slot].in_use && table[slot].pid == pid)
-            return &table[slot];
-        if (!table[slot].in_use) {
-            memset(&table[slot], 0, sizeof(kb_process_state_t));
-            table[slot].pid = pid;
-            table[slot].in_use = 1;
-            return &table[slot];
+        if (table[slot].in_use) {
+            if (table[slot].pid == pid)
+                return &table[slot];
+            double imp = table[slot].zone * 1000.0 + table[slot].ema_score;  // higher zone/score kept
+            if (imp < victim_imp) { victim_imp = imp; victim = (int)slot; }
+        } else if (free_slot < 0) {
+            free_slot = (int)slot;
         }
     }
-    return NULL; // table full — caller should log, not crash
+    int slot = free_slot >= 0 ? free_slot : victim;
+    if (free_slot < 0)
+        evictions++;
+    memset(&table[slot], 0, sizeof(kb_process_state_t));
+    table[slot].pid = pid;
+    table[slot].in_use = 1;
+    return &table[slot];
 }
 
 kb_process_state_t *kb_scoring_get_state(uint32_t pid)
 {
-    uint32_t idx = pid % KB_MAX_TRACKED_PROCS;
-    for (uint32_t i = 0; i < KB_MAX_TRACKED_PROCS; i++) {
+    uint32_t idx = score_slot(pid);
+    for (uint32_t i = 0; i < KB_PROBE_MAX; i++) {
         uint32_t slot = (idx + i) % KB_MAX_TRACKED_PROCS;
         if (table[slot].in_use && table[slot].pid == pid)
             return &table[slot];
-        if (!table[slot].in_use) return NULL;
     }
     return NULL;
+}
+
+int kb_scoring_occupancy(void)
+{
+    int n = 0;
+    for (uint32_t i = 0; i < KB_MAX_TRACKED_PROCS; i++)
+        if (table[i].in_use) n++;
+    return n;
+}
+
+// Linear probing has no tombstones, so entries cannot be deleted in place
+// without breaking other pids' probe chains: collect the survivors, clear the
+// table and re-insert them.
+int kb_scoring_reap(int (*alive)(uint32_t pid))
+{
+    static kb_process_state_t keep[KB_MAX_TRACKED_PROCS];
+    int kept = 0, dropped = 0;
+    for (uint32_t i = 0; i < KB_MAX_TRACKED_PROCS; i++) {
+        if (!table[i].in_use)
+            continue;
+        if (alive(table[i].pid))
+            keep[kept++] = table[i];
+        else
+            dropped++;
+    }
+    if (!dropped)
+        return 0;
+    memset(table, 0, sizeof(table));
+    for (int k = 0; k < kept; k++) {
+        kb_process_state_t *s = find_or_create(keep[k].pid);
+        if (s)
+            *s = keep[k];
+    }
+    return dropped;
 }
 
 void kb_scoring_remove(uint32_t pid)

@@ -1,6 +1,7 @@
 package ipc
 
 import (
+	"net"
 	"encoding/binary"
 	"math"
 	"testing"
@@ -208,5 +209,26 @@ func TestParseProcessExitRejectsShortBuffer(t *testing.T) {
 	short := frame[:len(frame)-1] // one byte short of 20
 	if _, err := parseProcessExit(short); err == nil {
 		t.Error("expected error for truncated ProcessExit frame, got nil")
+	}
+}
+// A sensor that disconnects between frames is a normal event, not an error;
+// one that vanishes mid-frame is a real fault and must still be reported.
+func TestReadLoop_CleanCloseIsNotAnError_TruncatedFrameIs(t *testing.T) {
+	server, client := net.Pipe()
+	go client.Close()
+	if err := NewReader(server, nil).ReadLoop(); err != nil {
+		t.Errorf("close at a frame boundary must return nil, got %v", err)
+	}
+
+	server2, client2 := net.Pipe()
+	go func() { client2.Write([]byte{0x20, 0x00}); client2.Close() }() // half a length prefix
+	if err := NewReader(server2, nil).ReadLoop(); err == nil {
+		t.Error("a close inside the length prefix must be reported")
+	}
+
+	server3, client3 := net.Pipe()
+	go func() { client3.Write([]byte{0x20, 0x00, 0x00, 0x00}); client3.Close() }() // length 32, no body
+	if err := NewReader(server3, nil).ReadLoop(); err == nil {
+		t.Error("a close after the length but before the body must be reported")
 	}
 }

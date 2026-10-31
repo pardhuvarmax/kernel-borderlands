@@ -16,20 +16,61 @@ void kb_behavior_init(void)
     memset(behavior_table, 0, sizeof(behavior_table));
 }
 
+// Bounded-probe table with eviction: see kb_evidence.c for why (unbounded linear
+// probing with pid%N sequential clustering degraded to O(table) per event under
+// load, and a full table made kb_behavior_get_or_create return NULL).
+#define KB_PROBE_MAX 64
+static uint64_t evictions;
+uint64_t kb_behavior_evictions(void) { return evictions; }
+
 static uint32_t behavior_slot(uint32_t pid)
 {
-    return pid % KB_BEHAVIOR_MAX_PROCS;
+    return (uint32_t)(((uint64_t)pid * 2654435761u) % KB_BEHAVIOR_MAX_PROCS);
+}
+
+int kb_behavior_occupancy(void)
+{
+    int n = 0;
+    for (uint32_t i = 0; i < KB_BEHAVIOR_MAX_PROCS; i++)
+        if (behavior_table[i].in_use) n++;
+    return n;
+}
+
+int kb_behavior_reap(int (*alive)(uint32_t pid))
+{
+    static kb_behavior_record_t keep[KB_BEHAVIOR_MAX_PROCS];
+    int kept = 0, dropped = 0;
+    for (uint32_t i = 0; i < KB_BEHAVIOR_MAX_PROCS; i++) {
+        if (!behavior_table[i].in_use)
+            continue;
+        if (alive(behavior_table[i].pid))
+            keep[kept++] = behavior_table[i];
+        else
+            dropped++;
+    }
+    if (!dropped)
+        return 0;
+    memset(behavior_table, 0, sizeof(behavior_table));
+    for (int k = 0; k < kept; k++) {
+        uint32_t idx = behavior_slot(keep[k].pid);
+        for (uint32_t i = 0; i < KB_PROBE_MAX; i++) {
+            uint32_t s = (idx + i) % KB_BEHAVIOR_MAX_PROCS;
+            if (!behavior_table[s].in_use) {
+                behavior_table[s] = keep[k];
+                break;
+            }
+        }
+    }
+    return dropped;
 }
 
 kb_behavior_record_t *kb_behavior_get(uint32_t pid)
 {
     uint32_t idx = behavior_slot(pid);
-    for (uint32_t i = 0; i < KB_BEHAVIOR_MAX_PROCS; i++) {
+    for (uint32_t i = 0; i < KB_PROBE_MAX; i++) {
         uint32_t s = (idx + i) % KB_BEHAVIOR_MAX_PROCS;
         if (behavior_table[s].in_use && behavior_table[s].pid == pid)
             return &behavior_table[s];
-        if (!behavior_table[s].in_use)
-            return NULL;
     }
     return NULL;
 }
@@ -38,24 +79,31 @@ static kb_behavior_record_t *kb_behavior_get_or_create(uint32_t pid, uint32_t pp
                                                        const char *comm, uint64_t start_time_ns)
 {
     uint32_t idx = behavior_slot(pid);
-    for (uint32_t i = 0; i < KB_BEHAVIOR_MAX_PROCS; i++) {
+    int free_slot = -1, victim = -1;
+    int victim_imp = 1 << 30;
+    for (uint32_t i = 0; i < KB_PROBE_MAX; i++) {
         uint32_t s = (idx + i) % KB_BEHAVIOR_MAX_PROCS;
-        if (behavior_table[s].in_use && behavior_table[s].pid == pid)
-            return &behavior_table[s];
-        if (!behavior_table[s].in_use) {
-            memset(&behavior_table[s], 0, sizeof(kb_behavior_record_t));
-            behavior_table[s].pid = pid;
-            behavior_table[s].ppid = ppid;
-            behavior_table[s].start_time_ns = start_time_ns;
-            behavior_table[s].state = KB_STATE_SAFE;
-            behavior_table[s].in_use = 1;
-            if (comm) {
-                strncpy(behavior_table[s].comm, comm, sizeof(behavior_table[s].comm) - 1);
-            }
-            return &behavior_table[s];
+        if (behavior_table[s].in_use) {
+            if (behavior_table[s].pid == pid)
+                return &behavior_table[s];
+            int imp = (int)behavior_table[s].state;   // quieter states are evicted first
+            if (imp < victim_imp) { victim_imp = imp; victim = (int)s; }
+        } else if (free_slot < 0) {
+            free_slot = (int)s;
         }
     }
-    return NULL; // table full
+    int s = free_slot >= 0 ? free_slot : victim;
+    if (free_slot < 0)
+        evictions++;
+    memset(&behavior_table[s], 0, sizeof(kb_behavior_record_t));
+    behavior_table[s].pid = pid;
+    behavior_table[s].ppid = ppid;
+    behavior_table[s].start_time_ns = start_time_ns;
+    behavior_table[s].state = KB_STATE_SAFE;
+    behavior_table[s].in_use = 1;
+    if (comm)
+        strncpy(behavior_table[s].comm, comm, sizeof(behavior_table[s].comm) - 1);
+    return &behavior_table[s];
 }
 
 void kb_behavior_remove(uint32_t pid)

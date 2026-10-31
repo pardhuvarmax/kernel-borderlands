@@ -211,13 +211,25 @@ func (r *Reader) ReadLoop() error {
     for {
         var length uint32
         if err := binary.Read(r.conn, binary.LittleEndian, &length); err != nil {
+            // io.EOF here means the peer closed exactly at a frame boundary:
+            // an ordinary disconnect (sensor restart/stop), not an error.
+            // A close inside the length prefix is io.ErrUnexpectedEOF and
+            // still returned.
+            if err == io.EOF {
+                return nil
+            }
             return err
         }
         if length == 0 || length > 65536 {
             return fmt.Errorf("invalid frame length %d", length)
         }
         buf := make([]byte, length)
-        if _, err := io.ReadFull(r.conn, buf); err != nil { return err }
+        if _, err := io.ReadFull(r.conn, buf); err != nil {
+            if err == io.EOF { // peer vanished after announcing a frame: truncated, a real fault
+                err = io.ErrUnexpectedEOF
+            }
+            return err
+        }
         if len(buf) < 4 { continue }
 
         magic   := binary.LittleEndian.Uint16(buf[0:2])

@@ -11,6 +11,8 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <sys/stat.h>
+#include "elf_symbols.h"
 #include <arpa/inet.h>
 #include <elf.h>
 #include <bpf/libbpf.h>
@@ -65,19 +67,49 @@ static uint64_t now_ns(void)
 
 static kb_zone_t map_state_to_zone(kb_behavior_state_t state);
 
+// Our own pid (set at start); declared early because several helpers compare against it.
+static pid_t self_pid;
+
 #define KB_STATE_SYNC_EVERY_N 20
 
 // ── Syscall entropy scan (KB_DIM_SYSCALL, 25% weight) ──
-#define KB_ENTROPY_SCAN_EVERY_N_POLLS 10
-// CWP orphan-reconciliation sweep (docs/features/CWP.md §14.3) —
-// approximate cadence only: ring_buffer__poll()'s 100ms timeout returns
-// early on real events, so this is "every ~3000 idle-ish polls", not a
-// precise timer. Deliberately low frequency per §15's performance
-// requirement (sweep cost must stay independent of steady-state load).
-#define KB_CWP_ORPHAN_SWEEP_EVERY_N_POLLS 3000
+// The full-map entropy scan used to run "every 10 polls". ring_buffer__poll()
+// returns the instant events are available, so under load that was every few
+// milliseconds, not every second, and each scan walks up to
+// KB_ENTROPY_MAX_MAP_ITER entries with ~3 syscalls each: the sensor's own scan
+// then starved the consumer, the ring buffer overflowed and events were lost,
+// exactly when load was highest. Cadence is now TIME-based with a duty cap.
+#define KB_ENTROPY_SCAN_MIN_INTERVAL_NS  1000000000ULL   // at most once a second
+// CWP orphan-reconciliation sweep (docs/features/CWP.md §14.3). Same problem,
+// same fix: the old "every 3000 polls" meant 300 s only when idle.
+#define KB_CWP_ORPHAN_SWEEP_MIN_INTERVAL_NS 300000000000ULL  // 300 s
+// A periodic job may use at most 1/(1+KB_JOB_BACKOFF) of wall time: after a run
+// that took D, the next run is delayed by at least KB_JOB_BACKOFF * D (9 => 10%).
+#define KB_JOB_BACKOFF 9
+
+static uint64_t next_job_ns(uint64_t started_ns, uint64_t min_interval_ns)
+{
+    uint64_t took = now_ns() - started_ns;
+    uint64_t delay = took * KB_JOB_BACKOFF;
+    return now_ns() + (delay > min_interval_ns ? delay : min_interval_ns);
+}
+
+#define KB_REAP_MIN_INTERVAL_NS 5000000000ULL   // look for stale entries at most every 5 s
+static uint64_t reaped_total;
+static uint64_t unscored_events;   // events whose behavior record could not be created (table full)
+static int pid_alive(uint32_t pid)
+{
+    return kill((pid_t)pid, 0) == 0 || errno == EPERM;
+}
+
+// Entropy-scan cost, reported in the 30 s summary so overload is visible.
+static uint64_t scan_count, scan_ns_sum, scan_ns_max;
 #define KB_ENTROPY_MAX_TRACKED_PIDS   4096   
 #define KB_ENTROPY_SNAPSHOT_TABLE_SIZE 65536 
 #define KB_ENTROPY_MAX_MAP_ITER       50000  
+#define KB_ENTROPY_BATCH              1024
+#define KB_TOTALS_CACHE_SLOTS         8192
+#define KB_PD_SLOTS                   131072   /* power of two, > 2 * KB_ENTROPY_MAX_MAP_ITER */
 #define KB_ENTROPY_LOG2_MAX_SYSCALLS  9.0    
 #define KB_ENTROPY_WINDOW_EMA_ALPHA   0.3    
 
@@ -89,10 +121,24 @@ struct kb_entropy_acc {
 static struct kb_entropy_acc lifetime_acc_table[KB_ENTROPY_MAX_TRACKED_PIDS];
 static struct kb_entropy_acc window_acc_table[KB_ENTROPY_MAX_TRACKED_PIDS];
 
+// The four scan-side tables below used to probe linearly over the WHOLE table
+// with hash = id % N. Sequential pids cluster, and the persistent tables
+// (snapshot, window EMA) never forgot dead pids, so lookups degraded to
+// thousands of probes each and one entropy scan stalled the consumer for up to
+// 4 s. Now: scatter hash, at most KB_SCAN_PROBE_MAX probes. The per-scan
+// accumulators return NULL when their window is full (callers already skip a
+// NULL); the persistent tables evict within the window (losing a baseline costs
+// at most one inaccurate delta/EMA restart).
+#define KB_SCAN_PROBE_MAX 64
+static inline uint32_t scan_hash(uint64_t k, uint32_t n)
+{
+    return (uint32_t)((k * 11400714819323198485ull) >> 32) % n;
+}
+
 static struct kb_entropy_acc *acc_slot(struct kb_entropy_acc *table, uint32_t pid)
 {
-    uint32_t idx = pid % KB_ENTROPY_MAX_TRACKED_PIDS;
-    for (uint32_t i = 0; i < KB_ENTROPY_MAX_TRACKED_PIDS; i++) {
+    uint32_t idx = scan_hash(pid, KB_ENTROPY_MAX_TRACKED_PIDS);
+    for (uint32_t i = 0; i < KB_SCAN_PROBE_MAX; i++) {
         uint32_t slot = (idx + i) % KB_ENTROPY_MAX_TRACKED_PIDS;
         if (table[slot].in_use && table[slot].pid == pid)
             return &table[slot];
@@ -103,7 +149,7 @@ static struct kb_entropy_acc *acc_slot(struct kb_entropy_acc *table, uint32_t pi
             return &table[slot];
         }
     }
-    return NULL; 
+    return NULL;
 }
 
 struct kb_syscall_snapshot {
@@ -115,8 +161,8 @@ static struct kb_syscall_snapshot snapshot_table[KB_ENTROPY_SNAPSHOT_TABLE_SIZE]
 
 static struct kb_syscall_snapshot *snapshot_slot(uint64_t key)
 {
-    uint32_t idx = (uint32_t)(key % KB_ENTROPY_SNAPSHOT_TABLE_SIZE);
-    for (uint32_t i = 0; i < KB_ENTROPY_SNAPSHOT_TABLE_SIZE; i++) {
+    uint32_t idx = scan_hash(key, KB_ENTROPY_SNAPSHOT_TABLE_SIZE);
+    for (uint32_t i = 0; i < KB_SCAN_PROBE_MAX; i++) {
         uint32_t slot = (idx + i) % KB_ENTROPY_SNAPSHOT_TABLE_SIZE;
         if (snapshot_table[slot].in_use && snapshot_table[slot].key == key)
             return &snapshot_table[slot];
@@ -127,7 +173,12 @@ static struct kb_syscall_snapshot *snapshot_slot(uint64_t key)
             return &snapshot_table[slot];
         }
     }
-    return NULL; 
+    // Window full of other keys (mostly dead pids): reuse the first slot.
+    uint32_t slot = idx;
+    snapshot_table[slot].key = key;
+    snapshot_table[slot].in_use = 1;
+    snapshot_table[slot].last_count = 0;
+    return &snapshot_table[slot];
 }
 
 struct kb_window_ema {
@@ -140,8 +191,8 @@ static struct kb_window_ema window_ema_table[KB_ENTROPY_MAX_TRACKED_PIDS];
 
 static struct kb_window_ema *window_ema_slot(uint32_t pid)
 {
-    uint32_t idx = pid % KB_ENTROPY_MAX_TRACKED_PIDS;
-    for (uint32_t i = 0; i < KB_ENTROPY_MAX_TRACKED_PIDS; i++) {
+    uint32_t idx = scan_hash(pid, KB_ENTROPY_MAX_TRACKED_PIDS);
+    for (uint32_t i = 0; i < KB_SCAN_PROBE_MAX; i++) {
         uint32_t slot = (idx + i) % KB_ENTROPY_MAX_TRACKED_PIDS;
         if (window_ema_table[slot].in_use && window_ema_table[slot].pid == pid)
             return &window_ema_table[slot];
@@ -153,7 +204,12 @@ static struct kb_window_ema *window_ema_slot(uint32_t pid)
             return &window_ema_table[slot];
         }
     }
-    return NULL; 
+    // Window full: restart the EMA of the first slot for this pid.
+    window_ema_table[idx].pid = pid;
+    window_ema_table[idx].in_use = 1;
+    window_ema_table[idx].primed = 0;
+    window_ema_table[idx].ema_0_100 = 0.0;
+    return &window_ema_table[idx];
 }
 
 struct kb_delta_entry { uint64_t key; uint64_t delta; };
@@ -223,17 +279,30 @@ static void bridge_dispatch(kb_scoring_result_t r, uint64_t ts_ns)
     }
 }
 
+// pids whose /proc identity could not be read (exited before we looked): do
+// not retry every scan. Direct-mapped, 30 s expiry.
+#define KB_BACKFILL_NEG_SLOTS 4096
+#define KB_BACKFILL_NEG_TTL_NS 30000000000ULL
+static struct { uint32_t pid; uint64_t until_ns; } backfill_neg[KB_BACKFILL_NEG_SLOTS];
+
 static void proc_backfill_identity(uint32_t pid)
 {
     if (kb_scoring_has_identity(pid))
+        return;
+
+    uint32_t slot = pid % KB_BACKFILL_NEG_SLOTS;
+    if (backfill_neg[slot].pid == pid && now_ns() < backfill_neg[slot].until_ns)
         return;
 
     char path[64], comm[16] = {0};
 
     snprintf(path, sizeof(path), "/proc/%u/comm", pid);
     FILE *f = fopen(path, "r");
-    if (!f)
-        return; 
+    if (!f) {
+        backfill_neg[slot].pid = pid;
+        backfill_neg[slot].until_ns = now_ns() + KB_BACKFILL_NEG_TTL_NS;
+        return;
+    }
     if (fgets(comm, sizeof(comm), f)) {
         size_t n = strlen(comm);
         if (n && comm[n - 1] == '\n') comm[n - 1] = '\0';
@@ -301,15 +370,21 @@ static void check_ringbuf_drops(struct kbd_sensor_bpf *skel)
     if (bpf_map_lookup_elem(fd, &zero, &total) != 0)
         return;
 
-    if (total > last_seen) {
+    // At most one line per 10 s, carrying the accumulated count: under a real
+    // overload this used to print every scan (every few ms) and was itself part
+    // of the journal flood.
+    static uint64_t last_print_ns;
+    uint64_t now = now_ns();
+    if (total > last_seen && (last_print_ns == 0 || now - last_print_ns >= 10000000000ULL)) {
         fprintf(stderr,
             "kbd_sensor: ring buffer full — %llu event(s) dropped since start "
-            "(+%llu since last check). kb_events is 1MB shared across all 9 "
+            "(+%llu since last report). kb_events is 1MB shared across all 9 "
             "hooks; a burst (e.g. a `go build` spawning many short-lived "
             "processes) can exceed that. Dropped exec/exit events are the "
             "likely cause of blank comm on very short-lived pids.\n",
             (unsigned long long)total, (unsigned long long)(total - last_seen));
         last_seen = total;
+        last_print_ns = now;
     }
 }
 
@@ -323,60 +398,126 @@ static void scan_syscall_entropy(struct kbd_sensor_bpf *skel)
     memset(lifetime_acc_table, 0, sizeof(lifetime_acc_table));
     memset(window_acc_table, 0, sizeof(window_acc_table));
 
-    uint64_t key = 0, next_key;
-    int have_key = 0;
     int iterations = 0;
     int delta_count_n = 0;
 
-    while (bpf_map_get_next_key(counts_fd, have_key ? &key : NULL, &next_key) == 0) {
-        key = next_key;
-        have_key = 1;
+    // Walk the whole counts map in batches of KB_ENTROPY_BATCH entries (one
+    // bpf() call per batch) instead of get_next_key + lookup per entry (two
+    // calls per entry plus a third for the totals). On a busy host that walk
+    // took 0.5-3 s, during which nothing drained the ring buffer; batches cut
+    // it by roughly 1000x in syscalls. Per-pid totals are cached for the pass.
+    static struct { uint32_t pid; uint64_t total; uint32_t epoch; } totals_cache[KB_TOTALS_CACHE_SLOTS];
+    static uint32_t scan_epoch;
+    scan_epoch++;
 
-        if (++iterations > KB_ENTROPY_MAX_MAP_ITER)
-            break;
+    uint64_t bkeys[KB_ENTROPY_BATCH], bvals[KB_ENTROPY_BATCH];
+    uint64_t batch_in = 0, batch_out = 0;
+    int have_batch = 0, batch_ok = 1, map_done = 0;
 
-        uint64_t count = 0;
-        if (bpf_map_lookup_elem(counts_fd, &key, &count) != 0 || count == 0)
-            continue;
-
-        uint32_t pid = (uint32_t)(key >> 32);
-
-        proc_backfill_identity(pid);
-
-        struct kb_entropy_acc *acc = acc_slot(lifetime_acc_table, pid);
-        if (acc) {
-            uint64_t pid_total = 0;
-            if (bpf_map_lookup_elem(totals_fd, &pid, &pid_total) == 0 && pid_total > 0) {
-                double p = (double)count / (double)pid_total;
-                acc->sum_neg_p_logp += -p * (log2(p) / KB_ENTROPY_LOG2_MAX_SYSCALLS);
+    while (!map_done && iterations < KB_ENTROPY_MAX_MAP_ITER) {
+        uint32_t n = KB_ENTROPY_BATCH;
+        if (batch_ok) {
+            DECLARE_LIBBPF_OPTS(bpf_map_batch_opts, bopts);
+            int rc = bpf_map_lookup_batch(counts_fd, have_batch ? &batch_in : NULL, &batch_out,
+                                          bkeys, bvals, &n, &bopts);
+            if (rc != 0 && errno != ENOENT) {
+                if (errno == EINTR || errno == EAGAIN) continue;
+                batch_ok = 0;              // kernel/map does not support it: per-entry walk below
+                iterations = 0; delta_count_n = 0;
+                memset(lifetime_acc_table, 0, sizeof(lifetime_acc_table));
+                memset(window_acc_table, 0, sizeof(window_acc_table));
+                have_batch = 0;
+                continue;
+            }
+            if (rc != 0)                   // ENOENT = last batch, still holds n valid entries
+                map_done = 1;
+            batch_in = batch_out;
+            have_batch = 1;
+        } else {
+            // Fallback: the original per-entry iteration.
+            static uint64_t fkey; static int fhave;
+            if (!iterations) fhave = 0;
+            n = 0;
+            while (n < KB_ENTROPY_BATCH) {
+                uint64_t nk;
+                if (bpf_map_get_next_key(counts_fd, fhave ? &fkey : NULL, &nk) != 0) { map_done = 1; break; }
+                fkey = nk; fhave = 1;
+                uint64_t c = 0;
+                if (bpf_map_lookup_elem(counts_fd, &fkey, &c) != 0) continue;
+                bkeys[n] = fkey; bvals[n] = c; n++;
             }
         }
 
-        struct kb_syscall_snapshot *snap = snapshot_slot(key);
-        if (snap) {
-            uint64_t delta = (count > snap->last_count) ? (count - snap->last_count) : 0;
-            snap->last_count = count;
+        for (uint32_t b = 0; b < n; b++) {
+            if (++iterations > KB_ENTROPY_MAX_MAP_ITER) { map_done = 1; break; }
+            uint64_t key = bkeys[b], count = bvals[b];
+            if (count == 0)
+                continue;
 
-            if (delta > 0) {
-                delta_buf[delta_count_n].key = key;
-                delta_buf[delta_count_n].delta = delta;
-                delta_count_n++;
+            uint32_t pid = (uint32_t)(key >> 32);
+
+            proc_backfill_identity(pid);
+
+            struct kb_entropy_acc *acc = acc_slot(lifetime_acc_table, pid);
+            if (acc) {
+                uint64_t pid_total = 0;
+                typeof(totals_cache[0]) *tc = &totals_cache[pid % KB_TOTALS_CACHE_SLOTS];
+                if (tc->epoch == scan_epoch && tc->pid == pid) {
+                    pid_total = tc->total;
+                } else {
+                    if (bpf_map_lookup_elem(totals_fd, &pid, &pid_total) != 0)
+                        pid_total = 0;
+                    tc->pid = pid; tc->total = pid_total; tc->epoch = scan_epoch;
+                }
+                if (pid_total > 0) {
+                    double p = (double)count / (double)pid_total;
+                    acc->sum_neg_p_logp += -p * (log2(p) / KB_ENTROPY_LOG2_MAX_SYSCALLS);
+                }
+            }
+
+            struct kb_syscall_snapshot *snap = snapshot_slot(key);
+            if (snap) {
+                uint64_t delta = (count > snap->last_count) ? (count - snap->last_count) : 0;
+                snap->last_count = count;
+
+                if (delta > 0 && delta_count_n < KB_ENTROPY_MAX_MAP_ITER) {
+                    delta_buf[delta_count_n].key = key;
+                    delta_buf[delta_count_n].delta = delta;
+                    delta_count_n++;
+                }
             }
         }
     }
 
     check_ringbuf_drops(skel);
 
+    // Per-pid sum of this window's syscall deltas. This was a nested loop over
+    // every delta entry (O(n^2): with up to 50000 entries, billions of
+    // iterations and multi-second stalls during which the ring buffer
+    // overflowed). Now one pass to accumulate into an open-addressed table, one
+    // to read it back. The epoch tag avoids clearing the table every scan.
+    static struct { uint32_t pid; uint32_t epoch; uint64_t total; } pd[KB_PD_SLOTS];
+    static uint32_t pd_epoch;
+    pd_epoch++;
+    for (int i = 0; i < delta_count_n; i++) {
+        uint32_t pid = (uint32_t)(delta_buf[i].key >> 32);
+        uint32_t h = (pid * 2654435761u) & (KB_PD_SLOTS - 1);
+        while (pd[h].epoch == pd_epoch && pd[h].pid != pid)
+            h = (h + 1) & (KB_PD_SLOTS - 1);
+        if (pd[h].epoch != pd_epoch) {
+            pd[h].pid = pid; pd[h].epoch = pd_epoch; pd[h].total = 0;
+        }
+        pd[h].total += delta_buf[i].delta;
+    }
+
     for (int i = 0; i < delta_count_n; i++) {
         uint32_t pid = (uint32_t)(delta_buf[i].key >> 32);
         uint64_t delta = delta_buf[i].delta;
 
-        uint64_t pid_delta_total = 0;
-        for (int j = 0; j < delta_count_n; j++) {
-            if ((uint32_t)(delta_buf[j].key >> 32) == pid) {
-                pid_delta_total += delta_buf[j].delta;
-            }
-        }
+        uint32_t h = (pid * 2654435761u) & (KB_PD_SLOTS - 1);
+        while (pd[h].epoch == pd_epoch && pd[h].pid != pid)
+            h = (h + 1) & (KB_PD_SLOTS - 1);
+        uint64_t pid_delta_total = (pd[h].epoch == pd_epoch) ? pd[h].total : 0;
 
         if (pid_delta_total > 0) {
             struct kb_entropy_acc *acc = acc_slot(window_acc_table, pid);
@@ -1537,6 +1678,16 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
                        r_beh.chain_name ? r_beh.chain_name : "none");
             }
 
+        // kb_behavior_evaluate returns no record when its table is full. That
+        // used to be dereferenced unconditionally: a SIGSEGV exactly when the
+        // sensor is overloaded (stale entries from lost exit events fill the
+        // table). Keep the previous zone for this event and count it, so the
+        // gap is visible in the summary instead of silent.
+        if (!r_beh.record) {
+            unscored_events++;
+            r.zone_changed = 0;
+            return r;
+        }
         kb_zone_t next_zone = map_state_to_zone(r_beh.record->state);
         kb_zone_t prev_zone = r.state->zone;
         r.state->zone = next_zone;
@@ -1551,104 +1702,70 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
     return r;
 }
 
-static size_t find_elf_symbol_offset(const char *elf_path, const char *symbol_name)
+
+// try_attach_go_tls runs on EVERY exec event. It used to open the new process's
+// ELF through /proc/<pid>/exe and walk the symbol table twice for every exec,
+// including /bin/true (whose /proc entry is usually already gone: a failing
+// open per event) and every browser/compiler child. A binary does not change
+// between execs, so the answer (symbol offset, or "none") is cached by the
+// file's identity (dev, inode, size, mtime), and a process that already exited
+// is skipped after one stat(). Direct-mapped, so memory is fixed.
+#define KB_TLS_CACHE_SLOTS 2048
+static struct tls_cache_entry {
+    int      valid;
+    dev_t    dev;
+    ino_t    ino;
+    off_t    size;
+    time_t   mtime_s;
+    long     mtime_ns;
+    size_t   offset;           // 0 = no Go TLS symbol in this binary
+} tls_cache[KB_TLS_CACHE_SLOTS];
+
+static size_t go_tls_offset_cached(const char *exe_path)
 {
-    FILE *f = fopen(elf_path, "rb");
-    if (!f) return 0;
+    struct stat st;
+    if (stat(exe_path, &st) != 0)
+        return 0;                              // process (or its binary) already gone
+    struct tls_cache_entry *c = &tls_cache[((uint64_t)st.st_ino * 2654435761u ^ (uint64_t)st.st_dev) % KB_TLS_CACHE_SLOTS];
+    if (c->valid && c->dev == st.st_dev && c->ino == st.st_ino && c->size == st.st_size &&
+        c->mtime_s == st.st_mtim.tv_sec && c->mtime_ns == st.st_mtim.tv_nsec)
+        return c->offset;
 
-    Elf64_Ehdr ehdr;
-    if (fread(&ehdr, 1, sizeof(ehdr), f) != sizeof(ehdr)) {
-        fclose(f);
-        return 0;
-    }
+    size_t offset = kb_elf_function_file_offset(exe_path, "crypto/tls.(*Conn).Write");
+    if (offset == 0)
+        offset = kb_elf_function_file_offset(exe_path, "crypto/tls.(*Conn).write");
 
-    if (memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0 || ehdr.e_ident[EI_CLASS] != ELFCLASS64) {
-        fclose(f);
-        return 0;
-    }
-
-    Elf64_Shdr *shdrs = malloc(ehdr.e_shentsize * ehdr.e_shnum);
-    if (!shdrs) {
-        fclose(f);
-        return 0;
-    }
-
-    if (fseek(f, ehdr.e_shoff, SEEK_SET) != 0 ||
-        fread(shdrs, ehdr.e_shentsize, ehdr.e_shnum, f) != ehdr.e_shnum) {
-        free(shdrs);
-        fclose(f);
-        return 0;
-    }
-
-    Elf64_Shdr *symtab_shdr = NULL;
-    Elf64_Shdr *strtab_shdr = NULL;
-
-    for (int i = 0; i < ehdr.e_shnum; i++) {
-        if (shdrs[i].sh_type == SHT_SYMTAB) {
-            symtab_shdr = &shdrs[i];
-            strtab_shdr = &shdrs[shdrs[i].sh_link];
-        } else if (shdrs[i].sh_type == SHT_DYNSYM && !symtab_shdr) {
-            symtab_shdr = &shdrs[i];
-            strtab_shdr = &shdrs[shdrs[i].sh_link];
-        }
-    }
-
-    if (!symtab_shdr || !strtab_shdr) {
-        free(shdrs);
-        fclose(f);
-        return 0;
-    }
-
-    size_t num_syms = symtab_shdr->sh_size / symtab_shdr->sh_entsize;
-    Elf64_Sym *syms = malloc(symtab_shdr->sh_size);
-    char *strs = malloc(strtab_shdr->sh_size);
-
-    if (!syms || !strs) {
-        free(syms);
-        free(strs);
-        free(shdrs);
-        fclose(f);
-        return 0;
-    }
-
-    if (fseek(f, symtab_shdr->sh_offset, SEEK_SET) != 0 ||
-        fread(syms, 1, symtab_shdr->sh_size, f) != symtab_shdr->sh_size ||
-        fseek(f, strtab_shdr->sh_offset, SEEK_SET) != 0 ||
-        fread(strs, 1, strtab_shdr->sh_size, f) != strtab_shdr->sh_size) {
-        free(syms);
-        free(strs);
-        free(shdrs);
-        fclose(f);
-        return 0;
-    }
-
-    size_t offset = 0;
-    for (size_t i = 0; i < num_syms; i++) {
-        const char *name = strs + syms[i].st_name;
-        if (strcmp(name, symbol_name) == 0) {
-            offset = syms[i].st_value;
-            break;
-        }
-    }
-
-    free(syms);
-    free(strs);
-    free(shdrs);
-    fclose(f);
+    c->valid = 1; c->dev = st.st_dev; c->ino = st.st_ino; c->size = st.st_size;
+    c->mtime_s = st.st_mtim.tv_sec; c->mtime_ns = st.st_mtim.tv_nsec; c->offset = offset;
     return offset;
 }
 
 static void try_attach_go_tls(struct kbd_sensor_bpf *skel, uint32_t pid, const char *comm)
 {
-    if (pid == 0 || pid == getpid()) return;
+    // KB_TLS_GO_UPROBE=0 turns Go TLS uprobes off entirely (they patch another
+    // process's code, so an operator must be able to opt out).
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *e = getenv("KB_TLS_GO_UPROBE");
+        enabled = !(e && e[0] == '0');
+    }
+    if (!enabled || pid == 0 || pid == (uint32_t)self_pid) return;
 
     char exe_path[64];
     snprintf(exe_path, sizeof(exe_path), "/proc/%u/exe", pid);
 
-    size_t offset = find_elf_symbol_offset(exe_path, "crypto/tls.(*Conn).Write");
-    if (offset == 0) {
-        offset = find_elf_symbol_offset(exe_path, "crypto/tls.(*Conn).write");
-    }
+    size_t offset = go_tls_offset_cached(exe_path);
+    if (offset == 0)
+        return;
+
+    // The same pid can reach here more than once (duplicate exec events, comm
+    // changes): never stack a second probe on it. Small ring of recent pids.
+    static uint32_t probed[512];
+    static unsigned probed_next;
+    for (unsigned i = 0; i < 512; i++)
+        if (probed[i] == pid)
+            return;
+    probed[probed_next++ % 512] = pid;
 
     if (offset == 0) {
         return;
@@ -1737,7 +1854,7 @@ static void attach_ssl_uprobes(struct kbd_sensor_bpf *skel)
         }
     }
     if (libssl_path) {
-        size_t offset = find_elf_symbol_offset(libssl_path, "SSL_write");
+        size_t offset = kb_elf_function_file_offset(libssl_path, "SSL_write");
         if (offset > 0) {
             printf("[TLS DETECTOR] Found libssl.so at %s. SSL_write offset=0x%lx. Attaching uprobe...\n", libssl_path, (unsigned long)offset);
             struct bpf_link *link = bpf_program__attach_uprobe(
@@ -1762,7 +1879,7 @@ static void attach_ssl_uprobes(struct kbd_sensor_bpf *skel)
         }
     }
     if (gnutls_path) {
-        size_t offset = find_elf_symbol_offset(gnutls_path, "gnutls_record_send");
+        size_t offset = kb_elf_function_file_offset(gnutls_path, "gnutls_record_send");
         if (offset > 0) {
             printf("[TLS DETECTOR] Found libgnutls.so at %s. gnutls_record_send offset=0x%lx. Attaching uprobe...\n", gnutls_path, (unsigned long)offset);
             struct bpf_link *link = bpf_program__attach_uprobe(
@@ -1787,7 +1904,7 @@ static void attach_ssl_uprobes(struct kbd_sensor_bpf *skel)
         }
     }
     if (nss_path) {
-        size_t offset = find_elf_symbol_offset(nss_path, "PR_Write");
+        size_t offset = kb_elf_function_file_offset(nss_path, "PR_Write");
         if (offset > 0) {
             printf("[TLS DETECTOR] Found libnss3.so at %s. PR_Write offset=0x%lx. Attaching uprobe...\n", nss_path, (unsigned long)offset);
             struct bpf_link *link = bpf_program__attach_uprobe(
@@ -1844,7 +1961,6 @@ static void prot_str(__u32 prot, char *buf)
 #define EV_LOG_RATE_PER_SEC   200
 #define EV_SUMMARY_INTERVAL_S 30
 
-static pid_t self_pid;
 static int   self_skip_map_fd = -1;   // kb_self_syscalls_skipped (per-CPU), set after load
 static int   ev_verbose;
 static FILE *ev_null;
@@ -1914,7 +2030,7 @@ static FILE *event_sink(void)
     if (ev_stats.last_summary_ns == 0) {
         ev_stats.last_summary_ns = ev_stats.last_refill_ns = now;
     } else if (now - ev_stats.last_summary_ns >= (uint64_t)EV_SUMMARY_INTERVAL_S * 1000000000ull) {
-        printf("[SENSOR] last %ds: %llu events seen, %llu logged, %llu log lines suppressed, %llu transition lines suppressed, %llu own syscalls skipped in-kernel, %llu CRITICAL own-activity events (%llu log lines suppressed)%s\n",
+        printf("[SENSOR] last %ds: %llu events seen, %llu logged, %llu log lines suppressed, %llu transition lines suppressed, %llu own syscalls skipped in-kernel, %llu CRITICAL own-activity events (%llu log lines suppressed), entropy scans: %llu (avg %.1f ms, max %.1f ms), stale process entries reaped: %llu, events left unscored: %llu, per-pid table evictions: %llu%s\n",
                EV_SUMMARY_INTERVAL_S,
                (unsigned long long)(ev_stats.seen - ev_stats.summary_seen),
                (unsigned long long)ev_stats.logged,
@@ -1923,12 +2039,19 @@ static FILE *event_sink(void)
                (unsigned long long)self_syscalls_skipped_total(),
                (unsigned long long)ev_stats.self_critical,
                (unsigned long long)ev_stats.critical_suppressed,
+               (unsigned long long)scan_count,
+               scan_count ? (double)scan_ns_sum / scan_count / 1e6 : 0.0,
+               (double)scan_ns_max / 1e6,
+               (unsigned long long)reaped_total,
+               (unsigned long long)unscored_events,
+               (unsigned long long)(kb_scoring_evictions() + kb_evidence_evictions() + kb_behavior_evictions()),
                ev_verbose ? "" : " (per-event log off; set KB_SENSOR_VERBOSE=1)");
         fflush(stdout);
         ev_stats.summary_seen = ev_stats.seen;
         ev_stats.summary_suppressed = ev_stats.suppressed;
         ev_stats.logged = ev_stats.self_critical = ev_stats.critical_suppressed = 0;
         transition_suppressed = 0;
+        scan_count = scan_ns_sum = scan_ns_max = 0;
         ev_stats.last_summary_ns = now;
     }
 
@@ -2234,8 +2357,7 @@ int main(void)
     printf("All 6 hooks attached. Streaming unified events...\n");
     printf("Press Ctrl+C to stop.\n\n");
 
-    int poll_count = 0;
-    int cwp_sweep_poll_count = 0;
+    uint64_t next_scan_ns = 0, next_reap_ns = 0, next_cwp_sweep_ns = now_ns() + KB_CWP_ORPHAN_SWEEP_MIN_INTERVAL_NS;
     while (running) {
         err = ring_buffer__poll(rb, 100);
         if (err == -EINTR) { err = 0; break; }
@@ -2248,14 +2370,35 @@ int main(void)
             handle_incoming_containment_cmd(control_fd, skel);
         }
 
-        if (++poll_count >= KB_ENTROPY_SCAN_EVERY_N_POLLS) {
-            poll_count = 0;
+        uint64_t t = now_ns();
+        if (t >= next_scan_ns) {
             scan_syscall_entropy(skel);
+            uint64_t took = now_ns() - t;
+            scan_count++;
+            scan_ns_sum += took;
+            if (took > scan_ns_max)
+                scan_ns_max = took;
+            next_scan_ns = next_job_ns(t, KB_ENTROPY_SCAN_MIN_INTERVAL_NS);
         }
 
-        if (++cwp_sweep_poll_count >= KB_CWP_ORPHAN_SWEEP_EVERY_N_POLLS) {
-            cwp_sweep_poll_count = 0;
+        // Stale scoring-table entries (exit events lost to ring-buffer overflow)
+        // slow every later event down. Only look when the table is getting full.
+        t = now_ns();
+        if (t >= next_reap_ns) {
+            if (kb_scoring_occupancy() > KB_MAX_TRACKED_PROCS / 4) {
+                reaped_total += (uint64_t)kb_scoring_reap(pid_alive);
+            }
+            if (kb_evidence_occupancy() > KB_EVIDENCE_MAX_PROCS / 4)
+                kb_evidence_reap(pid_alive);
+            if (kb_behavior_occupancy() > KB_BEHAVIOR_MAX_PROCS / 4)
+                kb_behavior_reap(pid_alive);
+            next_reap_ns = next_job_ns(t, KB_REAP_MIN_INTERVAL_NS);
+        }
+
+        t = now_ns();
+        if (t >= next_cwp_sweep_ns) {
             cwp_sweep_orphaned_entries(skel);
+            next_cwp_sweep_ns = next_job_ns(t, KB_CWP_ORPHAN_SWEEP_MIN_INTERVAL_NS);
         }
     }
 
