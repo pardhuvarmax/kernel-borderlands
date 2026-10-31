@@ -13,6 +13,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include "elf_symbols.h"
+#include "../../include/kb_memclass.h"
 #include <arpa/inet.h>
 #include <elf.h>
 #include <bpf/libbpf.h>
@@ -1715,12 +1716,17 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
                 break;
             case KB_EVT_MEMORY_MMAP:
             case KB_EVT_MEMORY_MPROTECT:
-                if (e->addr == 0 && e->rwx) {
+                switch (kb_classify_memory_event(e->addr, e->prot, e->rwx)) {
+                case KB_MEM_CROSS_PROCESS_WRITE:
                     kb_evidence_set_flag(ev, KB_EV_PROC_MEM_WRITE, ts);
                     kb_evidence_push_seq(ev, KB_SEQ_PROC_MEM_WRITE);
-                } else if (e->rwx) {
+                    break;
+                case KB_MEM_RWX_MAPPING:
                     kb_evidence_set_flag(ev, KB_EV_RWX_MAPPING, ts);
                     kb_evidence_push_seq(ev, KB_SEQ_RWX_MAP);
+                    break;
+                default:
+                    break;
                 }
                 break;
             default:

@@ -9,6 +9,7 @@
 #include "../include/kb_evidence.h"
 #include "../include/kb_behavior.h"
 #include "../include/kb_rules.h"
+#include "../include/kb_memclass.h"
 
 // Define a test runner macro
 #define RUN_TEST(test) \
@@ -241,6 +242,18 @@ static void test_rwx_mapping_from_suspicious_process_is_borderlands(void)
     assert(rec->state >= KB_STATE_BORDERLANDS);
 }
 
+// Test 8: the sensor must tell an ordinary RWX mapping from a cross-process write.
+// An anonymous mmap has addr == 0 (the hint) as well; only the process_vm_writev
+// marker has prot == 0.
+static void test_memory_event_classification(void)
+{
+    assert(kb_classify_memory_event(0, 7, 1) == KB_MEM_RWX_MAPPING);             // anonymous RWX mmap (addr hint 0)
+    assert(kb_classify_memory_event(0x7f0000000000ULL, 7, 1) == KB_MEM_RWX_MAPPING);
+    assert(kb_classify_memory_event(0, 0, 1) == KB_MEM_CROSS_PROCESS_WRITE);     // process_vm_writev marker
+    assert(kb_classify_memory_event(0, 7, 0) == KB_MEM_NONE);                    // not rwx
+    assert(kb_classify_memory_event(0, 0, 0) == KB_MEM_NONE);
+}
+
 int main(void)
 {
     printf("╔══════════════════════════════════════════════╗\n");
@@ -254,6 +267,7 @@ int main(void)
     RUN_TEST(test_cross_process_write_from_clean_process_is_borderlands);
     RUN_TEST(test_rwx_mapping_alone_from_clean_process_is_not_borderlands);
     RUN_TEST(test_rwx_mapping_from_suspicious_process_is_borderlands);
+    RUN_TEST(test_memory_event_classification);
 
     printf("\nAll unit tests passed successfully!\n");
     return 0;
