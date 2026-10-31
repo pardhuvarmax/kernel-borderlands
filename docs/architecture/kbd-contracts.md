@@ -58,6 +58,18 @@ just forwards it in `KBEvent.ScoreDelta`. Nothing on the Go side branches on
 job (`kb_scoring.c`), consistent with `internal/policy/policy.go`'s comment
 that "zone classification moved fully to kb-core... arrives pre-computed."
 
+## `process_state`'s `Metadata` map: feature schema, not part of this contract
+
+`KBEvent{event_type:"process_state"}.Metadata` carries the learned-policy feature export
+(`feature_schema` key; see `kb-aads/features/schema.py` and
+`docs/development/control-aads/learned-policy-retraining.md`), currently schema v2. This is layered
+on top of the `event_type` contract above, not a change to it: `dest_class`/`dest_port` (new in v2)
+are derived server-side in `kb-control-plane/internal/controlplane/controlplane.go` from the
+existing `NetFlow` (`msg_type=9`) stream and required **no wire-contract change** — `daddr`/`dport`
+already crossed the wire. A prospective `bytes_sent` feature is different: it needs new sensor-side
+instrumentation and a real wire-contract change (new `msg_type`, `KB_WIRE_VERSION` bump), not yet
+built — see the learned-policy doc's §3b for the scoped plan.
+
 ## Known related staleness (not fixed here, flagging while in this area)
 
 `docs/development/control-aads/kb-events-swarm-ingestion-gap.md` documents

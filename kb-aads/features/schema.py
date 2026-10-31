@@ -15,10 +15,23 @@ Rules (docs/development/control-aads/learned-policy-retraining.md):
 import json
 import os
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 # (name, low, high, missing_default). Values are clipped to [low, high].
 # Scores are the sensor's 0-100 dimension scores; zone 0/1/2; flags 0/1.
+#
+# v2 adds dest_class/dest_port (CHANGELOG.md, destination-class wire-contract
+# change): derived by kbd from the existing NetFlow (msg_type=9) sample for
+# this pid, which already carries destination IP/port — no eBPF/wire change,
+# a server-side join (kb-control-plane/internal/controlplane/controlplane.go,
+# classifyDestination). dest_class is 0 ("none") until a pid's first observed
+# connection. dest_class alone does NOT separate a legitimate backup upload
+# from exfiltration at the same kind of address (datasets/attack-lab/
+# 20261031T201927: backup_remote and credential_report connect to a loopback
+# "backup host", same class as a C2-style address); see
+# docs/development/control-aads/learned-policy-retraining.md for what would
+# (destination identity/allowlisting, byte volume — the latter needs new
+# sensor-side write()/sendto() instrumentation, not yet built).
 FEATURES = [
     ("score",          0.0, 100.0, 0.0),   # kbd EMA score
     ("zone",           0.0,   2.0, 0.0),   # SAFE/SUSPICIOUS/BORDERLANDS
@@ -31,6 +44,8 @@ FEATURES = [
     ("dim_network",    0.0, 100.0, 0.0),
     ("dim_memory",     0.0, 100.0, 0.0),
     ("telemetry_gap",  0.0,   1.0, 1.0),   # 1 = this window is known-incomplete OR unknown (fail toward "unsure")
+    ("dest_class",     0.0,   5.0, 0.0),   # 0=none 1=loopback 2=private 3=link-local 4=multicast 5=public
+    ("dest_port",      0.0, 65535.0, 0.0), # most recent NetFlow dest port for this pid, 0 if none
 ]
 NAMES = [f[0] for f in FEATURES]
 
@@ -74,6 +89,8 @@ def from_event_message(msg: dict, prev_score=None) -> dict:
     }
     for k in ("dim_process", "dim_syscall", "dim_privilege", "dim_file", "dim_network", "dim_memory"):
         raw[k] = md.get(k)
+    raw["dest_class"] = md.get("dest_class")
+    raw["dest_port"] = md.get("dest_port")
     return raw
 
 

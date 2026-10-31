@@ -643,9 +643,11 @@ func TestRecordStoreResult_ConcurrentCallsDontRace(t *testing.T) {
 	wg.Wait()
 }
 
-// The learned-policy feature contract (schema v1) is served from this event:
-// all six sensor dimension scores must be present, by name.
-func TestOnProcessState_EmitsFeatureSchemaV1(t *testing.T) {
+// The learned-policy feature contract (schema v2) is served from this event:
+// all six sensor dimension scores must be present, by name, plus dest_class/
+// dest_port (new in v2) defaulting to "no NetFlow seen yet" for a pid that
+// has made no connection.
+func TestOnProcessState_EmitsFeatureSchemaV2(t *testing.T) {
 	cp := newTestControlPlane(t)
 	ch := make(chan *pb.KBEvent, 1)
 	cp.subMu.Lock()
@@ -658,13 +660,50 @@ func TestOnProcessState_EmitsFeatureSchemaV1(t *testing.T) {
 	}
 	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 5, UID: 0, Comm: "x", DimScore: dims, EMAScore: 55, EventCount: 7})
 	ev := <-ch
-	if ev.Metadata["feature_schema"] != "1" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
+	if ev.Metadata["feature_schema"] != "2" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
 		t.Fatalf("missing schema/event_count/uid: %v", ev.Metadata)
+	}
+	if ev.Metadata["dest_class"] != "0" || ev.Metadata["dest_port"] != "0" {
+		t.Errorf("expected dest_class=0 (none seen) dest_port=0 for a pid with no NetFlow, got dest_class=%q dest_port=%q",
+			ev.Metadata["dest_class"], ev.Metadata["dest_port"])
 	}
 	for i, name := range ipc.DimNames {
 		want := fmt.Sprintf("%.2f", dims[i])
 		if got := ev.Metadata["dim_"+name]; got != want {
 			t.Errorf("dim_%s = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// OnNetFlow's sample must show up in the NEXT OnProcessState for the same
+// pid, classified without needing any wire-contract change (daddr/dport
+// already cross on msg_type=9; this is a server-side join).
+func TestOnProcessState_DestClassFromPriorNetFlow(t *testing.T) {
+	cp := newTestControlPlane(t)
+	ch := make(chan *pb.KBEvent, 1)
+	cp.subMu.Lock()
+	cp.eventSubs = append(cp.eventSubs, ch)
+	cp.subMu.Unlock()
+
+	cases := []struct {
+		name  string
+		daddr uint32 // network byte order, matches NetFlowMsg.Daddr
+		class string
+	}{
+		{"loopback", 0x0100007F, "1"},  // 127.0.0.1
+		{"private", 0x0101A8C0, "2"},   // 192.168.1.1
+		{"public", 0x08080808, "5"},    // 8.8.8.8
+	}
+	for pid, c := range cases {
+		pid := uint32(pid + 100)
+		cp.OnNetFlow(&ipc.NetFlowMsg{PID: pid, Daddr: c.daddr, Dport: 4444})
+		cp.OnProcessState(&ipc.ProcessStateMsg{PID: pid, Comm: "x"})
+		ev := <-ch
+		if ev.Metadata["dest_class"] != c.class {
+			t.Errorf("%s: dest_class = %q, want %q", c.name, ev.Metadata["dest_class"], c.class)
+		}
+		if ev.Metadata["dest_port"] != "4444" {
+			t.Errorf("%s: dest_port = %q, want 4444", c.name, ev.Metadata["dest_port"])
 		}
 	}
 }

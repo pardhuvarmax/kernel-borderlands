@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"crypto/ed25519"
+	"encoding/binary"
 	"fmt"
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/logx"
 	"log"
@@ -120,6 +121,65 @@ type ControlPlane struct {
 	// prevents for SubmitAgentDecision/SetContainment.
 	lastExfilAlertMu sync.Mutex
 	lastExfilAlert   map[string]time.Time
+
+	// netFlowCache remembers the most recent NetFlow (msg_type=9) sample per
+	// pid so OnProcessState can attach a destination class/port to feature
+	// schema v2 without any wire-contract change: daddr/dport already cross
+	// the wire in NetFlowMsg, this just joins it server-side. sync.Map (not
+	// the lastExfilAlert mutex-map pattern) because this is read on every
+	// OnProcessState call (every 20 events per pid) but written far less
+	// often (once per connect), so the read-mostly map fits better.
+	netFlowCache sync.Map // pid uint32 -> netFlowSample
+}
+
+// netFlowSample is what netFlowCache stores per pid: just enough to derive
+// dest_class/dest_port in OnProcessState. Not persisted; lost on restart
+// like the rest of L1.
+type netFlowSample struct {
+	Daddr uint32
+	Dport uint16
+}
+
+// destClass buckets. 0 means "no NetFlow observed yet for this pid" (the
+// schema's missing-value default), matching telemetry_gap's "unknown means
+// unsure" convention rather than silently implying "loopback".
+const (
+	destClassNone      = 0
+	destClassLoopback  = 1
+	destClassPrivate   = 2
+	destClassLinkLocal = 3
+	destClassMulticast = 4
+	destClassPublic    = 5
+)
+
+// classifyDestination buckets an IPv4 destination (network byte order, as
+// carried in NetFlowMsg.Daddr) into a coarse class a learned policy can use
+// without memorizing specific IPs. This is intentionally coarse: it cannot
+// tell a legitimate backup host from a C2 host at the same RFC1918 address,
+// only the kind of destination. See datasets/attack-lab/20261031T201927 and
+// CHANGELOG.md for why that distinction matters and what schema v2 still
+// cannot see (destination identity, byte volume).
+func classifyDestination(daddr uint32) int {
+	// NetFlowMsg.Daddr keeps the original network-byte-order IP bytes, but
+	// wire.go's parseNetFlow reads them with binary.LittleEndian.Uint32 (the
+	// same reader used for every other uint32 field), so the resulting Go
+	// value has those bytes reversed from a "normal" IPv4 numeric value.
+	// LittleEndian.PutUint32 undoes that and recovers the original bytes.
+	b := make(net.IP, 4)
+	binary.LittleEndian.PutUint32(b, daddr)
+	ip := b
+	switch {
+	case ip.IsLoopback():
+		return destClassLoopback
+	case ip.IsPrivate():
+		return destClassPrivate
+	case ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast():
+		return destClassLinkLocal
+	case ip.IsMulticast():
+		return destClassMulticast
+	default:
+		return destClassPublic
+	}
 }
 
 // exfilAlertMinInterval is how often OnNetFlow will re-alert on the same
@@ -520,13 +580,13 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	}
 	cp.recordStoreResult(err)
 
-	// Feature schema v1 (kb-aads/features/schema.py): every field below is a
-	// value the sensor actually computed for this process, so a learned
+	// Feature schema v2 (kb-aads/features/schema.py): every field below is a
+	// value the sensor/kbd actually computed for this process, so a learned
 	// policy can be trained and served on the same inputs. Keep the keys in
 	// sync with that file. The legacy dim_syscall/dim_privilege/composite/
 	// zone/uid keys stay for existing consumers.
 	md := map[string]string{
-		"feature_schema": "1",
+		"feature_schema": "2",
 		"zone":           ipc.KBZone(msg.Zone).String(),
 		"composite":      fmt.Sprintf("%.2f", msg.CompositeScore),
 		"dim_syscall":    fmt.Sprintf("%.2f", msg.DimScore[ipc.DimCount-5]),
@@ -536,6 +596,20 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	}
 	for i, name := range ipc.DimNames {
 		md["dim_"+name] = fmt.Sprintf("%.2f", msg.DimScore[i])
+	}
+	// dest_class/dest_port: new in schema v2, derived server-side from the
+	// most recent NetFlow sample (msg_type=9) for this pid — no wire-contract
+	// change, see classifyDestination's doc comment and
+	// docs/development/control-aads/learned-policy-retraining.md §3b.
+	// destClassNone (0, the schema's missing-value default) if this pid has
+	// made no connection kbd has seen yet.
+	if v, ok := cp.netFlowCache.Load(msg.PID); ok {
+		nf := v.(netFlowSample)
+		md["dest_class"] = fmt.Sprintf("%d", classifyDestination(nf.Daddr))
+		md["dest_port"] = fmt.Sprintf("%d", nf.Dport)
+	} else {
+		md["dest_class"] = fmt.Sprintf("%d", destClassNone)
+		md["dest_port"] = "0"
 	}
 	cp.fanOutEvent(&pb.KBEvent{
 		Pid:        msg.PID,
@@ -551,6 +625,7 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 func (cp *ControlPlane) OnProcessExit(msg *ipc.ProcessExitMsg) {
 	// Delete volatile cache entries to prevent PID reuse vulnerabilities
 	cp.commCache.Delete(msg.PID)
+	cp.netFlowCache.Delete(msg.PID)
 
 	// Push exit details to L2 DB
 	if err := cp.store.TerminateProcessState(msg.PID, msg.ExitTimeNs, msg.ExitCode); err != nil {
@@ -591,6 +666,8 @@ func (cp *ControlPlane) OnContainmentAck(msg *ipc.ContainmentAckMsg) {
 // exfil.go's package doc comment for the byte-volume-vs-connection-
 // frequency fidelity trade-off this detector runs under.
 func (cp *ControlPlane) OnNetFlow(msg *ipc.NetFlowMsg) {
+	cp.netFlowCache.Store(msg.PID, netFlowSample{Daddr: msg.Daddr, Dport: msg.Dport})
+
 	result := cp.exfilDetector.Observe(msg.PID, msg.Daddr, msg.Dport, msg.TsNs)
 	if !result.Beacon {
 		return

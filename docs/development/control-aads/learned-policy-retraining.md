@@ -30,6 +30,52 @@ All are computed by the sensor/kbd from observed behaviour. `telemetry_gap` defa
 
 Candidate features that do **not** exist in the sensor yet (implement before adding to the schema, then bump the version): `credential_change_count`, `sensitive_file_access_count`, `network_anomaly_score` (beyond `dim_network`), `memory_risk_flags` (mmap/mprotect/injection evidence), `sequence_evidence` (ordered events in a window).
 
+## 3b. Schema v2: `dest_class` / `dest_port` (implemented, 2026-10-31) — and why `bytes_sent` is a separate, bigger change
+
+Prompted by the tree-oracle result in `datasets/attack-lab/20261031T201927` (file+network evidence in a
+process tree is 5/5 for the attacks **and** 5/5 for two network-using benign scenarios), the operator
+asked for destination class and bytes-sent as new features. They split into two very different pieces:
+
+- **`dest_class`/`dest_port` (done, no wire-contract change).** `NetFlowMsg` (`msg_type=9`) already
+  carries `daddr`/`dport` for every `connect()` — it just wasn't joined into the feature export.
+  `kb-control-plane/internal/controlplane/controlplane.go` now caches the most recent `NetFlow` sample
+  per pid (`netFlowCache`, evicted on process exit alongside `commCache`) and `OnProcessState` attaches
+  `dest_class` (0=none seen yet, 1=loopback, 2=private, 3=link-local, 4=multicast, 5=public;
+  `classifyDestination`) and `dest_port` (raw, 0 if none) to the schema-v2 export. `feature_schema` is
+  now `"2"`. Tests: `TestOnProcessState_EmitsFeatureSchemaV2`, `TestOnProcessState_DestClassFromPriorNetFlow`
+  (Go); `test_dest_class_defaults_to_none_and_from_event_message_reads_it` (Python). **Known limit**:
+  `dest_class` is coarse by construction — it cannot distinguish a legitimate backup host from a C2 host
+  at the same kind of address. In the `20261031T201927` corpus, `backup_remote`/`credential_report`
+  (benign) and `exfil_staging`/`credential_dump` (attack) would currently land in the same class (the lab
+  payloads all use loopback addresses for realism/safety, so in that specific corpus everything is class
+  1; on a real host the attack and a real offsite backup would differ, but a generic public/private split
+  still does not separate "my own backup server" from "an attacker's server"). A real fix needs
+  destination *identity* (an allowlist of known-good hosts, analogous to `config/allowlist.yaml`'s
+  comm-based exemption) layered on top of the class, which is a policy decision, not a sensor change.
+
+- **`bytes_sent` (NOT done — scoped, not started).** `connect()` carries no payload-size field (the same
+  limitation `docs/development/control-aads/dev-exfiltration-detection.md` hit building the beaconing
+  detector, which falls back to connection-frequency as a volume proxy for the same reason). Real byte
+  accounting needs:
+  1. New eBPF instrumentation on `write()`/`sendto()`/`sendmsg()` (or a socket-layer kprobe/tracepoint),
+     counting bytes per `(pid, fd)` and correlating `fd` to the socket/destination already tracked for
+     `NetFlow` — kb-core work, not Go-side.
+  2. A new wire message (`KB_WIRE_VERSION` bump past 3; `msg_type` values 11+ are free per
+     `docs/development/core-control/wire-protocol.md`) or an extension to `kb_wire_net_flow`, sent
+     periodically/on accumulation rather than per syscall, to avoid flooding `kbd.sock` — the journal-flood
+     fix in `kb-sensor.service` and the per-event-output-off default (CHANGELOG 1.1.0) exist because
+     unbatched per-event telemetry caused real outages; a byte-counting hook must batch from day one.
+  3. Go-side aggregation into schema v3 (`bytes_sent`, likely log-scaled given the "low & slow" exfil
+     threat model it's meant to help with), plus `kb-aads` schema/test updates like this change's.
+  4. Careful validation before any rollout: a sensor-side uprobe mistake has crashed `tailscaled` and
+     frozen the lab VM before (the Go-TLS-uprobe offset bug, CHANGELOG 1.1.0); a new syscall-level hook
+     needs the same isolated-VM testing discipline and an opt-out env var (the `KB_TLS_GO_UPROBE=0`
+     pattern) before it ships enabled by default.
+
+  This is sensor-side (C/eBPF) work requiring a coordinated C+Go wire-contract change
+  (`docs/architecture/kbd-contracts.md`'s "C and Go sides must change together" rule) and is **not
+  scheduled**; treat it as a separate task, reviewed on its own, not a drop-in alongside `dest_class`.
+
 ## 4. Pipeline to build
 
 1. **Capture.** Attack lab on an isolated VM (root): benign workloads (web, DB, compile, desktop), privilege escalation, process injection, suspicious network, credential access, evasion. Record the sensor's own `process_state` stream plus timestamps. `scripts/attack-lab/` currently has only `containment_demo.py`; the scenario scripts listed in older docs do not exist.

@@ -19,8 +19,21 @@ def test_vector_is_ordered_clipped_and_defaults_missing():
 
 def test_serving_features_match_what_kbd_emits():
     # keys kbd puts in KBEvent.metadata (controlplane.go OnProcessState)
-    kbd_keys = {"dim_process", "dim_syscall", "dim_privilege", "dim_file", "dim_network", "dim_memory"}
+    kbd_keys = {"dim_process", "dim_syscall", "dim_privilege", "dim_file", "dim_network", "dim_memory",
+                "dest_class", "dest_port"}
     assert kbd_keys <= set(schema.NAMES)
+
+
+def test_dest_class_defaults_to_none_and_from_event_message_reads_it():
+    v = schema.build_vector({"score": 50})
+    assert v[schema.NAMES.index("dest_class")] == 0.0
+    assert v[schema.NAMES.index("dest_port")] == 0.0
+    msg = {"metadata": {"dim_process": "1", "dest_class": "2", "dest_port": "4444"}}
+    raw = schema.from_event_message(msg)
+    assert raw["dest_class"] == "2" and raw["dest_port"] == "4444"
+    v = schema.build_vector(raw)
+    assert v[schema.NAMES.index("dest_class")] == 2.0
+    assert v[schema.NAMES.index("dest_port")] == 4444.0
 
 
 def test_gate_refuses_legacy_and_mismatch_accepts_current(monkeypatch):
