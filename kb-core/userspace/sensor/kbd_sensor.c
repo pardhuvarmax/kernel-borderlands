@@ -254,6 +254,66 @@ static void control_ensure_connected(void)
     }
 }
 
+// ---- final state on process exit -----------------------------------------
+// kbd only learns a process's state when the sensor syncs it (every
+// KB_STATE_SYNC_EVERY_N events, or on a zone change) and the exit message is
+// not republished as a process_state, so a short-lived or low-activity process
+// (a compiler child, a one-shot payload, `sudo cat`) could finish without kbd,
+// its event stream, the swarm or a training corpus ever seeing its final score.
+// On exit we now publish that final state, before the exit message.
+//
+// KB_SENSOR_EXIT_STATE: "anomalous" (default; only processes that scored
+// non-trivially or left SAFE, so a process storm of harmless exits adds almost
+// nothing), "all" (every exit; for lab capture), "off". Always rate-limited so
+// kbd cannot be flooded; the counts are in the 30 s summary.
+#define KB_EXIT_STATE_RATE_PER_SEC 2000
+#define KB_EXIT_STATE_MIN_EMA      5.0
+static int      exit_state_mode = 1;            // 0 off, 1 anomalous, 2 all
+static uint64_t exit_sent, exit_skipped_benign, exit_rate_limited;
+
+static int exit_state_rate_allow(void)
+{
+    static double tokens = KB_EXIT_STATE_RATE_PER_SEC;
+    static uint64_t last_ns;
+    uint64_t now = now_ns();
+    if (last_ns)
+        tokens += (double)(now - last_ns) / 1e9 * KB_EXIT_STATE_RATE_PER_SEC;
+    last_ns = now;
+    if (tokens > KB_EXIT_STATE_RATE_PER_SEC)
+        tokens = KB_EXIT_STATE_RATE_PER_SEC;
+    if (tokens >= 1.0) {
+        tokens -= 1.0;
+        return 1;
+    }
+    return 0;
+}
+
+static void publish_exit_state(kb_scoring_result_t r)
+{
+    if (!r.state || exit_state_mode == 0)
+        return;
+    // bridge_dispatch already sent this exact state (sync boundary / zone change)
+    if (r.zone_changed || r.state->event_count % KB_STATE_SYNC_EVERY_N == 0)
+        return;
+    if (exit_state_mode == 1 && r.state->zone == KB_ZONE_SAFE && r.state->ema_score < KB_EXIT_STATE_MIN_EMA) {
+        exit_skipped_benign++;
+        return;
+    }
+    if (!exit_state_rate_allow()) {
+        exit_rate_limited++;
+        return;
+    }
+    bridge_ensure_connected();
+    if (bridge_fd < 0)
+        return;
+    if (kb_bridge_send_state(bridge_fd, r.state) != 0) {
+        kb_bridge_close(bridge_fd);
+        bridge_fd = -1;
+        return;
+    }
+    exit_sent++;
+}
+
 static void bridge_dispatch(kb_scoring_result_t r, uint64_t ts_ns)
 {
     if (!r.state)
@@ -2030,7 +2090,7 @@ static FILE *event_sink(void)
     if (ev_stats.last_summary_ns == 0) {
         ev_stats.last_summary_ns = ev_stats.last_refill_ns = now;
     } else if (now - ev_stats.last_summary_ns >= (uint64_t)EV_SUMMARY_INTERVAL_S * 1000000000ull) {
-        printf("[SENSOR] last %ds: %llu events seen, %llu logged, %llu log lines suppressed, %llu transition lines suppressed, %llu own syscalls skipped in-kernel, %llu CRITICAL own-activity events (%llu log lines suppressed), entropy scans: %llu (avg %.1f ms, max %.1f ms), stale process entries reaped: %llu, events left unscored: %llu, per-pid table evictions: %llu%s\n",
+        printf("[SENSOR] last %ds: %llu events seen, %llu logged, %llu log lines suppressed, %llu transition lines suppressed, %llu own syscalls skipped in-kernel, %llu CRITICAL own-activity events (%llu log lines suppressed), entropy scans: %llu (avg %.1f ms, max %.1f ms), stale process entries reaped: %llu, events left unscored: %llu, per-pid table evictions: %llu, exit states: %llu sent / %llu benign skipped / %llu rate-limited%s\n",
                EV_SUMMARY_INTERVAL_S,
                (unsigned long long)(ev_stats.seen - ev_stats.summary_seen),
                (unsigned long long)ev_stats.logged,
@@ -2045,6 +2105,9 @@ static FILE *event_sink(void)
                (unsigned long long)reaped_total,
                (unsigned long long)unscored_events,
                (unsigned long long)(kb_scoring_evictions() + kb_evidence_evictions() + kb_behavior_evictions()),
+               (unsigned long long)exit_sent,
+               (unsigned long long)exit_skipped_benign,
+               (unsigned long long)exit_rate_limited,
                ev_verbose ? "" : " (per-event log off; set KB_SENSOR_VERBOSE=1)");
         fflush(stdout);
         ev_stats.summary_seen = ev_stats.seen;
@@ -2101,6 +2164,8 @@ static int handle_event(void *ctx, void *data, size_t sz)
     if (e->event_type != 9 && e->event_type != 10) {
         kb_scoring_result_t r = process_behavior_and_score(e);
         bridge_dispatch(r, e->ts_ns);
+        if (e->event_type == KB_EVT_PROCESS_EXIT)
+            publish_exit_state(r);
     }
 
     char dst[INET_ADDRSTRLEN] = {0};
@@ -2208,6 +2273,12 @@ int main(void)
     struct ring_buffer    *rb = NULL;
     int err;
 
+    {
+        const char *m = getenv("KB_SENSOR_EXIT_STATE");
+        if (m && strcmp(m, "off") == 0)       exit_state_mode = 0;
+        else if (m && strcmp(m, "all") == 0)  exit_state_mode = 2;
+        else                                  exit_state_mode = 1;
+    }
     self_pid = getpid();
     ev_verbose = getenv("KB_SENSOR_VERBOSE") && getenv("KB_SENSOR_VERBOSE")[0] == '1';
     // Line-buffer stdout so a journal pipe gets whole lines, not block flushes.
