@@ -1,0 +1,21 @@
+run 20261031T183320  host=UbuntuVM-eBPF  kernel=6.8.0-139-generic  package=1.1.0  schema=1
+containment_active=False  audit_export_ok=True  stream_gaps=0
+events=246114  attributed=3432 (1.4%; the rest is background desktop activity)
+executions=60  with zero attributed events: 0 []
+
+kind   family                n events/exec peak score  reached SUSP+        95% CI reached BORD would-contain
+attack credential_access     5        37.0       21.8         5/5    [0.57,1.00]        0/5           0/5
+attack evasion               5        68.6       24.1         5/5    [0.57,1.00]        0/5           0/5
+attack memory_exploit        5         2.0       15.4         0/5    [0.00,0.43]        0/5           0/5
+attack network_c2            5         9.0       11.0         0/5    [0.00,0.43]        0/5           0/5
+attack privilege_escalation  5        78.8       27.5         5/5    [0.57,1.00]        0/5           0/5
+attack process_injection     5         5.0       21.0         5/5    [0.57,1.00]        5/5           5/5
+benign admin                 5       278.2       19.9         0/5    [0.00,0.43]        0/5           0/5
+benign admin_privileged      5        55.8       25.8         5/5    [0.57,1.00]        0/5           0/5
+benign compile               5        28.0        1.0         0/5    [0.00,0.43]        0/5           0/5
+benign database              5         1.0        3.2         0/5    [0.00,0.43]        0/5           0/5
+benign idle                  5         1.0        6.2         0/5    [0.00,0.43]        0/5           0/5
+benign web                   5       122.0        9.7         0/5    [0.00,0.43]        0/5           0/5
+
+fixed rule engine, executions flagged SUSPICIOUS or higher: attacks 20/30 (67%, CI [0.49,0.81]); benign 5/30 (17%, CI [0.07,0.34])
+time from first malicious action to first kbd zone audit (flagged attacks, n=20): median 3 ms, max 213 ms
