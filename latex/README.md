@@ -11,6 +11,9 @@ LaTeX source for Kernel Borderlands research papers.
   pdflatex main.tex` from inside `paper/`.
 - `bug-reports/` — LaTeX writeups of specific defects found during
   development.
+- `session-reports/` — dated LaTeX writeups of individual working sessions,
+  one subdirectory per date, same four-side-border visual style as
+  `bug-reports/`.
 
 NOMAD's own standalone paper draft (previously `nomad/`) has moved with
 the rest of NOMAD's design work to its separate repository and has been
