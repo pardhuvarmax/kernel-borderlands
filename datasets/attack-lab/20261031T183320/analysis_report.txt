@@ -1,5 +1,5 @@
 run 20261031T183320  host=UbuntuVM-eBPF  kernel=6.8.0-139-generic  package=1.1.0  schema=1
-containment_active=False  audit_export_ok=True  stream_gaps=0
+containment_active=False (Observe-only Run)  audit_export_ok=True  stream_gaps=0
 events=246114  attributed=3432 (1.4%; the rest is background desktop activity)
 executions=60  with zero attributed events: 0 []
 
