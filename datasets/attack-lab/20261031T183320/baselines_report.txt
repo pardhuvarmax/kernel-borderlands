@@ -1,0 +1,31 @@
+rows=245854  train=85345 test=160509  attack rows: train=319 test=476
+test executions: 30  families held out entirely from train: ['admin_privileged', 'evasion']
+threshold rule: chosen on TRAIN only so that <= 0.1% of train benign+background rows are flagged
+
+system                                                          attacks flagged       95% CI  benign flagged       95% CI  bg procs/min
+fixed rules: zone >= SUSPICIOUS                                       11/15     [0.48,0.89]         5/15    [0.15,0.58]         14.13
+fixed rules: zone >= BORDERLANDS                                       2/15     [0.04,0.38]         0/15    [0.00,0.20]          0.24
+logistic regression (all v1 features)  [row AUC 0.997]                12/15     [0.55,0.93]         5/15    [0.15,0.58]          0.64
+gradient-boosted tree (all v1 features)  [row AUC 0.967]              15/15     [0.80,1.00]         9/15    [0.36,0.80]          9.15
+gradient-boosted tree (no zone/score)  [row AUC 0.878]                15/15     [0.80,1.00]         9/15    [0.36,0.80]          9.47
+
+(bg procs/min = distinct background processes flagged per minute of test time: the alert noise on a normal desktop)
+per test family (flagged / executions); attacks first:
+kind   family                   1       2       3       4       5
+attack credential_access      2/2     0/2     2/2     2/2     2/2
+attack evasion                5/5     0/5     5/5     5/5     5/5
+attack memory_exploit         0/2     0/2     1/2     2/2     2/2
+attack network_c2             0/2     0/2     0/2     2/2     2/2
+attack privilege_escalation     2/2     0/2     2/2     2/2     2/2
+attack process_injection      2/2     2/2     2/2     2/2     2/2
+benign admin                  0/2     0/2     0/2     2/2     1/2
+benign admin_privileged       5/5     0/5     5/5     5/5     5/5
+benign compile                0/2     0/2     0/2     0/2     0/2
+benign database               0/2     0/2     0/2     0/2     0/2
+benign idle                   0/2     0/2     0/2     2/2     1/2
+benign web                    0/2     0/2     0/2     0/2     2/2
+
+systems: 1=fixed rules: zone >= SUSPICIOUS; 2=fixed rules: zone >= BORDERLANDS; 3=logistic regression (all v1 features); 4=gradient-boosted tree (all v1 features); 5=gradient-boosted tree (no zone/score)
+
+Caveats: n is tiny (see the intervals), the rule engine and the learned models share the same sensor features,
+held-out families appear only in test, and nothing here is a claim about performance on other hosts or attacks.

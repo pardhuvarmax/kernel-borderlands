@@ -44,6 +44,10 @@ Candidate features that do **not** exist in the sensor yet (implement before add
 
 `scripts/attack-lab/` (`runner.py`, `payloads.py`, `capture.py`, `labeling.py`; see its README) produces the corpus described above. Captures must run with `kbd` in **observe-only** mode (`KB_OBSERVE_ONLY=1`): automatic containment would truncate the attacks and bias the data toward already-contained behaviour. The same mode is the "shadow" stage later: the learned policy runs, `kbd` audits `OBSERVE_ONLY_WOULD_*`, nothing is enforced. Not yet done: the sensor does not yet export per-window drop counts per process (`telemetry_gap` is derived from stream gaps and missing dimensions only), the candidate features listed in section 3 do not exist yet, and no full corpus has been captured.
 
+## 4c. First baselines (descriptive, 2026-10-31)
+
+`scripts/attack-lab/baselines.py` compares the fixed rules with logistic regression and a gradient-boosted tree on schema-v1 features, using the corpus' execution-level split. On the first 60-execution corpus a logistic regression matches the rules' attack recall with about 22x fewer false background alerts, no model separates the `sudo tar /etc` hard negatives from credential theft, and the gradient-boosted tree trades precision for recall. The sample is far too small for gates (section 5); the actionable result is that **richer features come before a more complex model**. Details and caveats: the changelog entry "First baseline comparison" and `datasets/attack-lab/<run>/baselines_report.txt`.
+
 ## 5. Gates before `policy.use_learned: true`
 
 Evaluated on independent executions/scenarios, with confidence intervals and repeated trials, against deterministic and supervised baselines:
