@@ -1,0 +1,102 @@
+# eBPF build artifacts
+kb-core/.output/
+kb-core/build/
+kb-core/*.o
+kb-core/*.skel.h
+kb-core/compile_commands.json
+
+# Go
+kb-control-plane/vendor/
+kb-op/kb-tui/vendor/
+*.exe
+
+# Python
+kb-aads/venv/
+kb-aads/__pycache__/
+kb-aads/**/__pycache__/
+*.pyc
+*.pyo
+
+# Node
+kb-op/kb-dashboard/node_modules/
+kb-op/kb-dashboard/dist/
+kb-op/kb-tui/target/
+
+# Rust
+kb-checker/target/
+
+# Secrets
+*.env
+*.key
+*.pem
+config/secrets/
+authorized_keys
+ssh_host_*
+*.pub
+test_client_key*
+kb-op/kb-mcp/kb-mcp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Third-party dependencies
+libbpf/
+
+
+demo/
+
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Agent work documents (local only)
+docs/AGENT_WORK/
+
+kb-control-plane/bin/kbd
+kb-op/kbctl/kbctl
+
+# graphify - keep only the human/machine-readable outputs
+graphify-out/*
+!graphify-out/graph.html
+!graphify-out/GRAPH_REPORT.md
+!graphify-out/graph.json
+!graphify-out/README.md
+
+
+
+# attack datasets
+scripts/dataset/output/raw/
+
+
+# packaged bundles (e.g. Colab training bundles) — regenerable, not source
+scripts/zips/
+
+# LaTeX build artifacts (keep .tex source and the built .pdf, not intermediates)
+latex/**/*.aux
+latex/**/*.log
+latex/**/*.out
+latex/**/*.toc
+latex/**/*.fls
+latex/**/*.fdb_latexmk
+latex/**/*.synctex.gz
+latex/**/*.bbl
+latex/**/*.blg
+
+# source markdown for the LaTeX bug report -- the PDF (latex/bug-reports/main.pdf) is the deliverable
+BUG_REPORT.md
+
+# Package build output
+dist/
+
+# Built binaries (make build)
+/bin/
+
+# Attack-lab datasets: track the compact tables only (Parquet + small CSVs + README +
+# analysis report). The raw run files, the 50 MB events.csv and the .xlsx copies stay local;
+# regenerate the tables from the raw run with scripts/attack-lab/export.py.
+datasets/attack-lab/*/raw/
+datasets/attack-lab/*/tables/*.xlsx
+datasets/attack-lab/*/tables/events.csv
