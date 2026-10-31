@@ -27,6 +27,33 @@ def load_jsonl(path):
         return [json.loads(l) for l in f if l.strip()]
 
 
+def expand_pids(execution, events, max_rounds=12):
+    """Add every process whose ppid chain leads into this execution's tree.
+
+    The runner polls /proc every 50 ms, which misses short-lived children (a
+    `sudo cat /etc/shadow` lives ~10 ms). kbd's process_state events carry the
+    ppid, so any process whose parent is already in the tree (within the
+    execution's time window) belongs to it, and so do ITS children, until
+    nothing new is found. Returns a copy with "pids" expanded, "pids_polled"
+    (what the runner saw) and "pids_from_events" (what ancestry added).
+    zone_transition events carry no ppid and cannot link a process by
+    themselves.
+    """
+    lo, hi = execution["start_ns"], execution["end_ns"] + SETTLE_NS
+    win = [e for e in events if not e.get("gap") and lo <= e["recv_ns"] <= hi and e.get("ppid")]
+    tree = set(execution["pids"]) | {execution["root_pid"]}
+    for _ in range(max_rounds):
+        new = {e["pid"] for e in win if e["ppid"] in tree and e["pid"] not in tree and e["pid"] != 0}
+        if not new:
+            break
+        tree |= new
+    out = dict(execution)
+    out["pids_polled"] = sorted(execution["pids"])
+    out["pids"] = sorted(tree)
+    out["pids_from_events"] = sorted(tree - set(execution["pids"]) - {execution["root_pid"]})
+    return out
+
+
 def pid_index(executions):
     """pid -> list of (start_ns, end_ns, execution) for fast attribution."""
     idx = {}

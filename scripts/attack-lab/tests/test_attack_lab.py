@@ -152,3 +152,22 @@ def test_runner_refuses_when_not_observe_only(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["runner.py", "--ack-isolated", "--scenarios", "benign_idle"])
     assert runner.main() == 2
     assert "observe-only" in capsys.readouterr().err
+
+
+def test_expand_pids_recovers_short_lived_children_through_ppid_chains():
+    ex_ = {"execution_id": "e", "root_pid": 100, "pids": [100], "start_ns": 1000, "end_ns": 5000, "kind": "attack", "family": "f", "host": "h"}
+    events = [
+        {"pid": 101, "ppid": 100, "recv_ns": 1500, "comm": "sudo"},     # child the poll missed
+        {"pid": 102, "ppid": 101, "recv_ns": 1600, "comm": "cat"},      # grandchild, linked through 101
+        {"pid": 200, "ppid": 1,   "recv_ns": 1500, "comm": "systemd"},  # unrelated
+        {"pid": 103, "ppid": 100, "recv_ns": 9_000_000_000_000, "comm": "late"},  # after the window
+        {"pid": 104, "ppid": 100, "recv_ns": 1700, "comm": "zt"},
+        {"pid": 105, "ppid": 0,   "recv_ns": 1700, "comm": "zone_transition_no_ppid"},
+        {"gap": True, "recv_ns": 1800},
+    ]
+    out = labeling.expand_pids(ex_, events)
+    assert out["pids"] == [100, 101, 102, 104] and out["pids_from_events"] == [101, 102, 104]
+    assert out["pids_polled"] == [100] and ex_["pids"] == [100]       # input is not mutated
+    # and the attribution now picks the grandchild up
+    labelled = [(e["pid"], hit is not None) for e, hit, _ in labeling.label_events(events, [out])]
+    assert (102, True) in labelled and (200, False) in labelled

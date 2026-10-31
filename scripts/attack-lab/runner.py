@@ -129,14 +129,15 @@ def kbd_observe_only():
 
 
 def audit_entries(socket_path):
+    """kbd's audit log via the shipped `kbctl audit export` (the Python gRPC
+    stubs in kb-aads/comms predate that RPC). None if it cannot be read."""
     try:
-        from comms.grpc_client import ControlPlaneClient
-        import kb_pb2
-        c = ControlPlaneClient(socket_path=socket_path)
-        r = c.stub.ExportAuditLog(kb_pb2.Empty())
-        c.close()
-        return [{"ts_ns": e.ts_ns, "action": e.action, "subject": e.subject,
-                 "actor": e.actor, "reason": e.reason} for e in r.entries]
+        out = subprocess.run(["kbctl", "audit", "export", "--socket", socket_path],
+                             capture_output=True, text=True, timeout=60)
+        if out.returncode != 0:
+            return None
+        return [{"ts_ns": int(e["ts_ns"]), "action": e["action"], "subject": e.get("subject", ""),
+                 "actor": e.get("actor", ""), "reason": e.get("reason", "")} for e in json.loads(out.stdout)]
     except Exception:  # noqa: BLE001
         return None
 
@@ -288,8 +289,12 @@ def main():
                                              "--since", f"@{manifest['started_wall_ns'] // 10**9}"]).count("SENSOR] last"))
         entries = audit_entries(a.socket)
         manifest["audit_export_ok"] = entries is not None
+        import labeling
+        captured = labeling.load_jsonl(events_path)
         with open(os.path.join(root, "labels.jsonl"), "w") as f:
-            for ex in executions:
+            for i, ex in enumerate(executions):
+                ex = labeling.expand_pids(ex, captured)   # short-lived children the poll missed
+                executions[i] = ex
                 ex["kbd_audit"] = audit_for_execution(entries, ex)
                 f.write(json.dumps(ex) + "\n")
         with open(os.path.join(root, "manifest.json"), "w") as f:
