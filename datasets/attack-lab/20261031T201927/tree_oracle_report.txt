@@ -1,0 +1,11 @@
+family               kind    n  tree has file AND network   single process has both   procs/exec
+exfil_staging        attack  5               5/5                      0/5           13.0
+backup_etc           benign  5               0/5                      0/5           19.0
+backup_remote        benign  5               5/5                      0/5           13.0
+
+credential_dump      attack  5               5/5                      0/5            7.0
+credential_audit     benign  5               0/5                      0/5           19.0
+credential_report    benign  5               5/5                      0/5            7.0
+
+Caveats: oracle grouping (ground-truth execution id); 5 executions per family; backup_remote and
+credential_report are benign work that reads secrets and uses the network.

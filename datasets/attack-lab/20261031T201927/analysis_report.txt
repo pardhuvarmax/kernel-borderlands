@@ -1,0 +1,27 @@
+run 20261031T201927  host=UbuntuVM-eBPF  kernel=6.8.0-139-generic  package=1.1.0  schema=1
+containment_active=False  audit_export_ok=True  stream_gaps=0
+events=321662  attributed=4476 (1.4%; the rest is background desktop activity)
+executions=90  with zero attributed events: 0 []
+
+kind   family                n events/exec peak score  reached SUSP+        95% CI reached BORD would-contain
+attack credential_access     5        37.2       23.6         5/5    [0.57,1.00]        0/5           0/5
+attack credential_dump       5        22.0       26.2         5/5    [0.57,1.00]        0/5           0/5
+attack evasion               5        81.2       26.1         5/5    [0.57,1.00]        0/5           0/5
+attack exfil_staging         5        22.0       21.8         5/5    [0.57,1.00]        0/5           0/5
+attack memory_exploit        5         2.0       14.4         0/5    [0.00,0.43]        0/5           0/5
+attack network_c2            5         9.0        9.7         0/5    [0.00,0.43]        0/5           0/5
+attack privilege_escalation  5        79.0       27.3         5/5    [0.57,1.00]        0/5           0/5
+attack process_injection     5         5.0       20.6         5/5    [0.57,1.00]        5/5           5/5
+benign admin                 5       283.6       19.4         0/5    [0.00,0.43]        0/5           0/5
+benign admin_privileged      5        55.0       25.4         5/5    [0.57,1.00]        0/5           0/5
+benign backup_etc            5        36.8       24.3         5/5    [0.57,1.00]        0/5           0/5
+benign backup_remote         5        23.4       26.4         5/5    [0.57,1.00]        0/5           0/5
+benign compile               5        28.0        3.8         0/5    [0.00,0.43]        0/5           0/5
+benign credential_audit      5        64.0       26.1         5/5    [0.57,1.00]        0/5           0/5
+benign credential_report     5        23.0       21.8         5/5    [0.57,1.00]        0/5           0/5
+benign database              5         1.0        1.0         0/5    [0.00,0.43]        0/5           0/5
+benign idle                  5         1.0        6.5         0/5    [0.00,0.43]        0/5           0/5
+benign web                   5       122.0        9.2         0/5    [0.00,0.43]        0/5           0/5
+
+fixed rule engine, executions flagged SUSPICIOUS or higher: attacks 30/40 (75%, CI [0.60,0.86]); benign 25/50 (50%, CI [0.37,0.63])
+time from first malicious action to first kbd zone audit (flagged attacks, n=30): median 3 ms, max 206 ms

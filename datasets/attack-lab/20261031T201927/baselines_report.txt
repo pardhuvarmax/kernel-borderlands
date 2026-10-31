@@ -1,0 +1,37 @@
+rows=320721  train=122520 test=198201  attack rows: train=426 test=605
+test executions: 42  families held out entirely from train: ['admin_privileged', 'evasion']
+threshold rule: chosen on TRAIN only so that <= 0.1% of train benign+background rows are flagged
+
+system                                                          attacks flagged       95% CI  benign flagged       95% CI  bg procs/min
+fixed rules: zone >= SUSPICIOUS                                       15/19     [0.57,0.91]        13/23    [0.37,0.74]         30.90
+fixed rules: zone >= BORDERLANDS                                       2/19     [0.03,0.31]         0/23    [0.00,0.14]          0.34
+logistic regression (all v1 features)  [row AUC 0.994]                15/19     [0.57,0.91]         8/23    [0.19,0.55]          0.14
+gradient-boosted tree (all v1 features)  [row AUC 0.951]              15/19     [0.57,0.91]        13/23    [0.37,0.74]          0.34
+gradient-boosted tree (no zone/score)  [row AUC 0.865]                13/19     [0.46,0.85]        15/23    [0.45,0.81]          0.00
+
+(bg procs/min = distinct background processes flagged per minute of test time: the alert noise on a normal desktop)
+per test family (flagged / executions); attacks first:
+kind   family                   1       2       3       4       5
+attack credential_access      2/2     0/2     2/2     2/2     2/2
+attack credential_dump        2/2     0/2     2/2     2/2     2/2
+attack evasion                5/5     0/5     5/5     5/5     5/5
+attack exfil_staging          2/2     0/2     0/2     2/2     2/2
+attack memory_exploit         0/2     0/2     2/2     0/2     0/2
+attack network_c2             0/2     0/2     0/2     0/2     0/2
+attack privilege_escalation     2/2     0/2     2/2     2/2     2/2
+attack process_injection      2/2     2/2     2/2     2/2     0/2
+benign admin                  0/2     0/2     0/2     0/2     0/2
+benign admin_privileged       5/5     0/5     2/5     5/5     5/5
+benign backup_etc             2/2     0/2     1/2     2/2     2/2
+benign backup_remote          2/2     0/2     1/2     2/2     2/2
+benign compile                0/2     0/2     0/2     0/2     0/2
+benign credential_audit       2/2     0/2     2/2     2/2     2/2
+benign credential_report      2/2     0/2     2/2     2/2     2/2
+benign database               0/2     0/2     0/2     0/2     0/2
+benign idle                   0/2     0/2     0/2     0/2     0/2
+benign web                    0/2     0/2     0/2     0/2     2/2
+
+systems: 1=fixed rules: zone >= SUSPICIOUS; 2=fixed rules: zone >= BORDERLANDS; 3=logistic regression (all v1 features); 4=gradient-boosted tree (all v1 features); 5=gradient-boosted tree (no zone/score)
+
+Caveats: n is tiny (see the intervals), the rule engine and the learned models share the same sensor features,
+held-out families appear only in test, and nothing here is a claim about performance on other hosts or attacks.

@@ -10,14 +10,15 @@ execution id, a stand-in for the ppid-rooted tree a live system could build) and
   * does the TREE have both?
 
 The grouping uses ground truth, so this shows what tree-level features could do, not what a
-deployed system gets. It is NOT sufficient evidence for a detector: the benign halves of the
-pairs make no network connection at all, and a real backup that uploads to a backup server
-would also be "file plus network".
+deployed system gets. It is NOT sufficient evidence for a detector. backup_etc and
+credential_audit make no network connection; backup_remote and credential_report (added after
+the first run of this oracle) read the same secrets AND connect out, which is the case that
+tests whether "file plus network in one tree" is a usable rule.
 """
 import sys
 import pandas as pd
 
-PAIRS = [("exfil_staging", "backup_etc"), ("credential_dump", "credential_audit")]
+PAIRS = [("exfil_staging", "backup_etc", "backup_remote"), ("credential_dump", "credential_audit", "credential_report")]
 
 
 def main(tables):
@@ -38,8 +39,8 @@ def main(tables):
             if len(g):
                 print(f"{fam:20s} {g.kind.iloc[0]:6s} {len(g):2d}  {int(g.tree.sum()):>14d}/{len(g):<8d}  {int(g.single.sum()):>14d}/{len(g):<6d}  {g.n_procs.mean():8.1f}")
         print()
-    print("Caveats: oracle grouping (ground-truth execution id); 5 executions per family; the benign pair members\n"
-          "make no network connection, so a benign backup that uploads would also look like file+network.")
+    print("Caveats: oracle grouping (ground-truth execution id); 5 executions per family; backup_remote and\n"
+          "credential_report are benign work that reads secrets and uses the network.")
 
 
 if __name__ == "__main__":
