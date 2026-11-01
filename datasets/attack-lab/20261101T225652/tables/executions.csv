@@ -1,0 +1,2 @@
+execution_id,scenario,family,kind,seed,root_pid,n_pids,n_pids_polled,n_pids_from_events,start_ns,end_ns,duration_s,first_malicious_ns,exit_code,timed_out,n_events,peak_ema_score,max_zone,n_zone_audit_entries,n_would_contain,kbd_audit_actions,split
+20261101T225652-benign_idle-000,benign_idle,idle,benign,577090037,14555,1,1,0,1793554012997182813,1793554038058227029,25.061,,0,False,2,6.748167991638184,SAFE,0,0,{},train

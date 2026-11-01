@@ -73,7 +73,9 @@ def main(run):
     nb, sb = sum(r[2] for r in ben), sum(r[3] for r in ben)
     print()
     la, ha = wilson(sa, na); lb, hb = wilson(sb, nb)
-    print(f"fixed rule engine, executions flagged SUSPICIOUS or higher: attacks {sa}/{na} ({100*sa/na:.0f}%, CI [{la:.2f},{ha:.2f}]); benign {sb}/{nb} ({100*sb/nb:.0f}%, CI [{lb:.2f},{hb:.2f}])")
+    pa = f"{100*sa/na:.0f}%" if na else "n/a"
+    pb = f"{100*sb/nb:.0f}%" if nb else "n/a"
+    print(f"fixed rule engine, executions flagged SUSPICIOUS or higher: attacks {sa}/{na} ({pa}, CI [{la:.2f},{ha:.2f}]); benign {sb}/{nb} ({pb}, CI [{lb:.2f},{hb:.2f}])")
     # time to first kbd zone audit for attack executions
     ttd = []
     for x in ex:

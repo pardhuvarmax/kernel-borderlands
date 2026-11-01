@@ -1,0 +1,9 @@
+run 20261101T225652  host=UbuntuVM-eBPF  kernel=6.8.0-147-generic  package=1.1.0  schema=1
+containment_active=True  audit_export_ok=True  stream_gaps=0
+events=9123  attributed=2 (0.0%; the rest is background desktop activity)
+executions=1  with zero attributed events: 0 []
+
+kind   family                n events/exec peak score  reached SUSP+        95% CI reached BORD would-contain
+benign idle                  1         2.0        6.7         0/1    [0.00,0.79]        0/1           0/1
+
+fixed rule engine, executions flagged SUSPICIOUS or higher: attacks 0/0 (n/a, CI [0.00,0.00]); benign 0/1 (0%, CI [0.00,0.79])
