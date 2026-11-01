@@ -195,3 +195,72 @@ int kb_evidence_seq_contains(const kb_evidence_t *ev,
     }
     return pi == pattern_len;
 }
+// ── Exec-path and connect-burst classification (plan item B1) ──────────────
+static int path_has_prefix(const char *p, const char *prefix)
+{
+    return strncmp(p, prefix, strlen(prefix)) == 0;
+}
+
+uint64_t kb_evidence_classify_exec_path(const char *path)
+{
+    if (!path || !path[0])
+        return 0;
+
+    uint64_t mask = 0;
+
+    if (path_has_prefix(path, "/tmp/") || path_has_prefix(path, "/var/tmp/") ||
+        path_has_prefix(path, "/dev/shm/"))
+        mask |= KB_EV_EXEC_FROM_TMP;
+
+    // fexecve()/execveat() of a memfd shows up as /proc/<pid>/fd/N or
+    // /proc/self/fd/N; a bare "memfd:" name is also accepted.
+    if ((path_has_prefix(path, "/proc/") && strstr(path, "/fd/")) ||
+        path_has_prefix(path, "/memfd:") || path_has_prefix(path, "memfd:"))
+        mask |= KB_EV_EXEC_FROM_PROC;
+
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    static const char *const shells[] = {
+        "sh", "bash", "zsh", "dash", "fish", "ksh", "csh", "tcsh", "ash", "busybox", NULL
+    };
+    for (int i = 0; shells[i]; i++) {
+        if (strcmp(base, shells[i]) == 0) {
+            mask |= KB_EV_SPAWNED_SHELL;
+            break;
+        }
+    }
+    return mask;
+}
+
+int kb_evidence_note_connect(kb_evidence_t *ev, uint32_t daddr, uint64_t ts_ns)
+{
+    if (!ev)
+        return 0;
+
+    ev->connect_count++;
+    ev->last_connect_ns = ts_ns;
+
+    // Refresh an existing slot for this address, else overwrite the oldest.
+    int slot = -1;
+    for (int i = 0; i < KB_CONNECT_BURST_SLOTS; i++) {
+        if (ev->recent_ts[i] && ev->recent_daddr[i] == daddr) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        slot = ev->recent_head % KB_CONNECT_BURST_SLOTS;
+        ev->recent_head = (uint8_t)((ev->recent_head + 1) % KB_CONNECT_BURST_SLOTS);
+    }
+    ev->recent_daddr[slot] = daddr;
+    ev->recent_ts[slot] = ts_ns ? ts_ns : 1;
+
+    uint32_t distinct = 0;
+    for (int i = 0; i < KB_CONNECT_BURST_SLOTS; i++) {
+        if (ev->recent_ts[i] && ts_ns >= ev->recent_ts[i] &&
+            ts_ns - ev->recent_ts[i] <= KB_CONNECT_BURST_WINDOW_NS)
+            distinct++;
+    }
+    ev->distinct_ip_count = distinct;
+    return distinct > KB_CONNECT_BURST_IPS;
+}

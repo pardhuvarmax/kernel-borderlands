@@ -429,6 +429,13 @@ int kb_handle_exec(struct trace_event_raw_sched_process_exec *ctx)
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_PROCESS_EXEC);
+    // The exec pathname goes to userspace so it can set EXEC_FROM_TMP /
+    // EXEC_FROM_PROC / SPAWNED_SHELL. Must happen BEFORE submit: the event is
+    // no longer ours to write after bpf_ringbuf_submit().
+    {
+        unsigned short exec_off = ctx->__data_loc_filename & 0xffff;
+        bpf_probe_read_kernel_str(e->filename, sizeof(e->filename), (char *)ctx + exec_off);
+    }
     KB_SUBMIT_EVENT(ctx, e);
 
     // CPM registration path (docs/features/CPM.md §5.3): if this exec's

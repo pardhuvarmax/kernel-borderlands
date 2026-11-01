@@ -1681,10 +1681,17 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
         ev->advisory_composite = r.state->composite_score;
 
         switch (e->event_type) {
-            case KB_EVT_PROCESS_EXEC:
+            case KB_EVT_PROCESS_EXEC: {
                 kb_evidence_set_flag(ev, KB_EV_NONE, ts);
                 kb_evidence_push_seq(ev, KB_SEQ_EXEC);
+                uint64_t exec_flags = kb_evidence_classify_exec_path((const char *)e->filename);
+                if (exec_flags) {
+                    kb_evidence_set_flag(ev, exec_flags, ts);
+                    if (exec_flags & KB_EV_SPAWNED_SHELL)
+                        kb_evidence_push_seq(ev, KB_SEQ_EXEC_SHELL);
+                }
                 break;
+            }
             case KB_EVT_PRIVILEGE_CHANGE:
                 if (e->new_euid == 0xFFFFFFFF) {
                     kb_evidence_set_flag(ev, KB_EV_CAP_GAINED, ts);
@@ -1715,6 +1722,10 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
             case KB_EVT_NETWORK_CONNECT:
                 kb_evidence_set_flag(ev, KB_EV_OUTBOUND_CONNECT, ts);
                 kb_evidence_push_seq(ev, KB_SEQ_OUTBOUND_CONNECT);
+                if (kb_evidence_note_connect(ev, e->daddr, ts)) {
+                    kb_evidence_set_flag(ev, KB_EV_RAPID_CONNECT_BURST, ts);
+                    kb_evidence_push_seq(ev, KB_SEQ_RAPID_CONNECT);
+                }
                 if (e->dport == 4444 || e->dport == 1337) {
                     kb_evidence_set_flag(ev, KB_EV_C2_CANDIDATE_PORT, ts);
                     kb_evidence_push_seq(ev, KB_SEQ_C2_PORT);
@@ -1726,6 +1737,13 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
                 break;
             case KB_EVT_MEMORY_MMAP:
             case KB_EVT_MEMORY_MPROTECT:
+                // Anonymous mapping that is executable (mmap only; mprotect
+                // does not say whether the range is anonymous).
+                if (e->event_type == KB_EVT_MEMORY_MMAP && e->anonymous &&
+                    (e->prot & 0x4 /* PROT_EXEC */)) {
+                    kb_evidence_set_flag(ev, KB_EV_ANON_EXEC, ts);
+                    kb_evidence_push_seq(ev, KB_SEQ_ANON_EXEC);
+                }
                 switch (kb_classify_memory_event(e->addr, e->prot, e->rwx)) {
                 case KB_MEM_CROSS_PROCESS_WRITE:
                     kb_evidence_set_flag(ev, KB_EV_PROC_MEM_WRITE, ts);

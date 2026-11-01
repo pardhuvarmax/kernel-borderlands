@@ -71,6 +71,12 @@
 
 #define KB_EVIDENCE_SEQ_LEN  32
 
+// RAPID_CONNECT_BURST: more than KB_CONNECT_BURST_IPS distinct destination IPs
+// within KB_CONNECT_BURST_WINDOW_NS (KB_EV_RAPID_CONNECT_BURST: ">5 distinct IPs in 10 seconds").
+#define KB_CONNECT_BURST_SLOTS      16
+#define KB_CONNECT_BURST_IPS        5
+#define KB_CONNECT_BURST_WINDOW_NS  10000000000ULL
+
 typedef uint8_t kb_ev_seq_entry_t;
 
 // Sequence entry event codes (compact, separate from flag bits)
@@ -132,6 +138,12 @@ typedef struct {
     uint64_t last_exec_ns;
     uint64_t last_connect_ns;
 
+    // Recent distinct destinations, for RAPID_CONNECT_BURST (userspace-only
+    // state; not part of any wire struct).
+    uint32_t recent_daddr[KB_CONNECT_BURST_SLOTS];
+    uint64_t recent_ts[KB_CONNECT_BURST_SLOTS];
+    uint8_t  recent_head;
+
     // Advisory: EMA score (kept for dashboard/trends, not for state decisions)
     double   advisory_ema;
     double   advisory_composite;
@@ -159,6 +171,16 @@ void         kb_evidence_set_flag(kb_evidence_t *ev, uint64_t flag, uint64_t ts_
 
 // Append to the ordered sequence buffer
 void         kb_evidence_push_seq(kb_evidence_t *ev, kb_seq_event_t entry);
+
+// Classify the pathname passed to execve() (the sched_process_exec tracepoint's
+// `filename`, which is NOT canonicalised: a relative path cannot be resolved here).
+// Returns a mask of KB_EV_EXEC_FROM_TMP / KB_EV_EXEC_FROM_PROC / KB_EV_SPAWNED_SHELL
+// (0 for NULL, empty or unremarkable paths).
+uint64_t     kb_evidence_classify_exec_path(const char *path);
+
+// Record a connect() to daddr at ts_ns. Returns 1 when more than
+// KB_CONNECT_BURST_IPS distinct destinations were seen within the window.
+int          kb_evidence_note_connect(kb_evidence_t *ev, uint32_t daddr, uint64_t ts_ns);
 
 // Check if a flag is set
 static inline int kb_evidence_has(const kb_evidence_t *ev, uint64_t flag) {

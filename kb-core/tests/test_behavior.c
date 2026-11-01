@@ -254,6 +254,63 @@ static void test_memory_event_classification(void)
     assert(kb_classify_memory_event(0, 0, 0) == KB_MEM_NONE);
 }
 
+
+// ── B1: exec-path classification and connect-burst evidence ────────────────
+static void test_classify_exec_path(void)
+{
+    assert(kb_evidence_classify_exec_path(NULL) == 0);
+    assert(kb_evidence_classify_exec_path("") == 0);
+    assert(kb_evidence_classify_exec_path("/usr/bin/ls") == 0);
+    assert(kb_evidence_classify_exec_path("/tmp/payload") == KB_EV_EXEC_FROM_TMP);
+    assert(kb_evidence_classify_exec_path("/dev/shm/x") == KB_EV_EXEC_FROM_TMP);
+    assert(kb_evidence_classify_exec_path("/var/tmp/x") == KB_EV_EXEC_FROM_TMP);
+    assert(kb_evidence_classify_exec_path("/tmpfoo/x") == 0);          // prefix must end at '/'
+    assert(kb_evidence_classify_exec_path("/proc/self/fd/3") == KB_EV_EXEC_FROM_PROC);
+    assert(kb_evidence_classify_exec_path("/proc/1234/fd/7") == KB_EV_EXEC_FROM_PROC);
+    assert(kb_evidence_classify_exec_path("/proc/cpuinfo") == 0);
+    assert(kb_evidence_classify_exec_path("/bin/bash") == KB_EV_SPAWNED_SHELL);
+    assert(kb_evidence_classify_exec_path("/usr/bin/zsh") == KB_EV_SPAWNED_SHELL);
+    assert(kb_evidence_classify_exec_path("sh") == KB_EV_SPAWNED_SHELL);
+    assert(kb_evidence_classify_exec_path("/usr/bin/bashful") == 0);   // exact basename only
+    assert(kb_evidence_classify_exec_path("/tmp/sh") ==
+           (KB_EV_EXEC_FROM_TMP | KB_EV_SPAWNED_SHELL));
+}
+
+static void test_rapid_connect_burst(void)
+{
+    kb_evidence_init();
+    kb_evidence_t *ev = kb_evidence_get_or_create(900, 1, 1000, "scanner", 1);
+    assert(ev);
+    uint64_t t = 1000000000ULL;
+    // 5 distinct IPs in 1s: not yet a burst (needs more than 5).
+    for (uint32_t i = 1; i <= 5; i++)
+        assert(!kb_evidence_note_connect(ev, 0x0a000000u + i, t + i * 100000000ULL));
+    // Repeats to an already-seen IP do not count as new destinations.
+    for (int i = 0; i < 20; i++)
+        assert(!kb_evidence_note_connect(ev, 0x0a000001u, t + 600000000ULL + (uint64_t)i));
+    // The 6th distinct IP inside the window trips it.
+    assert(kb_evidence_note_connect(ev, 0x0a000006u, t + 700000000ULL));
+
+    // Same IPs spread over minutes never burst.
+    kb_evidence_t *slow = kb_evidence_get_or_create(901, 1, 1000, "slow", 1);
+    for (uint32_t i = 1; i <= 12; i++)
+        assert(!kb_evidence_note_connect(slow, 0x0b000000u + i, t + (uint64_t)i * 20000000000ULL));
+}
+
+static void test_b1_shell_connect_flag_combination(void)
+{
+    kb_evidence_init();
+    kb_behavior_init();
+    uint64_t ts = 5000000000ULL;
+    // A shell that connects out carries both flags reverse_shell_compromised requires (flag combination only; rule evaluation is not exercised here).
+    kb_evidence_t *ev = kb_evidence_get_or_create(902, 1, 1000, "bash", ts);
+    kb_evidence_set_flag(ev, kb_evidence_classify_exec_path("/bin/bash"), ts);
+    assert(ev->flags & KB_EV_SPAWNED_SHELL);
+    kb_evidence_set_flag(ev, KB_EV_OUTBOUND_CONNECT, ts + 1000000ULL);
+    assert((ev->flags & (KB_EV_SPAWNED_SHELL | KB_EV_OUTBOUND_CONNECT)) ==
+           (KB_EV_SPAWNED_SHELL | KB_EV_OUTBOUND_CONNECT));
+}
+
 int main(void)
 {
     printf("╔══════════════════════════════════════════════╗\n");
@@ -268,6 +325,9 @@ int main(void)
     RUN_TEST(test_rwx_mapping_alone_from_clean_process_is_not_borderlands);
     RUN_TEST(test_rwx_mapping_from_suspicious_process_is_borderlands);
     RUN_TEST(test_memory_event_classification);
+    RUN_TEST(test_classify_exec_path);
+    RUN_TEST(test_rapid_connect_burst);
+    RUN_TEST(test_b1_shell_connect_flag_combination);
 
     printf("\nAll unit tests passed successfully!\n");
     return 0;
