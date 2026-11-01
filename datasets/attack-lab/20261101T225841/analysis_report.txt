@@ -1,0 +1,27 @@
+run 20261101T225841  host=UbuntuVM-eBPF  kernel=6.8.0-147-generic  package=1.1.0  schema=1
+containment_active=True  audit_export_ok=True  stream_gaps=0
+events=264121  attributed=2858 (1.1%; the rest is background desktop activity)
+executions=90  with zero attributed events: 7 ['20261101T225841-benign_database-001', '20261101T225841-benign_database-000', '20261101T225841-benign_compile-001', '20261101T225841-benign_compile-004', '20261101T225841-benign_compile-000']
+
+kind   family                n events/exec peak score  reached SUSP+        95% CI reached BORD would-contain
+attack credential_access     5        32.8       23.5         5/5    [0.57,1.00]        0/5           0/5
+attack credential_dump       5        22.2       20.8         5/5    [0.57,1.00]        0/5           0/5
+attack evasion               5        58.2       23.2         5/5    [0.57,1.00]        0/5           0/5
+attack exfil_staging         5        13.4       21.9         5/5    [0.57,1.00]        0/5           0/5
+attack memory_exploit        5         2.0       12.3         0/5    [0.00,0.43]        0/5           0/5
+attack network_c2            5         9.0        8.2         0/5    [0.00,0.43]        0/5           0/5
+attack privilege_escalation  5        65.4       25.6         5/5    [0.57,1.00]        0/5           0/5
+attack process_injection     5         4.6       19.4         5/5    [0.57,1.00]        5/5           0/5
+benign admin                 5       187.6       19.2         0/5    [0.00,0.43]        0/5           0/5
+benign admin_privileged      5        40.6       27.8         5/5    [0.57,1.00]        0/5           0/5
+benign backup_etc            5        25.8       23.1         5/5    [0.57,1.00]        0/5           0/5
+benign backup_remote         5        13.0       21.9         5/5    [0.57,1.00]        0/5           0/5
+benign compile               5         0.6        1.5         0/5    [0.00,0.43]        0/5           0/5
+benign credential_audit      5        64.0       26.3         5/5    [0.57,1.00]        0/5           0/5
+benign credential_report     5        21.8       21.5         5/5    [0.57,1.00]        0/5           0/5
+benign database              5         0.4        2.6         0/5    [0.00,0.43]        0/5           0/5
+benign idle                  5         1.6        5.1         0/5    [0.00,0.43]        0/5           0/5
+benign web                   5         8.6        7.8         0/5    [0.00,0.43]        0/5           0/5
+
+fixed rule engine, executions flagged SUSPICIOUS or higher: attacks 30/40 (75%, CI [0.60,0.86]); benign 25/50 (50%, CI [0.37,0.63])
+time from first malicious action to first kbd zone audit (flagged attacks, n=30): median 3 ms, max 226 ms
