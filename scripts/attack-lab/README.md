@@ -17,6 +17,7 @@ policies and every evaluation depend on (plan: `docs/development/control-aads/le
 | `capture.py` | `StreamEvents` -> JSONL with receive time; records stream disconnects as `{"gap":true}` markers. |
 | `labeling.py` | Attributes events to executions (pid + time window), builds leakage-safe splits. |
 | `containment_demo.py` | Older single-process demo; not part of the corpus pipeline. |
+| `lidds_runner.py` | Runs real-exploit scenarios from LID-DS 2021 (separate GPL-3.0 checkout) in normal and exploit modes; same corpus format, victim-container pids only. |
 
 ## Scenarios (`runner.py --list`)
 Attacks: `credential_access`, `privilege_escalation`, `process_injection`, `network_c2`, `memory_exploit`, `evasion_slow`, `exfil_staging`, `credential_dump`.
@@ -54,6 +55,19 @@ Benign: `benign_compile`, `benign_database`, `benign_web`, `benign_admin`, `beni
 - Treat `{"gap":true}` markers and `stream_gaps` in the manifest as missing telemetry, not as quiet behaviour.
 - Execution order is seeded-shuffled so scenario does not correlate with time/drift.
 - Unattributed events during a run are **background** (real noise a deployed policy must ignore), labelled benign with no execution.
+
+## Real exploits: LID-DS 2021 (`lidds_runner.py`)
+LID-DS ships 15 scenarios with real vulnerable services, normal traffic and exploits, each in Docker. Keep LID-DS in its own checkout (GPL-3.0; never copy it into this repo) and install it as its wiki says (Docker, Sysdig, Python 3.7, `install.sh`, `build_images.sh` per scenario).
+```
+python3 lidds_runner.py --lidds ~/LID-DS --list
+python3 lidds_runner.py --lidds ~/LID-DS --ack-isolated --scenarios all --repeats 10 --seed 1 --out corpus
+```
+- Same safety rules as `runner.py` (`--ack-isolated`, not as root, observe-only `kbd`), plus passwordless `sudo -n` for Docker and the LID-DS interpreter.
+- Each scenario runs in two modes: `normal` (kind `benign`) and `exploit` (kind `attack`), so every exploit has false-positive runs on the same service.
+- An execution's `pids` are the processes in the **victim container** (cgroup membership, then `labeling.expand_pids`); exploit and normal-traffic containers are kept in `pids_by_role` and never count as the victim.
+- `first_malicious_ns` = the exploit container's start time from Docker (an upper bound for time-to-detect).
+- Victim detection is by container name or image; if a run prints "no victim container identified", pass `--victim-match <regex>`. Check each scenario's README: its CLI may differ from the default `main.py 1 <s> 0` / `main.py 1 -1 1` (override with `--cmd-template`).
+- Activity of the attacker's containers on this host is counted as background by `analyze.py`; keep that in mind when reading background-noise numbers.
 
 ## Tests
 `/path/to/venv/bin/python -m pytest scripts/attack-lab/tests` (no root, no gRPC needed).
