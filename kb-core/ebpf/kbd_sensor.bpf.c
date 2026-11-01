@@ -14,6 +14,21 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+// Telemetry transport selection — docs/architecture/cross-kernel-portability.md's
+// "Ring Buffer (Preferred) -> Perf Event Buffer (Fallback)" policy.
+// BPF_MAP_TYPE_RINGBUF requires kernel 5.8+; kernels below that (e.g. the
+// CVE-2021-4034/PwnKit repro guest's stock 5.4) fail kb_events' map creation
+// outright (-EINVAL) if ring buffer is used unconditionally. Resolved at
+// BUILD time (kb-core/Makefile's KB_USE_PERFBUF=1), not runtime: the two
+// transports' helpers (bpf_ringbuf_reserve/submit vs bpf_perf_event_output)
+// are mutually exclusive at the verifier level — a single compiled object
+// can't carry both and pick one live, so this produces two distinct
+// kbd_sensor builds, selected by the kernel class you're targeting, not one
+// binary that auto-senses. See CHANGELOG.md for the full writeup.
+#ifndef KB_USE_PERFBUF
+#define KB_USE_PERFBUF 0
+#endif
+
 #define KB_MAX_PROCESSES 10240
 #define KB_MAX_SYSCALLS  512   // matches kb_syscall.bpf.c's standalone collector
 
@@ -65,10 +80,34 @@ struct kb_unified_event {
     __u8  anonymous;
 };
 
+#if !KB_USE_PERFBUF
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 1024 * 1024); // 1MB, shared across all hooks
 } kb_events SEC(".maps");
+#else
+// Fallback transport (kernel < 5.8, no BPF_MAP_TYPE_RINGBUF). Same payload
+// (struct kb_unified_event) as kb_events above, carried via
+// bpf_perf_event_output() instead of the ringbuf reserve/submit pair.
+struct {
+    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+    __uint(key_size, sizeof(__u32));
+    __uint(value_size, sizeof(__u32));
+} kb_events_pb SEC(".maps");
+
+// bpf_perf_event_output() needs the full event built in memory that
+// outlives kb_reserve_event()'s own stack frame (unlike
+// bpf_ringbuf_reserve(), which hands back a pointer into the map itself
+// that the caller fills in-place). A per-CPU 1-entry array gives exactly
+// that: stable, per-CPU-exclusive scratch memory good until the submitting
+// hook returns.
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct kb_unified_event);
+} kb_event_scratch SEC(".maps");
+#endif
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -105,15 +144,17 @@ struct {
     __type(value, struct kb_cred_snapshot);
 } kb_cred_prev SEC(".maps");
 
-// Single-counter map: total bpf_ringbuf_reserve() failures since load.
-// Previously silent — every kb_reserve_event() caller just returned 0
-// on failure with no telemetry at all. Exists purely to answer "is
-// kb_events (1MB, shared across all 9 hooks) actually overflowing under
-// burst load (e.g. a `go build` spawning many short-lived processes/
-// file_access events in rapid succession), or is the blank-comm gap on
-// those pids coming from somewhere else." One BPF_MAP_TYPE_ARRAY entry,
-// updated via __sync_fetch_and_add so concurrent hooks on different
-// CPUs don't race each other's increments.
+// Single-counter map: total telemetry-submit failures since load —
+// bpf_ringbuf_reserve() failures in the default (KB_USE_PERFBUF=0) build,
+// or bpf_perf_event_output() non-zero returns in the KB_USE_PERFBUF=1
+// fallback build (see KB_USE_PERFBUF above). Previously silent — every
+// kb_reserve_event() caller just returned 0 on failure with no telemetry
+// at all. Exists purely to answer "is kb_events (1MB, shared across all 9
+// hooks) actually overflowing under burst load (e.g. a `go build` spawning
+// many short-lived processes/file_access events in rapid succession), or
+// is the blank-comm gap on those pids coming from somewhere else." One
+// BPF_MAP_TYPE_ARRAY entry, updated via __sync_fetch_and_add so concurrent
+// hooks on different CPUs don't race each other's increments.
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 1);
@@ -263,16 +304,67 @@ struct {
 #define KB_RL_MAX_TOKENS 100
 #define KB_RL_REFILL_RATE_NS 10000000 // 10ms = 100 tokens/sec
 
-static __always_inline int kb_rate_limit_throttle(__u64 resource_id)
+// ── Telemetry reserve/submit — see KB_USE_PERFBUF above ──
+//
+// kb_reserve_event() hands back a pointer the caller fills in over several
+// statements (kb_fill_common() plus hook-specific fields) before handing it
+// to KB_SUBMIT_EVENT(ctx, e). In the default build that pointer is memory
+// reserved directly inside the ring buffer map; in the KB_USE_PERFBUF=1
+// fallback build it's a per-CPU scratch slot (kb_event_scratch) instead,
+// since bpf_perf_event_output() has no "reserve, fill in place" step —
+// submission always copies via, so the pointer just needs to stay valid
+// until that happens, not live inside the map itself.
+static __always_inline struct kb_unified_event *kb_reserve_event(void)
+{
+#if !KB_USE_PERFBUF
+    struct kb_unified_event *e =
+        bpf_ringbuf_reserve(&kb_events, sizeof(*e), 0);
+    if (!e) {
+        __u32 zero = 0;
+        __u64 *drops = bpf_map_lookup_elem(&kb_ringbuf_drops, &zero);
+        if (drops)
+            __sync_fetch_and_add(drops, 1);
+        return NULL;
+    }
+#else
+    __u32 zero = 0;
+    struct kb_unified_event *e = bpf_map_lookup_elem(&kb_event_scratch, &zero);
+    if (!e) return NULL; // can't happen for a 1-entry array; satisfies the verifier
+#endif
+    __builtin_memset(e, 0, sizeof(*e));
+    return e;
+}
+
+// Submits an event obtained from kb_reserve_event(). ctx is the calling
+// program's own entry-point context (tracepoint/kprobe/uprobe struct),
+// passed through untyped — bpf_perf_event_output() takes it exactly as the
+// program received it, same as every other caller of that helper.
+#if !KB_USE_PERFBUF
+#define KB_SUBMIT_EVENT(ctx, e) bpf_ringbuf_submit((e), 0)
+#else
+#define KB_SUBMIT_EVENT(ctx, e)                                              \
+    do {                                                                     \
+        long __kb_r = bpf_perf_event_output(                                 \
+            (void *)(ctx), &kb_events_pb, BPF_F_CURRENT_CPU,                  \
+            (e), sizeof(*(e)));                                              \
+        if (__kb_r != 0) {                                                   \
+            __u32 __kb_z = 0;                                                \
+            __u64 *__kb_d = bpf_map_lookup_elem(&kb_ringbuf_drops, &__kb_z);  \
+            if (__kb_d) __sync_fetch_and_add(__kb_d, 1);                     \
+        }                                                                    \
+    } while (0)
+#endif
+
+static __always_inline int kb_rate_limit_throttle(void *ctx, __u64 resource_id)
 {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     struct kb_token_bucket *bucket = NULL;
-    
+
     struct kb_lru_key key = {};
     key.tgid = BPF_CORE_READ(task, tgid);
     key.start_time = BPF_CORE_READ(task, start_time);
     key.resource_id = resource_id;
-    
+
     bucket = bpf_map_lookup_elem(&kb_rate_limit_lru_map, &key);
     if (!bucket) {
         struct kb_token_bucket new_bucket = {};
@@ -282,10 +374,10 @@ static __always_inline int kb_rate_limit_throttle(__u64 resource_id)
         bucket = bpf_map_lookup_elem(&kb_rate_limit_lru_map, &key);
         if (!bucket) return 0;
     }
-    
+
     __u64 now = bpf_ktime_get_ns();
     __u64 elapsed = now - bucket->last_time;
-    
+
     if (elapsed > KB_RL_REFILL_RATE_NS) {
         __u64 add_tokens = elapsed / KB_RL_REFILL_RATE_NS;
         bucket->tokens += add_tokens;
@@ -294,16 +386,15 @@ static __always_inline int kb_rate_limit_throttle(__u64 resource_id)
         }
         bucket->last_time = now;
     }
-    
+
     if (bucket->dropped_count > 0 && bucket->tokens > 0) {
-         struct kb_unified_event *e = bpf_ringbuf_reserve(&kb_events, sizeof(*e), 0);
+         struct kb_unified_event *e = kb_reserve_event();
          if (e) {
-             __builtin_memset(e, 0, sizeof(*e));
              e->pid = BPF_CORE_READ(task, tgid);
              e->event_type = KB_EVT_DROPPED_TELEMETRY;
              e->length = bucket->dropped_count;
              e->ts_ns = now;
-             bpf_ringbuf_submit(e, 0);
+             KB_SUBMIT_EVENT(ctx, e);
          }
          bucket->dropped_count = 0;
     }
@@ -315,21 +406,6 @@ static __always_inline int kb_rate_limit_throttle(__u64 resource_id)
         bucket->dropped_count++;
         return 1; // throttle
     }
-}
-
-static __always_inline struct kb_unified_event *kb_reserve_event(void)
-{
-    struct kb_unified_event *e =
-        bpf_ringbuf_reserve(&kb_events, sizeof(*e), 0);
-    if (!e) {
-        __u32 zero = 0;
-        __u64 *drops = bpf_map_lookup_elem(&kb_ringbuf_drops, &zero);
-        if (drops)
-            __sync_fetch_and_add(drops, 1);
-        return NULL;
-    }
-    __builtin_memset(e, 0, sizeof(*e));
-    return e;
 }
 
 static __always_inline void kb_fill_common(
@@ -353,7 +429,7 @@ int kb_handle_exec(struct trace_event_raw_sched_process_exec *ctx)
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_PROCESS_EXEC);
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
 
     // CPM registration path (docs/features/CPM.md §5.3): if this exec's
     // path matches the protected executable registry, mark the new PID
@@ -392,7 +468,7 @@ int kb_handle_exit(struct trace_event_raw_sched_process_template *ctx)
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_PROCESS_EXIT);
     e->syscall_nr = BPF_CORE_READ(task, exit_code);
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
 
     // CPM de-registration (§7.3): drop protection the instant the process
     // exits, so a later, unrelated process reusing this PID never
@@ -457,13 +533,13 @@ int kb_handle_syscall(struct trace_event_raw_sys_enter *ctx)
     if (!t || (*t % 100 != 0))
         return 0;
 
-    if (kb_rate_limit_throttle((__u64)syscall_nr)) return 0;
+    if (kb_rate_limit_throttle(ctx, (__u64)syscall_nr)) return 0;
 
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_SYSCALL);
     e->syscall_nr = (__u32)syscall_nr;
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 
@@ -478,14 +554,50 @@ int kb_handle_commit_creds(struct pt_regs *ctx)
 
     __u32 new_uid  = BPF_CORE_READ(new_cred, uid.val);
     __u32 new_euid = BPF_CORE_READ(new_cred, euid.val);
-    __u64 new_cap  = BPF_CORE_READ(new_cred, cap_effective.val);
+
+    // kernel_cap_t (struct cred.cap_effective) changed shape in Linux 6.3
+    // (commit 3d5564e194b7): pre-6.3 it's `__u32 cap[2]` (two 32-bit words,
+    // low word first, little-endian); 6.3+ collapsed it to a single
+    // `__u64 val`. BPF_CORE_READ(..., cap_effective.val) unconditionally —
+    // correct on 6.3+, where this was written and tested
+    // (docs/architecture/cross-kernel-portability.md's "Development
+    // Environment": Ubuntu 22/24.04, "Latest Ubuntu HWE/Mainline") — hard
+    // compile-errors on an older vmlinux.h with no `.val` member at all,
+    // and fails CO-RE relocation at load time if vmlinux.h did happen to
+    // have it (found running on a 5.4 guest: "failed to resolve CO-RE
+    // relocation ... struct cred.cap_effective.val"), aborting the whole
+    // object's load, not just this one hook.
+    //
+    // Both historical layouts are bit-identical in memory (cap[0]/cap[1]
+    // packed little-endian IS the u64 "val" byte-for-byte — that's exactly
+    // why the kernel could make this change without touching behavior), so
+    // reading the field's raw 8 bytes directly — without going through
+    // either sub-member name — sidesteps the whole problem: the only CO-RE
+    // relocation needed is for `cap_effective` itself within `struct
+    // cred`, which exists, under that name, on every kernel version that
+    // has this field at all.
+    __u64 new_cap = 0;
+    bpf_core_read(&new_cap, sizeof(new_cap), &new_cred->cap_effective);
 
     struct kb_cred_snapshot *prev = bpf_map_lookup_elem(&kb_cred_prev, &pid);
     __u32 old_uid  = prev ? prev->uid  : new_uid;
     __u32 old_euid = prev ? prev->euid : new_euid;
     __u64 old_cap  = prev ? prev->cap_effective : new_cap;
 
-    struct kb_cred_snapshot snap = { .uid = new_uid, .euid = new_euid, .cap_effective = new_cap };
+    // Explicit zero-init before filling named fields: struct kb_cred_snapshot
+    // has a 4-byte alignment gap before cap_effective (uid+gid+euid=12 bytes,
+    // cap_effective needs 8-byte alignment). Designated initializers zero
+    // unnamed *members* (gid, here) but never guarantee zeroing *padding* —
+    // left as whatever was already on the stack. bpf_map_update_elem() reads
+    // every byte of the value it's given, padding included, and the
+    // verifier requires all of it provably initialized (caught here as
+    // "invalid indirect read from stack off -56+12 size 24" once this hook
+    // was actually loaded for the first time against a real kernel).
+    struct kb_cred_snapshot snap;
+    __builtin_memset(&snap, 0, sizeof(snap));
+    snap.uid = new_uid;
+    snap.euid = new_euid;
+    snap.cap_effective = new_cap;
     bpf_map_update_elem(&kb_cred_prev, &pid, &snap, BPF_ANY);
 
     if (old_uid == new_uid && old_euid == new_euid && old_cap == new_cap)
@@ -498,7 +610,7 @@ int kb_handle_commit_creds(struct pt_regs *ctx)
     e->old_euid = old_euid; e->new_euid = new_euid;
     e->cap_effective = new_cap;
     e->escalation = (new_uid < old_uid || new_euid == 0) ? 1 : 0;
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 
@@ -551,7 +663,7 @@ int kb_handle_openat(struct trace_event_raw_sys_enter *ctx)
     e->flags = (__u32)ctx->args[2];
     e->sensitive = 1;
     bpf_probe_read_user_str(&e->filename, sizeof(e->filename), fname);
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 
@@ -568,7 +680,7 @@ int kb_handle_connect(struct trace_event_raw_sys_enter *ctx)
     struct sockaddr_in sin = {};
     bpf_probe_read_user(&sin, sizeof(sin), addr);
 
-    if (kb_rate_limit_throttle((((__u64)sin.sin_addr.s_addr) << 16) | sin.sin_port)) return 0;
+    if (kb_rate_limit_throttle(ctx, (((__u64)sin.sin_addr.s_addr) << 16) | sin.sin_port)) return 0;
 
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
@@ -576,7 +688,7 @@ int kb_handle_connect(struct trace_event_raw_sys_enter *ctx)
     e->daddr = sin.sin_addr.s_addr;
     e->dport = __builtin_bswap16(sin.sin_port);
     e->proto = 6;
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 
@@ -593,14 +705,14 @@ int kb_handle_bind(struct trace_event_raw_sys_enter *ctx)
     struct sockaddr_in sin = {};
     bpf_probe_read_user(&sin, sizeof(sin), addr);
 
-    if (kb_rate_limit_throttle((((__u64)sin.sin_addr.s_addr) << 16) | sin.sin_port)) return 0;
+    if (kb_rate_limit_throttle(ctx, (((__u64)sin.sin_addr.s_addr) << 16) | sin.sin_port)) return 0;
 
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_NETWORK_BIND);
     e->saddr = sin.sin_addr.s_addr;
     e->sport = __builtin_bswap16(sin.sin_port);
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 
@@ -624,14 +736,14 @@ int kb_handle_mmap(struct trace_event_raw_sys_enter *ctx)
     int is_anon = (flags & KB_MAP_ANON) != 0;
     if (!is_rwx && !(is_exec && is_anon)) return 0;
 
-    if (kb_rate_limit_throttle((__u64)flags)) return 0;
+    if (kb_rate_limit_throttle(ctx, (__u64)flags)) return 0;
 
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_MEMORY_MMAP);
     e->addr = addr; e->length = length; e->prot = prot; e->mmap_flags = flags;
     e->rwx = is_rwx ? 1 : 0; e->anonymous = is_anon ? 1 : 0;
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 
@@ -645,14 +757,14 @@ int kb_handle_mprotect(struct trace_event_raw_sys_enter *ctx)
     __u32 prot = (__u32)ctx->args[2];
     if (!(prot & KB_PROT_EXEC)) return 0;
 
-    if (kb_rate_limit_throttle((__u64)prot)) return 0;
+    if (kb_rate_limit_throttle(ctx, (__u64)prot)) return 0;
 
     struct kb_unified_event *e = kb_reserve_event();
     if (!e) return 0;
     kb_fill_common(e, pid, KB_EVT_MEMORY_MPROTECT);
     e->addr = addr; e->length = length; e->prot = prot;
     e->rwx = ((prot & KB_PROT_RWX) == KB_PROT_RWX) ? 1 : 0;
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 
@@ -681,7 +793,7 @@ int kb_ssl_write(struct pt_regs *ctx)
     copy_len &= 127;
     bpf_probe_read_user(&e->filename, copy_len, buf);
     e->filename[copy_len] = '\0';
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 
@@ -709,7 +821,7 @@ int kb_go_tls_write(struct pt_regs *ctx)
     copy_len &= 127;
     bpf_probe_read_user(&e->filename, copy_len, buf);
     e->filename[copy_len] = '\0';
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 
@@ -731,7 +843,7 @@ int kb_handle_process_vm_writev(struct trace_event_raw_sys_enter *ctx)
     e->prot = 0;
     e->rwx = 1;
     e->anonymous = 1;
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 
@@ -758,7 +870,7 @@ int kb_handle_security_capable(struct pt_regs *ctx)
     e->old_euid = cap;
     e->new_euid = 0xFFFFFFFF; // Indicator for capability probe
     e->escalation = 1;
-    bpf_ringbuf_submit(e, 0);
+    KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }
 

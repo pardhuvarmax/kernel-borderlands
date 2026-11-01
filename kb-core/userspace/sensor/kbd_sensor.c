@@ -5,6 +5,7 @@
 // the single shared ring buffer, and prints unified events.
 
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <signal.h>
@@ -29,6 +30,15 @@
 #include <dirent.h>
 #include <limits.h>
 #include <sys/types.h>
+
+// Mirrors kbd_sensor.bpf.c's KB_USE_PERFBUF (kb-core/Makefile's
+// KB_USE_PERFBUF=1 passes -DKB_USE_PERFBUF=1 to both the BPF and userspace
+// compiles, so they always agree on which map/consumer API this binary
+// uses). See the comment above KB_USE_PERFBUF in kbd_sensor.bpf.c for why
+// this is a build-time choice, not a runtime one.
+#ifndef KB_USE_PERFBUF
+#define KB_USE_PERFBUF 0
+#endif
 
 // State-transition lines ([BEHAVIOR ENGINE]) are security-relevant, but one is
 // printed per NEW process that changes state, so a burst of short-lived
@@ -2273,10 +2283,36 @@ static int handle_event(void *ctx, void *data, size_t sz)
     return 0;
 }
 
+#if KB_USE_PERFBUF
+// perf_buffer_sample_fn's signature carries an extra `cpu` argument that
+// ring_buffer_sample_fn doesn't; handle_event() itself is transport-agnostic
+// (it only looks at the event payload), so this just adapts the callback
+// shape and forwards.
+static void handle_event_pb(void *ctx, int cpu, void *data, __u32 size)
+{
+    (void)cpu;
+    handle_event(ctx, data, size);
+}
+
+// perf_buffer__new()'s lost-sample callback — logged, not fatal; mirrors
+// kb_ringbuf_drops' role in the default build (both count telemetry actually
+// lost, as opposed to ev_stats.suppressed's intentional sampling).
+static void handle_lost_events_pb(void *ctx, int cpu, __u64 cnt)
+{
+    (void)ctx;
+    fprintf(stderr, "[SENSOR] perf buffer lost %llu events on CPU %d\n",
+            (unsigned long long)cnt, cpu);
+}
+#endif
+
 int main(void)
 {
     struct kbd_sensor_bpf *skel;
+#if !KB_USE_PERFBUF
     struct ring_buffer    *rb = NULL;
+#else
+    struct perf_buffer    *pb = NULL;
+#endif
     int err;
 
     {
@@ -2354,7 +2390,32 @@ int main(void)
 
     bpf_program__set_autoload(skel->progs.kb_ssl_write, true);
     bpf_program__set_autoload(skel->progs.kb_go_tls_write, true);
-    bpf_program__set_autoload(skel->progs.kb_lsm_file_open, true);
+
+    // LSM is an Optional capability (docs/architecture/cross-kernel-
+    // portability.md's Fallback Policy: "Modules without a compatible
+    // fallback are marked unavailable and excluded from deployment. The
+    // remaining instrumentation pipeline continues without interruption.")
+    // BPF LSM needs kernel 5.7+ with lsm=...,bpf on the boot cmdline;
+    // without it, attaching any of the 5 kb_lsm_* programs below
+    // unconditionally would fail kbd_sensor_bpf__attach() for the whole
+    // object, taking every other hook down with it (found running on a
+    // 5.4 guest, one kb_lsm_* program at a time as each was uncovered:
+    // -ESRCH, "failed to find kernel BTF type ID" — the LSM hook point
+    // itself doesn't exist without BPF LSM support, not just this specific
+    // field/helper). Probed, not assumed, and logged either way so a
+    // missing hook is visible rather than silently absent.
+    bool kb_lsm_supported = libbpf_probe_bpf_prog_type(BPF_PROG_TYPE_LSM, NULL) > 0;
+    bpf_program__set_autoload(skel->progs.kb_lsm_file_open, kb_lsm_supported);
+    bpf_program__set_autoload(skel->progs.kb_lsm_bprm_check, kb_lsm_supported);
+    bpf_program__set_autoload(skel->progs.kb_lsm_socket_connect, kb_lsm_supported);
+    bpf_program__set_autoload(skel->progs.kb_lsm_socket_bind, kb_lsm_supported);
+    bpf_program__set_autoload(skel->progs.kb_lsm_file_mprotect, kb_lsm_supported);
+    if (!kb_lsm_supported) {
+        fprintf(stderr,
+            "kbd_sensor: BPF LSM not supported on this kernel (needs 5.7+ "
+            "with lsm=...,bpf) -- containment file_open blocking disabled, "
+            "the other hooks are unaffected\n");
+    }
 
     err = kbd_sensor_bpf__load(skel);
     if (!err)
@@ -2422,6 +2483,7 @@ int main(void)
 
     attach_ssl_uprobes(skel);
 
+#if !KB_USE_PERFBUF
     rb = ring_buffer__new(
         bpf_map__fd(skel->maps.kb_events),
         handle_event, skel, NULL
@@ -2430,13 +2492,31 @@ int main(void)
         fprintf(stderr, "Failed to create ring buffer\n");
         goto cleanup;
     }
+#else
+    // 8 mmap'd pages/CPU — same order of magnitude as kb_events' 1MB on a
+    // handful of CPUs; perf_buffer__new sizes per-CPU, ring_buffer__new
+    // sizes once for the whole map, so this isn't a direct translation of
+    // the 1MB figure, just a comparable working size for the fallback path.
+    pb = perf_buffer__new(
+        bpf_map__fd(skel->maps.kb_events_pb), 8,
+        handle_event_pb, handle_lost_events_pb, skel, NULL
+    );
+    if (!pb) {
+        fprintf(stderr, "Failed to create perf buffer\n");
+        goto cleanup;
+    }
+#endif
 
     printf("All 6 hooks attached. Streaming unified events...\n");
     printf("Press Ctrl+C to stop.\n\n");
 
     uint64_t next_scan_ns = 0, next_reap_ns = 0, next_cwp_sweep_ns = now_ns() + KB_CWP_ORPHAN_SWEEP_MIN_INTERVAL_NS;
     while (running) {
+#if !KB_USE_PERFBUF
         err = ring_buffer__poll(rb, 100);
+#else
+        err = perf_buffer__poll(pb, 100);
+#endif
         if (err == -EINTR) { err = 0; break; }
         if (err < 0) break;
 
@@ -2484,7 +2564,11 @@ int main(void)
 cleanup:
     kb_bridge_close(bridge_fd);
     kb_bridge_close(control_fd);
+#if !KB_USE_PERFBUF
     ring_buffer__free(rb);
+#else
+    perf_buffer__free(pb);
+#endif
     kbd_sensor_bpf__destroy(skel);
     return err < 0 ? -err : 0;
 }

@@ -32,10 +32,20 @@ HARDEN_CFLAGS := -O2 \
                   -fPIE
 HARDEN_LDFLAGS := -pie -Wl,-z,relro,-z,now
 
-CFLAGS     := -g -Wall $(INCLUDES) $(HARDEN_CFLAGS)
+# Telemetry transport — docs/architecture/cross-kernel-portability.md's
+# Ring Buffer (preferred, default) -> Perf Event Buffer (fallback) policy.
+# BPF_MAP_TYPE_RINGBUF needs kernel 5.8+; set KB_USE_PERFBUF=1 to build a
+# kbd_sensor targeting older kernels instead (e.g. `make KB_USE_PERFBUF=1
+# kbd_sensor`). This is a build-time choice, not runtime auto-detection —
+# see the KB_USE_PERFBUF comment in ebpf/kbd_sensor.bpf.c for why the two
+# transports can't coexist in one compiled object. Propagated to BOTH the
+# BPF compile and the userspace loader compile, which must always agree.
+KB_USE_PERFBUF ?= 0
+
+CFLAGS     := -g -Wall $(INCLUDES) $(HARDEN_CFLAGS) -DKB_USE_PERFBUF=$(KB_USE_PERFBUF)
 LDFLAGS    := $(HARDEN_LDFLAGS)
 BPF_CFLAGS := -g -O2 -target bpf \
-              -D__TARGET_ARCH_$(ARCH) $(INCLUDES)
+              -D__TARGET_ARCH_$(ARCH) -DKB_USE_PERFBUF=$(KB_USE_PERFBUF) $(INCLUDES)
 
 HOOKS := kb_process kb_syscall kb_privilege \
          kb_file kb_network kb_memory \
