@@ -146,7 +146,8 @@ uint16 dport                 2   // destination port, host byte order
 uint16 _reserved              2
 uint64 ts_ns                   8
 ```
-Total: 22 bytes. Sent from `kbd_sensor.c`'s userspace `handle_event()`
+Total: 24 bytes (4+4+4+2+2+8; an earlier revision of this line said 22, which
+matched neither the field list nor `sizeof(struct kb_wire_net_flow)`). Sent from `kbd_sensor.c`'s userspace `handle_event()`
 (NOT the eBPF program — added 2026-09-07 for
 `docs/development/control-aads/dev-exfiltration-detection.md`'s
 out-of-band beaconing/exfiltration detector, `kb-control-plane/internal/

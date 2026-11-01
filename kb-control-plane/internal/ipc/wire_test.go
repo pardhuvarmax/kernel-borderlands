@@ -232,3 +232,28 @@ func TestReadLoop_CleanCloseIsNotAnError_TruncatedFrameIs(t *testing.T) {
 		t.Error("a close after the length but before the body must be reported")
 	}
 }
+
+func TestParseNetFlow_RejectsShortFrames(t *testing.T) {
+	// kb_wire_net_flow is 24 bytes; 22 and 23 used to pass the length check
+	// and then panic reading ts_ns past the end of the slice.
+	for _, n := range []int{0, 4, 16, 22, 23} {
+		if _, err := parseNetFlow(make([]byte, n)); err == nil {
+			t.Errorf("parseNetFlow(%d bytes) = nil error, want length error", n)
+		}
+	}
+}
+
+func TestParseNetFlow_RoundTrip24Bytes(t *testing.T) {
+	buf := make([]byte, 24)
+	binary.LittleEndian.PutUint32(buf[4:], 4242)
+	binary.LittleEndian.PutUint32(buf[8:], 0x0100007f)
+	binary.LittleEndian.PutUint16(buf[12:], 4444)
+	binary.LittleEndian.PutUint64(buf[16:], 987654321)
+	msg, err := parseNetFlow(buf)
+	if err != nil {
+		t.Fatalf("parseNetFlow: %v", err)
+	}
+	if msg.PID != 4242 || msg.Daddr != 0x0100007f || msg.Dport != 4444 || msg.TsNs != 987654321 {
+		t.Errorf("got %+v", msg)
+	}
+}

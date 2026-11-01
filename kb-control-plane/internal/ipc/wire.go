@@ -189,7 +189,7 @@ func parseContainmentAck(buf []byte) (*ContainmentAckMsg, error) {
 }
 
 func parseNetFlow(buf []byte) (*NetFlowMsg, error) {
-    const expected = 22 // hdr(4) + pid(4) + daddr(4) + dport(2) + reserved(2) + ts_ns(8)
+    const expected = 24 // hdr(4) + pid(4) + daddr(4) + dport(2) + reserved(2) + ts_ns(8); must equal sizeof(struct kb_wire_net_flow)
     if len(buf) < expected {
         return nil, fmt.Errorf("net flow: want %d bytes got %d", expected, len(buf))
     }

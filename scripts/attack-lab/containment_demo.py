@@ -27,6 +27,8 @@ import socket
 import sys
 import time
 
+# Not in the default policy any more: add it to sensitive_paths in
+# config/policy.yaml (and restart kbd) if you want reads of it flagged.
 SECRET_PATH = "/tmp/kb-pipeline-test-secret.txt"
 SHADOW_PATH = "/etc/shadow"
 KBD_HTTP_PORT = 8080

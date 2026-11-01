@@ -14,8 +14,9 @@ defaults:
 # already under operator containment at level >= 2 (Seccomp) — it is not
 # a blanket block on normal system operation (sudo/PAM reading
 # /etc/sudoers, /etc/shadow, etc. are unaffected unless already contained).
-sensitive_paths:
-  - /tmp/kb-pipeline-test-secret.txt
+sensitive_paths: []
+  # Add deployment-specific absolute paths here. (A lab test path used to ship
+  # in this list; scripts/attack-lab/containment_demo.py needs it added by hand.)
 
 # auto_namespace_on_exfil_beacon (per-comm, default false): opt a process
 # into automatic NAMESPACE containment when internal/detection's
@@ -35,7 +36,7 @@ policies:
     suspicious:   50.0
     borderlands:  80.0
     allow_network: false
-    auto_terminate: true
+    auto_terminate: false  # TERMINATE really kills since 1.1.0; opt in per deployment, not by default
 
   - comm: bash
     suspicious:   45.0
