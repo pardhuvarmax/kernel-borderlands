@@ -1057,7 +1057,7 @@ policies:
     suspicious:   50.0
     borderlands:  80.0
     allow_network: false
-    auto_terminate: true
+    auto_terminate: false   # shipped default; opt in per deployment
 
   - comm: bash
     suspicious:   45.0

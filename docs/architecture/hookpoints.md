@@ -15,7 +15,7 @@ here are additions worth considering:
 
 **Process & Execution**
 - `kprobe:do_execveat_common` — catches `execveat()` (exec from file descriptor), a common LOLBin evasion vector
-- `tracepoint:sched:sched_process_ptrace` — detects ptrace attachment between processes (debugger injection, GDB-based exploitation)
+- `tracepoint:syscalls:sys_enter_ptrace` — detects ptrace attachment between processes (debugger injection, GDB-based exploitation). Proposed, not implemented: `sched:sched_process_ptrace`, named in earlier drafts, is not a real tracepoint
 - `kprobe:kernel_clone` — lower-level than sched tracepoints; catches clone flags like `CLONE_NEWUSER` (unprivileged namespace abuse)
 
 **Privilege & Credential**
