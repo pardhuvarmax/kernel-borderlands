@@ -20,7 +20,7 @@ def test_vector_is_ordered_clipped_and_defaults_missing():
 def test_serving_features_match_what_kbd_emits():
     # keys kbd puts in KBEvent.metadata (controlplane.go OnProcessState)
     kbd_keys = {"dim_process", "dim_syscall", "dim_privilege", "dim_file", "dim_network", "dim_memory",
-                "dest_class", "dest_port"}
+                "dest_class", "dest_port", "dest_known"}
     assert kbd_keys <= set(schema.NAMES)
 
 
@@ -54,3 +54,11 @@ def test_shipped_checkpoints_are_refused_without_override(monkeypatch):
     root = os.path.join(os.path.dirname(__file__), "..", "marl", "checkpoints")
     for name in ("containment_ppo", "jury_ppo"):
         assert schema.gate_checkpoint(os.path.join(root, name))[0] is False
+
+
+def test_dest_known_defaults_to_zero_and_is_read_from_event_message():
+    assert schema.build_vector({"score": 50})[schema.NAMES.index("dest_known")] == 0.0
+    raw = schema.from_event_message({"metadata": {"dim_process": "1", "dest_known": "1"}})
+    assert schema.build_vector(raw)[schema.NAMES.index("dest_known")] == 1.0
+    raw = schema.from_event_message({"metadata": {"dim_process": "1", "dest_known": "7"}})
+    assert schema.build_vector(raw)[schema.NAMES.index("dest_known")] == 1.0  # clipped

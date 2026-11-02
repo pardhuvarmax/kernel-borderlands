@@ -59,7 +59,10 @@ def build_rows(ev, ex):
         "score_delta": ps.score_delta, "dim_process": ps.dim_process, "dim_syscall": ps.dim_syscall,
         "dim_privilege": ps.dim_privilege, "dim_file": ps.dim_file, "dim_network": ps.dim_network,
         "dim_memory": ps.dim_memory, "telemetry_gap": 0.0})
-    X = np.column_stack([np.clip(raw[n].fillna(d).astype(float).values, lo, hi) for n, lo, hi, d in schema.FEATURES])
+    # Features a corpus predates (dest_class/dest_port/dest_known on older runs) take the
+    # schema's missing-value default, exactly as build_vector does.
+    X = np.column_stack([np.clip((raw[n] if n in raw else pd.Series(d, index=raw.index)).fillna(d).astype(float).values, lo, hi)
+                         for n, lo, hi, d in schema.FEATURES])
     # the vectorised build must equal the contract's own build_vector
     for i in np.random.RandomState(0).choice(len(raw), 500, replace=False):
         assert np.allclose(X[i], schema.build_vector(raw.iloc[i].to_dict())), "feature build diverged from schema.py"

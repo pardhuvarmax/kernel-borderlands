@@ -18,6 +18,17 @@ sensitive_paths: []
   # Add deployment-specific absolute paths here. (A lab test path used to ship
   # in this list; scripts/attack-lab/containment_demo.py needs it added by hand.)
 
+# known_destinations (default empty): IPv4 addresses or CIDRs the operator
+# vouches for, e.g. an offsite backup host. kbd exports dest_known=1 for a
+# process whose most recent connection went to one (feature schema v3), so a
+# model or analyst can tell "my backup server" from another host at the same
+# kind of address. It is an input feature only: it never suppresses
+# containment. A bad entry rejects the whole list; prefixes shorter than /8
+# are refused. Takes effect on `kbctl policy reload`.
+known_destinations: []
+  # - 10.20.0.5
+  # - 192.168.50.0/24
+
 # auto_namespace_on_exfil_beacon (per-comm, default false): opt a process
 # into automatic NAMESPACE containment when internal/detection's
 # beaconing/exfiltration detector (docs/development/control-aads/

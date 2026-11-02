@@ -9,13 +9,13 @@ Rules (docs/development/control-aads/learned-policy-retraining.md):
   2. Names, order, ranges and missing-value rules are fixed per SCHEMA_VERSION.
      Changing any of them requires a new version; checkpoints record the
      version they were trained on and are refused otherwise (gate_checkpoint).
-  3. kbd emits the same keys in KBEvent.metadata (feature_schema = "1"; see
+  3. kbd emits the same keys in KBEvent.metadata (feature_schema = "3"; see
      OnProcessState in kb-control-plane/internal/controlplane/controlplane.go).
 """
 import json
 import os
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 # (name, low, high, missing_default). Values are clipped to [low, high].
 # Scores are the sensor's 0-100 dimension scores; zone 0/1/2; flags 0/1.
@@ -32,6 +32,13 @@ SCHEMA_VERSION = "2"
 # docs/development/control-aads/learned-policy-retraining.md for what would
 # (destination identity/allowlisting, byte volume — the latter needs new
 # sensor-side write()/sendto() instrumentation, not yet built).
+#
+# v3 adds dest_known: 1 when the pid's most recent destination is inside the
+# operator's policy.yaml `known_destinations` (a known backup host, internal
+# API), else 0 (also 0 when no connection has been seen or nothing is
+# configured). It is destination IDENTITY on top of dest_class; it is only as
+# good as the operator's list and says nothing about what was sent (bytes_sent
+# is still not a feature).
 FEATURES = [
     ("score",          0.0, 100.0, 0.0),   # kbd EMA score
     ("zone",           0.0,   2.0, 0.0),   # SAFE/SUSPICIOUS/BORDERLANDS
@@ -46,6 +53,7 @@ FEATURES = [
     ("telemetry_gap",  0.0,   1.0, 1.0),   # 1 = this window is known-incomplete OR unknown (fail toward "unsure")
     ("dest_class",     0.0,   5.0, 0.0),   # 0=none 1=loopback 2=private 3=link-local 4=multicast 5=public
     ("dest_port",      0.0, 65535.0, 0.0), # most recent NetFlow dest port for this pid, 0 if none
+    ("dest_known",     0.0,   1.0, 0.0),   # 1 = last destination is in policy.yaml known_destinations
 ]
 NAMES = [f[0] for f in FEATURES]
 
@@ -91,6 +99,7 @@ def from_event_message(msg: dict, prev_score=None) -> dict:
         raw[k] = md.get(k)
     raw["dest_class"] = md.get("dest_class")
     raw["dest_port"] = md.get("dest_port")
+    raw["dest_known"] = md.get("dest_known")
     return raw
 
 

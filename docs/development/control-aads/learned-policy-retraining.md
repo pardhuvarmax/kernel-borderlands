@@ -53,6 +53,13 @@ asked for destination class and bytes-sent as new features. They split into two 
   destination *identity* (an allowlist of known-good hosts, analogous to `config/allowlist.yaml`'s
   comm-based exemption) layered on top of the class, which is a policy decision, not a sensor change.
 
+- **Destination identity (`dest_known`, schema v3, implemented 2026-11-02, plan item B3).** `policy.yaml`
+  `known_destinations` (IPv4 addresses/CIDRs; empty by default) is matched against the pid's most recent
+  NetFlow destination and exported as `dest_known` = 0/1. No wire change. It supplies the identity layer
+  described above, but only as good as the operator's list: it does not say what was sent, and it never
+  changes an enforcement decision. Not yet measured on a corpus (the existing corpora predate it and
+  every lab destination is loopback); validate on a fresh capture before relying on it.
+
 - **`bytes_sent` (NOT done — scoped, not started).** `connect()` carries no payload-size field (the same
   limitation `docs/development/control-aads/dev-exfiltration-detection.md` hit building the beaconing
   detector, which falls back to connection-frequency as a volume proxy for the same reason). Real byte

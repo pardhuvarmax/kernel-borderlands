@@ -165,9 +165,7 @@ func classifyDestination(daddr uint32) int {
 	// same reader used for every other uint32 field), so the resulting Go
 	// value has those bytes reversed from a "normal" IPv4 numeric value.
 	// LittleEndian.PutUint32 undoes that and recovers the original bytes.
-	b := make(net.IP, 4)
-	binary.LittleEndian.PutUint32(b, daddr)
-	ip := b
+	ip := destIP(daddr)
 	switch {
 	case ip.IsLoopback():
 		return destClassLoopback
@@ -180,6 +178,14 @@ func classifyDestination(daddr uint32) int {
 	default:
 		return destClassPublic
 	}
+}
+
+// destIP recovers the IPv4 bytes from NetFlowMsg.Daddr (see the byte-order
+// note in classifyDestination).
+func destIP(daddr uint32) net.IP {
+	b := make(net.IP, 4)
+	binary.LittleEndian.PutUint32(b, daddr)
+	return b
 }
 
 // exfilAlertMinInterval is how often OnNetFlow will re-alert on the same
@@ -580,13 +586,13 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	}
 	cp.recordStoreResult(err)
 
-	// Feature schema v2 (kb-aads/features/schema.py): every field below is a
+	// Feature schema v3 (kb-aads/features/schema.py): every field below is a
 	// value the sensor/kbd actually computed for this process, so a learned
 	// policy can be trained and served on the same inputs. Keep the keys in
 	// sync with that file. The legacy dim_syscall/dim_privilege/composite/
 	// zone/uid keys stay for existing consumers.
 	md := map[string]string{
-		"feature_schema": "2",
+		"feature_schema": "3",
 		"zone":           ipc.KBZone(msg.Zone).String(),
 		"composite":      fmt.Sprintf("%.2f", msg.CompositeScore),
 		"dim_syscall":    fmt.Sprintf("%.2f", msg.DimScore[ipc.DimCount-5]),
@@ -607,9 +613,20 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 		nf := v.(netFlowSample)
 		md["dest_class"] = fmt.Sprintf("%d", classifyDestination(nf.Daddr))
 		md["dest_port"] = fmt.Sprintf("%d", nf.Dport)
+		// dest_known (schema v3): 1 if the destination is in policy.yaml
+		// known_destinations. Identity on top of the class; it does not
+		// change any enforcement decision.
+		cp.policyMu.RLock()
+		known := cp.policy.IsKnownDestination(destIP(nf.Daddr))
+		cp.policyMu.RUnlock()
+		md["dest_known"] = "0"
+		if known {
+			md["dest_known"] = "1"
+		}
 	} else {
 		md["dest_class"] = fmt.Sprintf("%d", destClassNone)
 		md["dest_port"] = "0"
+		md["dest_known"] = "0"
 	}
 	cp.fanOutEvent(&pb.KBEvent{
 		Pid:        msg.PID,

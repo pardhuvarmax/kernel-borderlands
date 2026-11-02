@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/ipc"
+	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/policy"
 )
 
 // ═══════════════════════════════════════════════════════════════════
@@ -643,11 +644,11 @@ func TestRecordStoreResult_ConcurrentCallsDontRace(t *testing.T) {
 	wg.Wait()
 }
 
-// The learned-policy feature contract (schema v2) is served from this event:
+// The learned-policy feature contract (schema v3) is served from this event:
 // all six sensor dimension scores must be present, by name, plus dest_class/
 // dest_port (new in v2) defaulting to "no NetFlow seen yet" for a pid that
 // has made no connection.
-func TestOnProcessState_EmitsFeatureSchemaV2(t *testing.T) {
+func TestOnProcessState_EmitsFeatureSchemaV3(t *testing.T) {
 	cp := newTestControlPlane(t)
 	ch := make(chan *pb.KBEvent, 1)
 	cp.subMu.Lock()
@@ -660,12 +661,15 @@ func TestOnProcessState_EmitsFeatureSchemaV2(t *testing.T) {
 	}
 	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 5, UID: 0, Comm: "x", DimScore: dims, EMAScore: 55, EventCount: 7})
 	ev := <-ch
-	if ev.Metadata["feature_schema"] != "2" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
+	if ev.Metadata["feature_schema"] != "3" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
 		t.Fatalf("missing schema/event_count/uid: %v", ev.Metadata)
 	}
 	if ev.Metadata["dest_class"] != "0" || ev.Metadata["dest_port"] != "0" {
 		t.Errorf("expected dest_class=0 (none seen) dest_port=0 for a pid with no NetFlow, got dest_class=%q dest_port=%q",
 			ev.Metadata["dest_class"], ev.Metadata["dest_port"])
+	}
+	if ev.Metadata["dest_known"] != "0" {
+		t.Errorf("dest_known = %q, want 0 with no NetFlow seen", ev.Metadata["dest_known"])
 	}
 	for i, name := range ipc.DimNames {
 		want := fmt.Sprintf("%.2f", dims[i])
@@ -704,6 +708,46 @@ func TestOnProcessState_DestClassFromPriorNetFlow(t *testing.T) {
 		}
 		if ev.Metadata["dest_port"] != "4444" {
 			t.Errorf("%s: dest_port = %q, want 4444", c.name, ev.Metadata["dest_port"])
+		}
+	}
+}
+
+// dest_known (schema v3): 1 only when the pid's last destination is inside
+// policy.yaml known_destinations. Same class of address, different identity:
+// the case dest_class alone cannot separate.
+func TestOnProcessState_DestKnownFromPolicy(t *testing.T) {
+	cp := newTestControlPlane(t)
+	pf := filepath.Join(t.TempDir(), "policy.yaml")
+	if err := os.WriteFile(pf, []byte("known_destinations:\n  - 10.1.2.3\n  - 192.168.50.0/24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := policy.New(pf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp.policy = p
+	ch := make(chan *pb.KBEvent, 1)
+	cp.subMu.Lock()
+	cp.eventSubs = append(cp.eventSubs, ch)
+	cp.subMu.Unlock()
+
+	cases := []struct {
+		name  string
+		daddr uint32 // NetFlowMsg.Daddr, see classifyDestination
+		known string
+	}{
+		{"host entry", 0x0302010A, "1"},         // 10.1.2.3
+		{"inside cidr", 0x0732A8C0, "1"},        // 192.168.50.7
+		{"same class, not listed", 0x0402010A, "0"}, // 10.1.2.4
+		{"public", 0x08080808, "0"},
+	}
+	for i, c := range cases {
+		pid := uint32(200 + i)
+		cp.OnNetFlow(&ipc.NetFlowMsg{PID: pid, Daddr: c.daddr, Dport: 443})
+		cp.OnProcessState(&ipc.ProcessStateMsg{PID: pid, Comm: "x"})
+		ev := <-ch
+		if ev.Metadata["dest_known"] != c.known {
+			t.Errorf("%s: dest_known = %q, want %q", c.name, ev.Metadata["dest_known"], c.known)
 		}
 	}
 }

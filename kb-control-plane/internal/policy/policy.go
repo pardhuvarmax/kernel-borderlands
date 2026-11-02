@@ -3,6 +3,7 @@ package policy
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"strings"
 
@@ -49,6 +50,10 @@ type PolicyFile struct {
 	} `yaml:"defaults"`
 	Policies       []ProcessPolicy `yaml:"policies"`
 	SensitivePaths []string        `yaml:"sensitive_paths"`
+	// KnownDestinations: IPv4 addresses or CIDRs the operator vouches for
+	// (offsite backup host, internal API). Feeds the dest_known feature
+	// (schema v3); never suppresses containment by itself.
+	KnownDestinations []string `yaml:"known_destinations"`
 }
 
 // Engine only exposes what controlplane.go actually calls today
@@ -64,6 +69,7 @@ type Engine struct {
 	defSus         float64
 	defBor         float64
 	sensitivePaths []string
+	knownDests     []*net.IPNet
 }
 
 func New(path string) (*Engine, error) {
@@ -102,7 +108,59 @@ func New(path string) (*Engine, error) {
 			log.Printf("[Policy] loaded %d additional sensitive path(s)", len(sp))
 		}
 	}
+
+	kd, err := parseKnownDestinations(pf.KnownDestinations)
+	if err != nil {
+		log.Printf("[Policy] known_destinations rejected, treating no destination as known: %v", err)
+	} else {
+		e.knownDests = kd
+		if len(kd) > 0 {
+			log.Printf("[Policy] loaded %d known destination(s)", len(kd))
+		}
+	}
 	return e, nil
+}
+
+// parseKnownDestinations rejects the whole list on any bad entry (same
+// posture as validateSensitivePaths) so a typo can never half-apply. Only
+// IPv4 is accepted because the sensor's NetFlow record is IPv4-only. A
+// bare address means /32. 0.0.0.0/0 and other prefixes shorter than /8 are
+// refused: they would mark every destination "known" and silently turn
+// the feature off.
+func parseKnownDestinations(entries []string) ([]*net.IPNet, error) {
+	out := make([]*net.IPNet, 0, len(entries))
+	for _, raw := range entries {
+		t := strings.TrimSpace(raw)
+		if t == "" {
+			return nil, fmt.Errorf("empty known_destinations entry")
+		}
+		if !strings.Contains(t, "/") {
+			t += "/32"
+		}
+		ip, n, err := net.ParseCIDR(t)
+		if err != nil || ip.To4() == nil {
+			return nil, fmt.Errorf("known_destinations entry %q is not an IPv4 address or CIDR", raw)
+		}
+		if ones, _ := n.Mask.Size(); ones < 8 {
+			return nil, fmt.Errorf("known_destinations entry %q is broader than /8 and would match almost every destination", raw)
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+// IsKnownDestination reports whether ip falls inside an operator-listed
+// known destination. False for nil/IPv6 and when nothing is configured.
+func (e *Engine) IsKnownDestination(ip net.IP) bool {
+	if e == nil || ip.To4() == nil {
+		return false
+	}
+	for _, n := range e.knownDests {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // DefaultSuspiciousThreshold and DefaultBorderlandsThreshold expose the
