@@ -436,6 +436,14 @@ int kb_handle_exec(struct trace_event_raw_sched_process_exec *ctx)
         unsigned short exec_off = ctx->__data_loc_filename & 0xffff;
         bpf_probe_read_kernel_str(e->filename, sizeof(e->filename), (char *)ctx + exec_off);
     }
+    // e->flags on an exec event: bit 0 = the process has a controlling tty
+    // (interactive). SPAWNED_SHELL is defined as a shell started by a
+    // NON-interactive process (spec, KB_EV_SPAWNED_SHELL), so userspace only
+    // sets it when this bit is clear.
+    {
+        struct task_struct *exec_task = (struct task_struct *)bpf_get_current_task();
+        e->flags = BPF_CORE_READ(exec_task, signal, tty) ? 1 : 0;
+    }
     KB_SUBMIT_EVENT(ctx, e);
 
     // CPM registration path (docs/features/CPM.md §5.3): if this exec's

@@ -276,6 +276,18 @@ static void test_classify_exec_path(void)
            (KB_EV_EXEC_FROM_TMP | KB_EV_SPAWNED_SHELL));
 }
 
+static void test_exec_flag_has_tty_bit(void)
+{
+    // The sensor clears SPAWNED_SHELL when the exec event carries the tty bit;
+    // the gate is a plain mask, so pin the constant and the interaction.
+    assert(KB_EXEC_FLAG_HAS_TTY == 0x1u);
+    uint64_t m = kb_evidence_classify_exec_path("/bin/bash");
+    assert(m & KB_EV_SPAWNED_SHELL);
+    uint32_t flags = KB_EXEC_FLAG_HAS_TTY;
+    if (flags & KB_EXEC_FLAG_HAS_TTY) m &= ~KB_EV_SPAWNED_SHELL;
+    assert(!(m & KB_EV_SPAWNED_SHELL));
+}
+
 static void test_rapid_connect_burst(void)
 {
     kb_evidence_init();
@@ -326,6 +338,7 @@ int main(void)
     RUN_TEST(test_rwx_mapping_from_suspicious_process_is_borderlands);
     RUN_TEST(test_memory_event_classification);
     RUN_TEST(test_classify_exec_path);
+    RUN_TEST(test_exec_flag_has_tty_bit);
     RUN_TEST(test_rapid_connect_burst);
     RUN_TEST(test_b1_shell_connect_flag_combination);
 

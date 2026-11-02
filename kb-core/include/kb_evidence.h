@@ -23,7 +23,7 @@
 // Process & Execution
 #define KB_EV_EXEC_FROM_TMP           (1ULL << 0)  // execve from /tmp or /dev/shm
 #define KB_EV_EXEC_FROM_PROC          (1ULL << 1)  // execve from /proc/*/fd (memfd)
-#define KB_EV_SPAWNED_SHELL           (1ULL << 2)  // exec'd sh/bash/zsh/dash/fish
+#define KB_EV_SPAWNED_SHELL           (1ULL << 2)  // exec'd sh/bash/zsh/dash/fish with NO controlling tty (non-interactive; spec: spawned by a non-interactive process)
 #define KB_EV_ANOMALOUS_PARENT        (1ULL << 3)  // parent unusual for this comm
 #define KB_EV_RAPID_EXEC_BURST        (1ULL << 4)  // >10 exec events in 5 seconds
 #define KB_EV_EXECVEAT                (1ULL << 5)  // used execveat() (fd-based exec)
@@ -171,6 +171,9 @@ void         kb_evidence_set_flag(kb_evidence_t *ev, uint64_t flag, uint64_t ts_
 
 // Append to the ordered sequence buffer
 void         kb_evidence_push_seq(kb_evidence_t *ev, kb_seq_event_t entry);
+
+// exec event flags bit 0 (kb_unified_event.flags): process has a controlling tty.
+#define KB_EXEC_FLAG_HAS_TTY  0x1u
 
 // Classify the pathname passed to execve() (the sched_process_exec tracepoint's
 // `filename`, which is NOT canonicalised: a relative path cannot be resolved here).

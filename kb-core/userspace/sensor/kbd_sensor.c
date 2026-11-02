@@ -1685,6 +1685,10 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
                 kb_evidence_set_flag(ev, KB_EV_NONE, ts);
                 kb_evidence_push_seq(ev, KB_SEQ_EXEC);
                 uint64_t exec_flags = kb_evidence_classify_exec_path((const char *)e->filename);
+                // SPAWNED_SHELL means a shell started by a non-interactive
+                // process; a shell on a controlling tty is an operator.
+                if (e->flags & KB_EXEC_FLAG_HAS_TTY)
+                    exec_flags &= ~KB_EV_SPAWNED_SHELL;
                 if (exec_flags) {
                     kb_evidence_set_flag(ev, exec_flags, ts);
                     if (exec_flags & KB_EV_SPAWNED_SHELL)
