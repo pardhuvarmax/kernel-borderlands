@@ -72,13 +72,20 @@ asked for destination class and bytes-sent as new features. They split into two 
   *ancestor* of the reader (`python` runs `sudo cat /etc/shadow`, then connects itself). Limits: walk bounded to
   6 levels and 256 nodes; a long-lived parent whose descendants collectively read sensitive files and connect
   looks like "both" indefinitely (in the lab corpora one runner process produced most flagged background rows);
-  children re-parented to init leave the tree. **Descriptive result on the three corpora (reconstructed offline,
-  same-moment "both" = file score >= 70 and network score >= 15 in one subtree):** 35 of 110 attack and 10 of 120
-  benign executions. The 35 are `credential_dump`, `exfil_staging` and `evasion_slow`; the 10 are
+  children re-parented to init leave the tree. **Design finding, NOT a performance result: the scope was compared on ALL 230 executions, including the
+  held-out test split, which breaks this document's rule that choices are made on training data only.** Counts on
+  all executions (reconstructed offline, same-moment "both" = file score >= 70 and network score >= 15 in one
+  subtree): 35 of 110 attack and 10 of 120 benign executions. The 35 are `credential_dump`, `exfil_staging` and `evasion_slow`; the 10 are
   `benign_backup_remote` and `benign_credential_report`, the pairs this document already says need destination
   identity or bytes sent. 0 of 230 executions have both in a single process. 555,813 of 875,135 background rows
-  are flagged, from 48 processes, mostly the lab runner (see the hazard above). The scope was chosen after
-  seeing these corpora, so it must be validated on a fresh capture, not on them.
+  are flagged, from 48 processes, mostly the lab runner (see the hazard above). The comparison was then redone on the TRAIN split alone (57 attack, 63 benign executions; held-out families
+  `evasion` and `admin_privileged` absent) and the subtree scope still came out ahead of own-process, family,
+  subtree-plus-family and parent's-subtree: 12 of 57 attack and 6 of 63 benign executions flagged
+  (`credential_dump` 6/6, `exfil_staging` 6/6 vs `benign_backup_remote` 3/3, `benign_credential_report` 3/3);
+  the parent's-subtree scope flags 48 of 57 and 53 of 63 and is useless; family catches 1 of 57. The candidate
+  scopes were still thought of after looking at all the data, and the `ppid = 0` defect was found by studying
+  `credential_dump`, so the design is not independent of these corpora. Do not report these figures in a paper;
+  evaluate the final feature once, on a fresh capture.
   The sensor-side B5 candidates (sensitive-file and credential counts, sequence evidence) and `bytes_sent`
   still need a wire change and are not done.
 
