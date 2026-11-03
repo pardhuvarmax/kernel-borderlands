@@ -1,7 +1,7 @@
 # Attack-lab corpus 20261103T234334
 
 Captured on `UbuntuVM-eBPF` (kernel 6.8.0-147-generic), package 1.1.0, feature schema v5.
-`kbd` observe-only (automatic containment OFF): yes. Sensor exit-state publish: `all`.
+`kbd` observe-only (automatic containment OFF): yes. Sensor exit-state publish: **`anomalous` (the sensor default, NOT `all`)**: the exporter used to print `all` without checking; the sensor's own counters during this run show thousands of benign exit states skipped. Short-lived benign processes are missing from this corpus, which is why it has about half the events of the earlier runs.
 90 executions (162441 events, 0 stream gaps), seed 1, 5 repeats per scenario.
 
 ## Files

@@ -156,6 +156,20 @@ def kbd_observe_only():
     return "KB_OBSERVE_ONLY=1" in out.split()
 
 
+def sensor_exit_state():
+    """The sensor's KB_SENSOR_EXIT_STATE from its service environment: "all", "off", "anomalous"
+    (the default when unset, which SKIPS exit snapshots of benign low-score processes), or None if it
+    cannot be determined. Short-lived benign processes then never appear in the corpus at all."""
+    if not shutil.which("systemctl"):
+        return None
+    out = sh(["systemctl", "show", "kb-sensor", "-p", "Environment", "--value"])
+    for tok in out.split():
+        if tok.startswith("KB_SENSOR_EXIT_STATE="):
+            v = tok.split("=", 1)[1]
+            return v if v in ("all", "off") else "anomalous"
+    return "anomalous"
+
+
 def audit_entries(socket_path):
     """kbd's audit log via the shipped `kbctl audit export` (the Python gRPC
     stubs in kb-aads/comms predate that RPC). None if it cannot be read."""
@@ -209,6 +223,9 @@ def main():
     ap.add_argument("--out", default="corpus")
     ap.add_argument("--socket", default="/run/kb/kba.sock")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--allow-partial-exit-state", action="store_true",
+                    help="record even though the sensor does not publish exit snapshots for every process "
+                         "(KB_SENSOR_EXIT_STATE != all): short-lived benign executions then produce no events.")
     ap.add_argument("--allow-containment", action="store_true",
                     help="record even though kbd applies automatic containment (distorts the data: "
                          "attacks get throttled/killed mid-run). Off by default.")
@@ -252,6 +269,19 @@ def main():
               "(containment is then logged per execution and the manifest says so).", file=sys.stderr)
         return 2
 
+    exit_state = sensor_exit_state()
+    if exit_state != "all" and not a.allow_partial_exit_state:
+        print("refusing to run: the sensor's KB_SENSOR_EXIT_STATE is "
+              + (repr(exit_state) if exit_state else "unknown") + ", not 'all'.\n"
+              "In the default mode the sensor drops the final state of benign low-score processes, so short-lived\n"
+              "executions (a one-second benign_compile) produce no events and the corpus is not comparable with\n"
+              "runs captured with 'all'. Set it for the capture:\n"
+              "    sudo systemctl edit kb-sensor     # [Service]  Environment=KB_SENSOR_EXIT_STATE=all\n"
+              "    sudo systemctl restart kb-sensor\n"
+              "and remove the override afterwards. Or pass --allow-partial-exit-state to record anyway "
+              "(the manifest says which mode was in effect).", file=sys.stderr)
+        return 2
+
     from capture import Capture
     run_id = time.strftime("%Y%m%dT%H%M%S")
     root = os.path.join(a.out, run_id)
@@ -271,6 +301,7 @@ def main():
         "feature_schema": SCHEMA_VERSION, "lab_infra_pids": lab_infra_pids(), "seed": a.seed, "repeats": a.repeats,
         "scenarios": names, "kbd_stats_before": kbd_stats(a.socket),
         "containment_active": observe_only is not True,
+        "sensor_exit_state": exit_state,
         "started_wall_ns": time.time_ns(),
     }
     executions = []

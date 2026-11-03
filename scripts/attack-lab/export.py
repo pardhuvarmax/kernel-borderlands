@@ -125,7 +125,7 @@ def write_all(df, base):
 README = """# Attack-lab corpus {run_id}
 
 Captured on `{host}` (kernel {kernel}), package {package}, feature schema v{schema}.
-`kbd` observe-only (automatic containment OFF): {observe_only}. Sensor exit-state publish: `all`.
+`kbd` observe-only (automatic containment OFF): {observe_only}. Sensor exit-state publish: `{exit_state}`.
 {n_exec} executions ({n_events} events, {n_gaps} stream gaps), seed {seed}, {repeats} repeats per scenario.
 
 ## Files
@@ -192,6 +192,7 @@ def main():
     open(os.path.join(root, "README.md"), "w").write(README.format(
         run_id=man["run_id"], host=man["host"], kernel=man["kernel"], package=man["package"], schema=man["feature_schema"],
         observe_only="yes" if not man["containment_active"] else "NO (containment was active)",
+        exit_state=man.get("sensor_exit_state") or "not recorded (the exporter used to claim `all` without checking)",
         n_exec=len(executions), n_events=len(real), n_gaps=man["stream_gaps"], seed=man["seed"], repeats=man["repeats"],
         holdout=a.holdout))
     print("done:", root)

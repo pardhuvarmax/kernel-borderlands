@@ -220,3 +220,13 @@ def test_network_using_benign_pair_members_read_secrets_and_connect_like_the_att
         s1.close()
     with pytest.raises(ValueError):
         payloads._Sink("8.8.8.8")
+
+
+def test_sensor_exit_state_is_read_from_the_service_environment(monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda _: "/bin/systemctl")
+    for env, want in (("KB_SENSOR_EXIT_STATE=all", "all"), ("FOO=1 KB_SENSOR_EXIT_STATE=off", "off"),
+                      ("KB_SENSOR_EXIT_STATE=weird", "anomalous"), ("", "anomalous")):
+        monkeypatch.setattr(runner, "sh", lambda *_a, _e=env, **_k: _e)
+        assert runner.sensor_exit_state() == want
+    monkeypatch.setattr(runner.shutil, "which", lambda _: None)
+    assert runner.sensor_exit_state() is None
