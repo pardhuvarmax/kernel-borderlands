@@ -100,3 +100,5 @@ dist/
 datasets/attack-lab/*/raw/
 datasets/attack-lab/*/tables/*.xlsx
 datasets/attack-lab/*/tables/events.csv
+# Merged training tables are derived (scripts/attack-lab/build_training_table.py, seconds to rebuild).
+datasets/attack-lab/training/

@@ -71,3 +71,7 @@ python3 lidds_runner.py --lidds ~/LID-DS --ack-isolated --scenarios all --repeat
 
 ## Tests
 `/path/to/venv/bin/python -m pytest scripts/attack-lab/tests` (no root, no gRPC needed).
+
+## Training table (`build_training_table.py`)
+
+Merges runs into `features.parquet` (schema features only, built through `kb-aads/features/schema.py`), `labels.parquet` (ground truth and the execution-level split, same keys) and `manifest.json` (commit, row counts, per-run feature provenance). Default: the three plan runs `20261031T183320`, `T193756`, `T201927` (230 executions, 886,140 `process_state` rows). Features a run's sensor never emitted (`dest_*`) are schema-default-filled and marked `absent`; `tree_*` are **reconstructed** by replaying the stream through the rules of `kb-control-plane/internal/controlplane/tree.go`, with two approximations documented in the script header. Outputs are derived and git-ignored. Run: `python3 scripts/attack-lab/build_training_table.py [--out DIR] [RUN ...]` (needs numpy, pandas, pyarrow). Tests: `tests/test_build_training_table.py`.
