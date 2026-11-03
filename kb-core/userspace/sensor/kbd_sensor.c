@@ -2290,7 +2290,9 @@ static int handle_event(void *ctx, void *data, size_t sz)
 
         case KB_EVT_MEMORY_MMAP:
         case KB_EVT_MEMORY_MPROTECT:
-            if (e->addr == 0 && e->rwx) {
+            // Same classifier the scoring uses: an anonymous RWX mmap has addr 0 and
+            // prot RWX; only the process_vm_writev marker (prot 0) is cross-process.
+            if (kb_classify_memory_event(e->addr, e->prot, e->rwx) == KB_MEM_CROSS_PROCESS_WRITE) {
                 fprintf(evout, "🔴 CROSS-PROCESS MEMORY INJECTION! TargetPID=%llu\n", (unsigned long long)e->length);
             } else {
                 prot_str(e->prot, prot);
