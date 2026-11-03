@@ -22,6 +22,15 @@ INCLUDES := \
     -Iinclude \
     -I$(BRIDGE) \
     -I../libbpf/include/uapi
+
+# Optional: directory holding libbpf's installed headers (the one containing
+# bpf/bpf_helpers.h). Not needed where libbpf-dev is installed system-wide;
+# CI uses it with the vendored libbpf (`make -C libbpf/src DESTDIR=... install_headers`)
+# because the repo's libbpf/ checkout only has the headers under libbpf/src/.
+LIBBPF_INCLUDE ?=
+ifneq ($(LIBBPF_INCLUDE),)
+INCLUDES += -I$(LIBBPF_INCLUDE)
+endif
 # Userspace binary hardening (BPF_CFLAGS below is a separate flag set —
 # these are userspace-only mitigations; most are meaningless/rejected by
 # `clang -target bpf`). _FORTIFY_SOURCE requires -O1+ to take effect.
