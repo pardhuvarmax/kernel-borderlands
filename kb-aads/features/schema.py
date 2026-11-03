@@ -9,13 +9,13 @@ Rules (docs/development/control-aads/learned-policy-retraining.md):
   2. Names, order, ranges and missing-value rules are fixed per SCHEMA_VERSION.
      Changing any of them requires a new version; checkpoints record the
      version they were trained on and are refused otherwise (gate_checkpoint).
-  3. kbd emits the same keys in KBEvent.metadata (feature_schema = "3"; see
+  3. kbd emits the same keys in KBEvent.metadata (feature_schema = "4"; see
      OnProcessState in kb-control-plane/internal/controlplane/controlplane.go).
 """
 import json
 import os
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 # (name, low, high, missing_default). Values are clipped to [low, high].
 # Scores are the sensor's 0-100 dimension scores; zone 0/1/2; flags 0/1.
@@ -39,6 +39,15 @@ SCHEMA_VERSION = "3"
 # configured). It is destination IDENTITY on top of dest_class; it is only as
 # good as the operator's list and says nothing about what was sent (bytes_sent
 # is still not a feature).
+#
+# v4 adds tree_dim_file, tree_dim_network and tree_file_net: the highest file
+# and network dimension scores across the process's FAMILY (its parent and
+# that parent's other children, as kbd saw them, incl. recently exited ones),
+# and the lower of the two (high only when both kinds of evidence exist in the
+# family). Computed in kbd from parent pids already on the wire
+# (kb-control-plane/internal/controlplane/tree.go); per-process dim_* are
+# unchanged. Limits: one level up/across only; children re-parented to init
+# leave the family; parents with >256 children are sampled.
 FEATURES = [
     ("score",          0.0, 100.0, 0.0),   # kbd EMA score
     ("zone",           0.0,   2.0, 0.0),   # SAFE/SUSPICIOUS/BORDERLANDS
@@ -54,6 +63,9 @@ FEATURES = [
     ("dest_class",     0.0,   5.0, 0.0),   # 0=none 1=loopback 2=private 3=link-local 4=multicast 5=public
     ("dest_port",      0.0, 65535.0, 0.0), # most recent NetFlow dest port for this pid, 0 if none
     ("dest_known",     0.0,   1.0, 0.0),   # 1 = last destination is in policy.yaml known_destinations
+    ("tree_dim_file",    0.0, 100.0, 0.0), # max dim_file over the process family
+    ("tree_dim_network", 0.0, 100.0, 0.0), # max dim_network over the process family
+    ("tree_file_net",    0.0, 100.0, 0.0), # min of the two: both kinds of evidence somewhere in the family
 ]
 NAMES = [f[0] for f in FEATURES]
 
@@ -100,6 +112,8 @@ def from_event_message(msg: dict, prev_score=None) -> dict:
     raw["dest_class"] = md.get("dest_class")
     raw["dest_port"] = md.get("dest_port")
     raw["dest_known"] = md.get("dest_known")
+    for k in ("tree_dim_file", "tree_dim_network", "tree_file_net"):
+        raw[k] = md.get(k)
     return raw
 
 

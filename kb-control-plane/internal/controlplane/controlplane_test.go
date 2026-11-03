@@ -644,11 +644,11 @@ func TestRecordStoreResult_ConcurrentCallsDontRace(t *testing.T) {
 	wg.Wait()
 }
 
-// The learned-policy feature contract (schema v3) is served from this event:
+// The learned-policy feature contract (schema v4) is served from this event:
 // all six sensor dimension scores must be present, by name, plus dest_class/
 // dest_port (new in v2) defaulting to "no NetFlow seen yet" for a pid that
 // has made no connection.
-func TestOnProcessState_EmitsFeatureSchemaV3(t *testing.T) {
+func TestOnProcessState_EmitsFeatureSchemaV4(t *testing.T) {
 	cp := newTestControlPlane(t)
 	ch := make(chan *pb.KBEvent, 1)
 	cp.subMu.Lock()
@@ -661,7 +661,7 @@ func TestOnProcessState_EmitsFeatureSchemaV3(t *testing.T) {
 	}
 	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 5, UID: 0, Comm: "x", DimScore: dims, EMAScore: 55, EventCount: 7})
 	ev := <-ch
-	if ev.Metadata["feature_schema"] != "3" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
+	if ev.Metadata["feature_schema"] != "4" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
 		t.Fatalf("missing schema/event_count/uid: %v", ev.Metadata)
 	}
 	if ev.Metadata["dest_class"] != "0" || ev.Metadata["dest_port"] != "0" {
@@ -749,6 +749,31 @@ func TestOnProcessState_DestKnownFromPolicy(t *testing.T) {
 		if ev.Metadata["dest_known"] != c.known {
 			t.Errorf("%s: dest_known = %q, want %q", c.name, ev.Metadata["dest_known"], c.known)
 		}
+	}
+}
+
+// End to end through OnProcessState: the connector's event carries the
+// reader's file evidence from its sibling (schema v4 tree_* keys).
+func TestOnProcessState_TreeFeaturesJoinSiblings(t *testing.T) {
+	cp := newTestControlPlane(t)
+	ch := make(chan *pb.KBEvent, 4)
+	cp.subMu.Lock()
+	cp.eventSubs = append(cp.eventSubs, ch)
+	cp.subMu.Unlock()
+
+	reader := &ipc.ProcessStateMsg{PID: 301, PPID: 300, StartTimeNs: 1, Comm: "cat"}
+	reader.DimScore[dimFileIdx] = 80
+	conn := &ipc.ProcessStateMsg{PID: 302, PPID: 300, StartTimeNs: 2, Comm: "nc"}
+	conn.DimScore[dimNetworkIdx] = 70
+	cp.OnProcessState(reader)
+	<-ch
+	cp.OnProcessState(conn)
+	md := (<-ch).Metadata
+	if md["tree_dim_file"] != "80.00" || md["tree_dim_network"] != "70.00" || md["tree_file_net"] != "70.00" {
+		t.Fatalf("connector did not see the reader: %v", md)
+	}
+	if md["dim_file"] != "0.00" {
+		t.Errorf("per-process dim_file must stay the process's own, got %q", md["dim_file"])
 	}
 }
 

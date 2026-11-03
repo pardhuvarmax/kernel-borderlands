@@ -20,7 +20,8 @@ def test_vector_is_ordered_clipped_and_defaults_missing():
 def test_serving_features_match_what_kbd_emits():
     # keys kbd puts in KBEvent.metadata (controlplane.go OnProcessState)
     kbd_keys = {"dim_process", "dim_syscall", "dim_privilege", "dim_file", "dim_network", "dim_memory",
-                "dest_class", "dest_port", "dest_known"}
+                "dest_class", "dest_port", "dest_known",
+                "tree_dim_file", "tree_dim_network", "tree_file_net"}
     assert kbd_keys <= set(schema.NAMES)
 
 
@@ -62,3 +63,15 @@ def test_dest_known_defaults_to_zero_and_is_read_from_event_message():
     assert schema.build_vector(raw)[schema.NAMES.index("dest_known")] == 1.0
     raw = schema.from_event_message({"metadata": {"dim_process": "1", "dest_known": "7"}})
     assert schema.build_vector(raw)[schema.NAMES.index("dest_known")] == 1.0  # clipped
+
+
+def test_tree_features_default_to_zero_and_are_read_and_clipped():
+    v = schema.build_vector({"score": 50})
+    for k in ("tree_dim_file", "tree_dim_network", "tree_file_net"):
+        assert v[schema.NAMES.index(k)] == 0.0
+    msg = {"metadata": {"dim_process": "1", "tree_dim_file": "80.00", "tree_dim_network": "70.00",
+                        "tree_file_net": "700"}}
+    v = schema.build_vector(schema.from_event_message(msg))
+    assert v[schema.NAMES.index("tree_dim_file")] == 80.0
+    assert v[schema.NAMES.index("tree_dim_network")] == 70.0
+    assert v[schema.NAMES.index("tree_file_net")] == 100.0  # clipped

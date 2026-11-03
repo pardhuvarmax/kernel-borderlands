@@ -60,6 +60,21 @@ asked for destination class and bytes-sent as new features. They split into two 
   changes an enforcement decision. Not yet measured on a corpus (the existing corpora predate it and
   every lab destination is loopback); validate on a fresh capture before relying on it.
 
+- **Process-family evidence (`tree_dim_file`, `tree_dim_network`, `tree_file_net`, schema v4, implemented 2026-11-02, plan items B2/B5 Go part).**
+  kbd keeps the latest file/network dimension per process and, for each `process_state`, exports the
+  highest of each over the process's family (its parent and that parent's other children, including ones
+  that exited in the last 120 s) plus their minimum, which is high only when both kinds of evidence exist
+  in the family. It is built from `parent_pid`, already on the wire, so there is no wire change
+  (`kb-control-plane/internal/controlplane/tree.go`). PIDs are host-namespace (the sensor reads `tgid` and
+  `real_parent->tgid`), so a container's init is an ordinary parent, not PID 1. Limits: one level up and
+  across only (not the whole ancestry, which would merge everything under systemd/sshd); a child
+  re-parented to init after its parent dies leaves the family; parents with more than 256 children are
+  sampled. This is the offline per-process stand-in for the tree-level rule that separated the matched
+  pairs 5/5 vs 0/5 in `20261031T193756`; **it has not been measured on any corpus yet** (needs a fresh
+  capture and a retrain, Workstream A).
+  The sensor-side B5 candidates (sensitive-file and credential counts, sequence evidence) and `bytes_sent`
+  still need a wire change and are not done.
+
 - **`bytes_sent` (NOT done — scoped, not started).** `connect()` carries no payload-size field (the same
   limitation `docs/development/control-aads/dev-exfiltration-detection.md` hit building the beaconing
   detector, which falls back to connection-frequency as a volume proxy for the same reason). Real byte

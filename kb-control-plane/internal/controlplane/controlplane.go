@@ -130,6 +130,10 @@ type ControlPlane struct {
 	// OnProcessState call (every 20 events per pid) but written far less
 	// often (once per connect), so the read-mostly map fits better.
 	netFlowCache sync.Map // pid uint32 -> netFlowSample
+
+	// tree aggregates file/network evidence over a process's family
+	// (parent + siblings) for the schema-v4 tree_* features; see tree.go.
+	tree *treeCache
 }
 
 // netFlowSample is what netFlowCache stores per pid: just enough to derive
@@ -240,6 +244,7 @@ func New(dbPath, policyPath, rulesPath, workloadsPath, workloadsPubKeyPath strin
 	// Build cp first (handler must exist before NewListener so it can be
 	// passed as the MessageHandler), then wire the enforcer to the listener.
 	cp := &ControlPlane{
+		tree:           newTreeCache(),
 		observeOnly:    os.Getenv("KB_OBSERVE_ONLY") == "1",
 		store:          s,
 		audit:          audit.New(s.DB()),
@@ -586,13 +591,13 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	}
 	cp.recordStoreResult(err)
 
-	// Feature schema v3 (kb-aads/features/schema.py): every field below is a
+	// Feature schema v4 (kb-aads/features/schema.py): every field below is a
 	// value the sensor/kbd actually computed for this process, so a learned
 	// policy can be trained and served on the same inputs. Keep the keys in
 	// sync with that file. The legacy dim_syscall/dim_privilege/composite/
 	// zone/uid keys stay for existing consumers.
 	md := map[string]string{
-		"feature_schema": "3",
+		"feature_schema": "4",
 		"zone":           ipc.KBZone(msg.Zone).String(),
 		"composite":      fmt.Sprintf("%.2f", msg.CompositeScore),
 		"dim_syscall":    fmt.Sprintf("%.2f", msg.DimScore[ipc.DimCount-5]),
@@ -628,6 +633,12 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 		md["dest_port"] = "0"
 		md["dest_known"] = "0"
 	}
+	// tree_* (schema v4): highest file/network dimension across this
+	// process's parent and siblings, and the lower of the two. See tree.go.
+	tf, tn, tb := cp.tree.Update(msg)
+	md["tree_dim_file"] = fmt.Sprintf("%.2f", tf)
+	md["tree_dim_network"] = fmt.Sprintf("%.2f", tn)
+	md["tree_file_net"] = fmt.Sprintf("%.2f", tb)
 	cp.fanOutEvent(&pb.KBEvent{
 		Pid:        msg.PID,
 		Ppid:       msg.PPID,
@@ -643,6 +654,7 @@ func (cp *ControlPlane) OnProcessExit(msg *ipc.ProcessExitMsg) {
 	// Delete volatile cache entries to prevent PID reuse vulnerabilities
 	cp.commCache.Delete(msg.PID)
 	cp.netFlowCache.Delete(msg.PID)
+	cp.tree.Exit(msg.PID) // keeps contributing to its family briefly; see tree.go
 
 	// Push exit details to L2 DB
 	if err := cp.store.TerminateProcessState(msg.PID, msg.ExitTimeNs, msg.ExitCode); err != nil {
