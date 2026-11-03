@@ -41,13 +41,14 @@ SCHEMA_VERSION = "4"
 # is still not a feature).
 #
 # v4 adds tree_dim_file, tree_dim_network and tree_file_net: the highest file
-# and network dimension scores across the process's FAMILY (its parent and
-# that parent's other children, as kbd saw them, incl. recently exited ones),
-# and the lower of the two (high only when both kinds of evidence exist in the
-# family). Computed in kbd from parent pids already on the wire
-# (kb-control-plane/internal/controlplane/tree.go); per-process dim_* are
-# unchanged. Limits: one level up/across only; children re-parented to init
-# leave the family; parents with >256 children are sampled.
+# and network dimension scores across the process's SUBTREE (itself and all
+# descendants kbd has seen, incl. recently exited ones; each process counts its
+# highest score ever, not its latest), and the lower of the two (high only when
+# both kinds of evidence exist in the subtree). Computed in kbd from parent pids
+# already on the wire (kb-control-plane/internal/controlplane/tree.go); per-process
+# dim_* are unchanged. Limits: walk bounded to 6 levels / 256 nodes; a long-lived
+# parent whose descendants collectively read files and connect looks like "both"
+# indefinitely; children re-parented to init leave the tree.
 FEATURES = [
     ("score",          0.0, 100.0, 0.0),   # kbd EMA score
     ("zone",           0.0,   2.0, 0.0),   # SAFE/SUSPICIOUS/BORDERLANDS
@@ -63,9 +64,9 @@ FEATURES = [
     ("dest_class",     0.0,   5.0, 0.0),   # 0=none 1=loopback 2=private 3=link-local 4=multicast 5=public
     ("dest_port",      0.0, 65535.0, 0.0), # most recent NetFlow dest port for this pid, 0 if none
     ("dest_known",     0.0,   1.0, 0.0),   # 1 = last destination is in policy.yaml known_destinations
-    ("tree_dim_file",    0.0, 100.0, 0.0), # max dim_file over the process family
-    ("tree_dim_network", 0.0, 100.0, 0.0), # max dim_network over the process family
-    ("tree_file_net",    0.0, 100.0, 0.0), # min of the two: both kinds of evidence somewhere in the family
+    ("tree_dim_file",    0.0, 100.0, 0.0), # max dim_file over the process subtree
+    ("tree_dim_network", 0.0, 100.0, 0.0), # max dim_network over the process subtree
+    ("tree_file_net",    0.0, 100.0, 0.0), # min of the two: both kinds of evidence somewhere in the subtree
 ]
 NAMES = [f[0] for f in FEATURES]
 

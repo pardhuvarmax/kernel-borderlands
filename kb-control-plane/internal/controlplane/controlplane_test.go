@@ -752,9 +752,9 @@ func TestOnProcessState_DestKnownFromPolicy(t *testing.T) {
 	}
 }
 
-// End to end through OnProcessState: the connector's event carries the
-// reader's file evidence from its sibling (schema v4 tree_* keys).
-func TestOnProcessState_TreeFeaturesJoinSiblings(t *testing.T) {
+// End to end through OnProcessState: the parent's event carries its child's
+// file evidence (schema v4 tree_* keys), the child's does not carry the parent's.
+func TestOnProcessState_TreeFeaturesAggregateUpTheTree(t *testing.T) {
 	cp := newTestControlPlane(t)
 	ch := make(chan *pb.KBEvent, 4)
 	cp.subMu.Lock()
@@ -763,14 +763,16 @@ func TestOnProcessState_TreeFeaturesJoinSiblings(t *testing.T) {
 
 	reader := &ipc.ProcessStateMsg{PID: 301, PPID: 300, StartTimeNs: 1, Comm: "cat"}
 	reader.DimScore[dimFileIdx] = 80
-	conn := &ipc.ProcessStateMsg{PID: 302, PPID: 300, StartTimeNs: 2, Comm: "nc"}
-	conn.DimScore[dimNetworkIdx] = 70
+	parent := &ipc.ProcessStateMsg{PID: 300, PPID: 200, StartTimeNs: 0, Comm: "python"}
+	parent.DimScore[dimNetworkIdx] = 15
 	cp.OnProcessState(reader)
-	<-ch
-	cp.OnProcessState(conn)
+	if md := (<-ch).Metadata; md["tree_dim_network"] != "0.00" || md["tree_file_net"] != "0.00" {
+		t.Fatalf("child must not see its parent's evidence: %v", md)
+	}
+	cp.OnProcessState(parent)
 	md := (<-ch).Metadata
-	if md["tree_dim_file"] != "80.00" || md["tree_dim_network"] != "70.00" || md["tree_file_net"] != "70.00" {
-		t.Fatalf("connector did not see the reader: %v", md)
+	if md["tree_dim_file"] != "80.00" || md["tree_dim_network"] != "15.00" || md["tree_file_net"] != "15.00" {
+		t.Fatalf("parent did not see its child: %v", md)
 	}
 	if md["dim_file"] != "0.00" {
 		t.Errorf("per-process dim_file must stay the process's own, got %q", md["dim_file"])

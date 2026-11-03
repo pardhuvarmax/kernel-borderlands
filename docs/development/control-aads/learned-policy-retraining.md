@@ -60,18 +60,25 @@ asked for destination class and bytes-sent as new features. They split into two 
   changes an enforcement decision. Not yet measured on a corpus (the existing corpora predate it and
   every lab destination is loopback); validate on a fresh capture before relying on it.
 
-- **Process-family evidence (`tree_dim_file`, `tree_dim_network`, `tree_file_net`, schema v4, implemented 2026-11-02, plan items B2/B5 Go part).**
-  kbd keeps the latest file/network dimension per process and, for each `process_state`, exports the
-  highest of each over the process's family (its parent and that parent's other children, including ones
-  that exited in the last 120 s) plus their minimum, which is high only when both kinds of evidence exist
-  in the family. It is built from `parent_pid`, already on the wire, so there is no wire change
-  (`kb-control-plane/internal/controlplane/tree.go`). PIDs are host-namespace (the sensor reads `tgid` and
-  `real_parent->tgid`), so a container's init is an ordinary parent, not PID 1. Limits: one level up and
-  across only (not the whole ancestry, which would merge everything under systemd/sshd); a child
-  re-parented to init after its parent dies leaves the family; parents with more than 256 children are
-  sampled. This is the offline per-process stand-in for the tree-level rule that separated the matched
-  pairs 5/5 vs 0/5 in `20261031T193756`; **it has not been measured on any corpus yet** (needs a fresh
-  capture and a retrain, Workstream A).
+- **Process-tree evidence (`tree_dim_file`, `tree_dim_network`, `tree_file_net`, schema v4, implemented 2026-11-02, corrected 2026-11-03; plan items B2/B5 Go part).**
+  kbd keeps, per process, the highest file and network dimension score it has shown and exports, per
+  `process_state`, the highest of each over the process's **subtree** (itself and its descendants, including
+  ones that exited in the last 120 s) plus their minimum, which is high only when both kinds of evidence exist
+  in the subtree. Built from `parent_pid`, already on the wire: no wire change
+  (`kb-control-plane/internal/controlplane/tree.go`). PIDs are host-namespace, so a container's init is an
+  ordinary parent. Two defects were found by replaying the lab corpora and fixed: the last `process_state` a
+  process sends has `ppid = 0` and zeroed dimensions (it must not detach the process or erase its evidence),
+  and an earlier parent-plus-siblings scope missed the common case where the connecting process is the
+  *ancestor* of the reader (`python` runs `sudo cat /etc/shadow`, then connects itself). Limits: walk bounded to
+  6 levels and 256 nodes; a long-lived parent whose descendants collectively read sensitive files and connect
+  looks like "both" indefinitely (in the lab corpora one runner process produced most flagged background rows);
+  children re-parented to init leave the tree. **Descriptive result on the three corpora (reconstructed offline,
+  same-moment "both" = file score >= 70 and network score >= 15 in one subtree):** 35 of 110 attack and 10 of 120
+  benign executions. The 35 are `credential_dump`, `exfil_staging` and `evasion_slow`; the 10 are
+  `benign_backup_remote` and `benign_credential_report`, the pairs this document already says need destination
+  identity or bytes sent. 0 of 230 executions have both in a single process. 555,813 of 875,135 background rows
+  are flagged, from 48 processes, mostly the lab runner (see the hazard above). The scope was chosen after
+  seeing these corpora, so it must be validated on a fresh capture, not on them.
   The sensor-side B5 candidates (sensitive-file and credential counts, sequence evidence) and `bytes_sent`
   still need a wire change and are not done.
 
@@ -110,7 +117,7 @@ asked for destination class and bytes-sent as new features. They split into two 
 
 ## 4a. Training table (plan Workstream A, step 1: built 2026-11-03)
 
-`scripts/attack-lab/build_training_table.py` merges the three plan runs (230 executions, 886,140 `process_state` rows) into a features file built only through `features/schema.py`, a separate labels file with the execution-level split, and a manifest with per-feature provenance. Label columns are asserted absent from the features file. `dest_class`/`dest_port`/`dest_known` are `absent` for all three runs (their sensor predates the join), so they carry the schema default and must not be read as measured; `tree_*` are reconstructed offline, not emitted by `kbd`. Steps 2 to 7 (split-before-windowing baselines, leave-one-family-out, retraining, serving-path evaluation, shadow mode) are not done. Run `20261101T225841` (90 executions) is deliberately not in the default set: it was captured with containment active (not observe-only), which truncates attacks.
+`scripts/attack-lab/build_training_table.py` merges the three plan runs (230 executions, 886,140 `process_state` rows) into a features file built only through `features/schema.py`, a separate labels file with the execution-level split, and a manifest with per-feature provenance. Label columns are asserted absent from the features file. `dest_class`/`dest_port`/`dest_known` are `absent` for all three runs (their sensor predates the join), so they carry the schema default and must not be read as measured; `tree_*` are reconstructed offline (subtree rules of `tree.go`), not emitted by `kbd`. Steps 2 to 7 (split-before-windowing baselines, leave-one-family-out, retraining, serving-path evaluation, shadow mode) are not done. Run `20261101T225841` (90 executions) is deliberately not in the default set: it was captured with containment active (not observe-only), which truncates attacks.
 
 ## 4b. Capture tooling and observe-only mode (implemented)
 

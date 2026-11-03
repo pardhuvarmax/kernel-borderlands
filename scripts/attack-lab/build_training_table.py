@@ -14,14 +14,17 @@ Honesty rules this script enforces:
   * a feature the run's sensor never emitted is filled with the schema default and
     listed as "absent" in the manifest, not silently treated as measured;
   * tree_* features are RECONSTRUCTED offline by replaying the process_state stream
-    through the same rules as kb-control-plane/internal/controlplane/tree.go, with two
-    approximations (below). They are marked "reconstructed", not "emitted";
+    through the same rules as kb-control-plane/internal/controlplane/tree.go (subtree
+    aggregation), with two approximations (below). They are marked "reconstructed",
+    not "emitted";
   * nothing here reads label_* columns while building features.
 
 Approximations in the tree_* replay (events tables carry no process_exit rows and no
 start_time_ns): a process stops contributing 120 s after its LAST observed state (kbd:
 120 s after its exit, 10 min if never seen to exit); PID reuse is detected only by a
-parent change, not by start time.
+parent change, not by start time. Known hazard, not corrected here: a long-lived parent
+(in the lab corpora, the runner process) whose descendants collectively read sensitive
+files and connect looks like "both" for as long as it lives.
 
 Usage: build_training_table.py [--out DIR] [RUN_DIR ...]
 """
@@ -43,7 +46,8 @@ from features import schema  # noqa: E402
 ZONE_ID = {"SAFE": 0, "SUSPICIOUS": 1, "BORDERLANDS": 2}
 DEFAULT_RUNS = ["20261031T183320", "20261031T193756", "20261031T201927"]
 TREE_TTL_NS = 120 * 1_000_000_000
-TREE_MAX_FAMILY = 256
+TREE_MAX_VISIT = 256
+TREE_MAX_DEPTH = 6
 KEYS = ["run_id", "row_id", "pid", "recv_ns"]
 EMITTED_BY_KBD = {"score", "zone", "is_root", "score_delta", "dim_process", "dim_syscall",
                   "dim_privilege", "dim_file", "dim_network", "dim_memory"}
@@ -52,7 +56,10 @@ TREE = ["tree_dim_file", "tree_dim_network", "tree_file_net"]
 
 def replay_tree(ps):
     """ps: process_state rows of ONE run (pid, ppid, recv_ns, dim_file, dim_network),
-    in recv_ns order. Returns three arrays aligned with ps (tree.go's Update)."""
+    in recv_ns order. Returns three arrays aligned with ps: the subtree aggregates of
+    tree.go's Update (max file, max network, min of the two). Rules mirror tree.go:
+    evidence only goes up; ppid 0 = unknown (the exit snapshot), keep the parent;
+    descendants feed ancestors; walk bounded to TREE_MAX_DEPTH levels / TREE_MAX_VISIT nodes."""
     n = len(ps)
     out_f, out_n, out_b = np.zeros(n), np.zeros(n), np.zeros(n)
     nodes = {}      # pid -> [ppid, file, net, last_seen_ns]
@@ -62,27 +69,26 @@ def replay_tree(ps):
     for i in range(n):
         pid, ppid, t = int(pid_a[i]), int(ppid_a[i]), int(t_a[i])
         node = nodes.get(pid)
-        if node is not None and node[0] != ppid:           # reused pid / reparented
+        if node is not None and ppid == 0:
+            ppid = node[0]                                   # unknown: keep the parent
+        if node is not None and node[0] != ppid:             # reused pid / reparented
             children.get(node[0], set()).discard(pid)
             node = None
         if node is None:
             node = nodes[pid] = [ppid, 0.0, 0.0, t]
-        node[1], node[2], node[3] = float(f_a[i]), float(n_a[i]), t
+        node[1], node[2], node[3] = max(node[1], float(f_a[i])), max(node[2], float(n_a[i])), t
         if ppid > 1:
             children.setdefault(ppid, set()).add(pid)
-        f, nt = node[1], node[2]
-        if ppid > 1:
-            fam = [nodes[ppid]] if ppid in nodes else []
-            scanned = 0
-            for sib in children.get(ppid, ()):
-                scanned += 1
-                if scanned > TREE_MAX_FAMILY:
-                    break
-                if sib != pid and sib in nodes:
-                    fam.append(nodes[sib])
-            for m in fam:
-                if t - m[3] <= TREE_TTL_NS:
-                    f, nt = max(f, m[1]), max(nt, m[2])
+        f = nt = 0.0
+        stack, visited = [(pid, 0)], 0
+        while stack and visited < TREE_MAX_VISIT:
+            p, d = stack.pop()
+            visited += 1
+            m = nodes.get(p)
+            if m is not None and t - m[3] <= TREE_TTL_NS:
+                f, nt = max(f, m[1]), max(nt, m[2])
+            if d < TREE_MAX_DEPTH:
+                stack.extend((c, d + 1) for c in children.get(p, ()))
         out_f[i], out_n[i], out_b[i] = f, nt, min(f, nt)
     return out_f, out_n, out_b
 
