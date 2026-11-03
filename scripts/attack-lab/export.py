@@ -36,6 +36,11 @@ import labeling
 ZONE_ORDER = {"SAFE": 0, "SUSPICIOUS": 1, "BORDERLANDS": 2}
 ZONE_NAME = {0: "SAFE", 1: "SUSPICIOUS", 2: "BORDERLANDS"}
 DIMS = ["process", "syscall", "privilege", "file", "network", "memory"]
+# Schema v2+ metadata keys kbd emits on process_state (absent in older runs -> empty column).
+# Names match kb-aads/features/schema.py; all are numeric.
+EXTRA_FEATURES = ["dest_class", "dest_port", "dest_known", "tree_dim_file", "tree_dim_network", "tree_file_net",
+                  "sensitive_file_count", "cred_change_count", "dropped_events", "seq_cred_then_connect",
+                  "seq_shell_then_connect", "seq_connect_then_memexec", "telemetry_gap"]
 
 
 def build_events(real, executions):
@@ -65,6 +70,8 @@ def build_events(real, executions):
         }
         for d in DIMS:
             row[f"dim_{d}"] = float(md[f"dim_{d}"]) if md.get(f"dim_{d}") else None
+        for k in EXTRA_FEATURES:
+            row[k] = float(md[k]) if md.get(k) not in (None, "") else None
         if hit:
             row.update(label_execution_id=hit["execution_id"], label_scenario=hit["scenario"],
                        label_family=hit["family"], label_kind=hit["kind"],
@@ -135,7 +142,9 @@ Captured on `{host}` (kernel {kernel}), package {package}, feature schema v{sche
 Telemetry (schema v1; these are the only columns a model may use):
 `recv_ns`, `recv_utc`, `sensor_ts`, `pid`, `ppid`, `comm`, `event_type`, `ema_score`, `zone`, `uid`, `is_root`,
 `composite`, `event_count`, `dim_process`, `dim_syscall`, `dim_privilege`, `dim_file`, `dim_network`, `dim_memory`,
-`feature_schema`. For `zone_transition` rows also `from_zone`, `to_zone`; `allowlisted` is set by kbd when an
+`feature_schema`, and from schema v2 on (empty for older runs) `dest_class`, `dest_port`, `dest_known`, `tree_dim_file`,
+`tree_dim_network`, `tree_file_net`, `sensitive_file_count`, `cred_change_count`, `dropped_events`, `seq_cred_then_connect`,
+`seq_shell_then_connect`, `seq_connect_then_memexec`, `telemetry_gap`. For `zone_transition` rows also `from_zone`, `to_zone`; `allowlisted` is set by kbd when an
 allowlisted, verified system binary was exempted from automatic containment.
 `ema_score` is kbd's `KBEvent.score_delta` (a misnomer: it carries the EMA score).
 `recv_ns` is wall-clock time the event was received; `sensor_ts` is the sensor's own clock (not wall time).

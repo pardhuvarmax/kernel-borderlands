@@ -107,10 +107,18 @@ def build_run(run_dir):
         "score_delta": ps.score_delta, "dim_process": ps.dim_process, "dim_syscall": ps.dim_syscall,
         "dim_privilege": ps.dim_privilege, "dim_file": ps.dim_file, "dim_network": ps.dim_network,
         "dim_memory": ps.dim_memory, "telemetry_gap": 0.0})
-    for col in ("dest_class", "dest_port", "dest_known"):
-        if col in ps.columns:
+    emitted = set()
+    for col in ("dest_class", "dest_port", "dest_known", "sensitive_file_count", "cred_change_count",
+                "dropped_events", "seq_cred_then_connect", "seq_shell_then_connect",
+                "seq_connect_then_memexec", "telemetry_gap") + tuple(TREE):
+        if col in ps.columns and ps[col].notna().any():       # kbd emitted it in this run
             raw[col] = ps[col]
-    if "ppid" in ps.columns:
+            emitted.add(col)
+    if "telemetry_gap" in emitted:
+        # kbd omits the key for a pid that sent no counters; serving (from_event_message) reads that as 0
+        # when the dimensions are present, so do the same here instead of the schema's "unknown" default of 1.
+        raw["telemetry_gap"] = ps["telemetry_gap"].fillna(0.0)
+    if not set(TREE) <= emitted and "ppid" in ps.columns:     # older run: reconstruct offline
         tf, tn, tb = replay_tree(ps)
         raw["tree_dim_file"], raw["tree_dim_network"], raw["tree_file_net"] = tf, tn, tb
 
@@ -119,7 +127,7 @@ def build_run(run_dir):
     for name, lo, hi, default in schema.FEATURES:
         if name in raw:
             v = raw[name].fillna(default).astype(float).values
-            prov[name] = "reconstructed" if name in TREE else "emitted"
+            prov[name] = "reconstructed" if (name in TREE and name not in emitted) else "emitted"
         else:
             v = np.full(len(raw), default)
             prov[name] = "absent (schema default)"
@@ -127,8 +135,8 @@ def build_run(run_dir):
     feat = pd.DataFrame(cols)
     # the vectorised build must equal the schema's own build_vector
     for i in np.random.RandomState(0).choice(len(raw), min(500, len(raw)), replace=False):
-        assert np.allclose(feat.iloc[i].values, schema.build_vector(raw.iloc[i].to_dict())), \
-            "feature build diverged from schema.py"
+        row = {k: v for k, v in raw.iloc[i].to_dict().items() if pd.notna(v)}   # absent key = missing, as in serving
+        assert np.allclose(feat.iloc[i].values, schema.build_vector(row)), "feature build diverged from schema.py"
 
     keys = pd.DataFrame({"run_id": run_id, "row_id": ps.row_id.values, "pid": ps.pid.values, "recv_ns": ps.recv_ns.values})
     features = pd.concat([keys, feat], axis=1)

@@ -41,7 +41,35 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from payloads import SCENARIOS  # noqa: E402
 
-SCHEMA_VERSION = "1"  # kb-aads/features/schema.py
+def _schema_version():
+    """The feature-schema version of the checkout this runner lives in (kb-aads/features/schema.py);
+    "unknown" when that file is not next to the scripts. It used to be a hard-coded "1"."""
+    try:
+        sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..", "kb-aads")))
+        from features import schema
+        return schema.SCHEMA_VERSION
+    except Exception:
+        return "unknown"
+
+
+SCHEMA_VERSION = _schema_version()
+
+
+def lab_infra_pids():
+    """This process and its ancestors (the runner, its shell, sshd, ...). They outlive every
+    execution and are ancestors of all payloads, so any subtree-aggregated feature sees them as
+    'both file and network evidence' for the whole run. Recorded so analysis can label them
+    lab infrastructure instead of counting them as real background noise."""
+    pids, pid = [], os.getpid()
+    while pid > 1 and pid not in pids:
+        pids.append(pid)
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                pid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            break
+    return pids
+
 POLL_S = 0.05
 
 
@@ -240,7 +268,7 @@ def main():
     manifest = {
         "run_id": run_id, "host": platform.node(), "kernel": platform.release(),
         "package": sh(["dpkg-query", "-W", "-f=${Version}", "kernel-borderlands"]) or sh(["pacman", "-Q", "kernel-borderlands"]),
-        "feature_schema": SCHEMA_VERSION, "seed": a.seed, "repeats": a.repeats,
+        "feature_schema": SCHEMA_VERSION, "lab_infra_pids": lab_infra_pids(), "seed": a.seed, "repeats": a.repeats,
         "scenarios": names, "kbd_stats_before": kbd_stats(a.socket),
         "containment_active": observe_only is not True,
         "started_wall_ns": time.time_ns(),
