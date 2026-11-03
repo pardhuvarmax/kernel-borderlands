@@ -1,9 +1,10 @@
 # LID-DS 2021 Setup Notes (Tier 3, Attack Lab Plan) — 2026-11-02, updated 2026-11-03
 
-Status: **11 of 15 scenarios build cleanly (victim+normal+exploit, or normal+exploit
-where the scenario has no victim image); 2 partial (missing only `normal`); 2 blocked
-(`ubuntu:13.04`). No capture run yet; `kbvm` needs to be re-isolated to host-only before
-one — see "Next steps" below.**
+Status: **13 of 15 scenarios build cleanly (victim+normal+exploit, or normal+exploit
+where the scenario has no victim image); 2 blocked (`ubuntu:13.04`). No capture run yet.
+`kbvm` is currently host-only/isolated (verified from the host: only route is
+`192.168.56.0/24`, no default route, Tailscale unreachable) — see "Next steps" below for
+what's still needed before a real run.**
 Per `scripts/attack-lab/README.md`'s "Real exploits: LID-DS 2021" section and the Attack
 Lab Plan (`~/Downloads/Kernel Borderlands Attack Lab Plan.md`, Nov 1 2026), LID-DS lives in
 its own checkout on `kbvm` (`~/LID-DS`), **never copied into this repo** (GPL-3.0). This
@@ -25,19 +26,17 @@ is already committed — see `scripts/attack-lab/lidds_runner.py` and its README
 ## Docker image build results (`build_all.sh`, 15 scenarios)
 
 **First pass** (before any fix) is kept below for history. **Current state**, after the
-blocker #2/#3 fixes (archive repos, Chromium swap) plus a second round that found and
-fixed the archive-repo fix missing from 5 **victim** Dockerfiles whose base image sits on
-an EOL Debian release indirectly (`vulhub/rails:5.0.7`, `ruby:2.5.1`,
-`apache/unomi:1.5.1`, `vulnerables/web-dvwa` ×2) — the first fix pass only patched
-Dockerfiles that `FROM debian:9.2`/`debian:10` directly, missing these. Confirmed by
-running `/etc/os-release` inside each base image (bypassing its custom `ENTRYPOINT` with
-`docker run --entrypoint sh`): all 5 are Debian 9 (stretch). Verified by rebuilding each
-scenario's own `./build_images.sh` end to end, not just a standalone `docker build`.
+blocker #2/#3 fixes (archive repos, Chromium swap), a second round that fixed the
+archive-repo fix missing from 5 **victim** Dockerfiles whose base image sits on an EOL
+Debian release indirectly (`vulhub/rails:5.0.7`, `ruby:2.5.1`, `apache/unomi:1.5.1`,
+`vulnerables/web-dvwa` ×2), and a third round that resolved both remaining blocker #4
+`COPY`/`ADD` failures (EPS_CWE-434, ZipSlip — see blocker #4 below for the root cause and
+fix of each). Confirmed by rebuilding each scenario's own `./build_images.sh` end to end,
+not just a standalone `docker build`.
 
 | Status (current) | Scenarios |
 | --- | --- |
-| Complete (victim+normal+exploit, or normal+exploit where no victim is used) | CVE-2012-2122, CVE-2017-12635_6, CVE-2017-7529, CVE-2018-3760, CVE-2019-5418, CVE-2020-13942, CVE-2020-23839, CVE-2020-9484, CWE-89-SQL-injection, Juice-Shop, PHP_CWE-434 |
-| Partial (2/3 — missing `normal` only) | EPS_CWE-434 (blocker #4, `/images` COPY error — not yet identified which scenario's Dockerfile this actually belongs to; a grep for `images`-named COPY lines across all 15 scenarios found nothing besides `EPS_CWE-434/exploit`'s unrelated, already-working `COPY image_0501.eps`), ZipSlip (blocker #4, confirmed: `ZipSlip/normal/Dockerfile` does `COPY filesplits/ /home/filesplits/` but that directory doesn't exist in the checkout — a missing data file, not a config fix) |
+| Complete (victim+normal+exploit, or normal+exploit where no victim is used) | CVE-2012-2122, CVE-2017-12635_6, CVE-2017-7529, CVE-2018-3760, CVE-2019-5418, CVE-2020-13942, CVE-2020-23839, CVE-2020-9484, CWE-89-SQL-injection, EPS_CWE-434, Juice-Shop, PHP_CWE-434, ZipSlip |
 | Blocked (`ubuntu:13.04`, blocker #1) | Bruteforce_CWE-307 (victim + exploit — exploit also separately fails in the vendored Metasploit `bundle install` step, exit 5, not triaged), CVE-2014-0160/Heartbleed (victim + exploit, same two blockers) |
 
 **Relevance to KB, if prioritizing which blockers to chase further:** KB's eBPF sensor
@@ -46,12 +45,11 @@ sensitive-file access, and network connections — not in-memory/protocol-only f
 Bruteforce and Heartbleed are the two lowest-relevance scenarios against that hook set
 (Heartbleed is a pure in-memory OpenSSL read overrun with no process/file/privilege
 signature; Bruteforce is mostly repeated auth/network connections). The `ubuntu:13.04`
-and Metasploit-build blockers were deliberately left unfixed this round on that basis —
-the 11 now-complete scenarios already cover the higher-relevance RCE/file-access/
-path-traversal cases (CVE-2020-9484 Tomcat deserialization, CVE-2020-13942 Unomi
-expression injection, CVE-2017-12635_6 CouchDB priv-esc→RCE, EPS/PHP_CWE-434 file
-upload, ZipSlip path-traversal write, CVE-2019-5418/CVE-2018-3760 Rails path traversal
-reads).
+and Metasploit-build blockers remain deliberately unfixed on that basis — the 13
+now-complete scenarios already cover the higher-relevance RCE/file-access/path-traversal
+cases (CVE-2020-9484 Tomcat deserialization, CVE-2020-13942 Unomi expression injection,
+CVE-2017-12635_6 CouchDB priv-esc→RCE, EPS/PHP_CWE-434 file upload, ZipSlip
+path-traversal write, CVE-2019-5418/CVE-2018-3760 Rails path traversal reads).
 
 <details>
 <summary>First build pass (before blocker #2/#3 fixes) — kept for history</summary>
@@ -114,18 +112,41 @@ reads).
    benchmark if it's presented as an unqualified reproduction; say explicitly that
    browser-driven "normal" traffic was regenerated with Chromium due to the glibc
    incompatibility, not with the original Chrome build.
-4. Two `COPY`-step failures (`"/filesplits": not found`, `"/images": not found`) seen in the
-   original `build_all.log`. **2026-11-03: one triaged.** `/filesplits` is
-   `ZipSlip/normal/Dockerfile`'s `COPY filesplits/ /home/filesplits/` — the `filesplits/`
-   directory is genuinely absent from the checkout, a missing data file rather than a config
-   problem; needs sourcing or regenerating, not yet done. `/images` is still unidentified: a
-   grep for `images`-named `COPY` lines across all 15 scenarios' Dockerfiles found only
-   `EPS_CWE-434/exploit/Dockerfile`'s `COPY image_0501.eps` (singular file, already builds
-   fine) — not the error's source. The failure recurs in rebuild logs around a
-   `debian:9.2`+archive-fix+`curl/python3/pip` sequence that looks like `EPS_CWE-434/normal`,
-   but that Dockerfile's only `COPY` (per direct inspection) is `COPY normal.py
-   /home/normal.py` — no `images` reference. Needs a fresh, isolated `docker build` of just
-   that one Dockerfile with full output to pin down the real source.
+4. Two `COPY`/`ADD`-step failures (`"/filesplits": not found`, `"/images": not found`) seen
+   in the original `build_all.log`. **Both resolved 2026-11-03.**
+   - **`/images`** (EPS_CWE-434/normal) — the earlier grep for `images`-named `COPY` lines
+     missed it because `EPS_CWE-434/normal/Dockerfile` uses `ADD images /home/images`, not
+     `COPY`. Root cause: `build_images.sh` already calls a data-prep script
+     (`normal/download_images.py`, downloads 500 placeholder images from
+     `picsum.photos` and converts each to EPS via ImageMagick's `convert`) to generate that
+     directory, but invokes it with the **system** `python3`, which lacks the `wget` package
+     the script needs — it crashed immediately with `ModuleNotFoundError`, and since the
+     shell script has no `set -e`, the build proceeded anyway and failed on the missing
+     directory. The project's own `venv37` has `wget` installed (from LID-DS's
+     `requirements.txt`). Fix: ran `~/LID-DS/venv37/bin/python3 normal/download_images.py`
+     directly (kbvm bridged to the internet for this step, ~3 minutes to download+convert
+     all 500 images) — no code change needed. `normal_eps` now builds clean.
+   - **`/filesplits`** (ZipSlip/normal) — same shape of problem (`COPY filesplits/
+     /home/filesplits/`, directory missing, generator script exists but uses system
+     `python3`): `prepare_zips.py` downloads a German Wikipedia "abstract" XML dump
+     (`dumps.wikimedia.org/dewiki/latest/dewiki-latest-abstract1.xml.gz`), splits it into
+     ~2MB chunks, zips each one. Running it correctly (via `venv37`) surfaced a second,
+     independent problem: the download now returns `403 Forbidden`, and investigating
+     further found the cause isn't a missing header — Wikimedia has **discontinued
+     "abstract" dumps entirely**: absent from dewiki's current `latest/` index and from
+     every dated snapshot checked back to 2025-01-01. The upstream data source LID-DS's
+     2021 script depends on no longer exists. Fix: wrote
+     `scenarios/ZipSlip/normal/gen_zipslip_filesplits.py` (kbvm-local, not in this repo) to
+     generate synthetic XML in the same shape (root element, many `<doc><title>/<abstract>`
+     entries, well-formed) and zip it into the same ~2MB-chunk pattern `normal.py` expects
+     (`glob.glob("/home/filesplits/*.xml.zip")`). The ZipSlip CVE is a zip-extraction
+     path-traversal bug in the victim container — its vulnerability doesn't depend on the
+     zip's content being real Wikipedia text, only on realistic file count/size for "normal"
+     upload traffic. **Caveat for any write-up that cites this as reproducing LID-DS**: like
+     the Chromium/Chrome substitution (blocker #3), this is a content substitution — the
+     "normal" traffic's payload is synthetic data, not the original Wikipedia corpus; say so
+     explicitly rather than presenting it as an unqualified reproduction. `normal_zipslip`
+     now builds clean.
 
 ## A real, independent finding from this session: kbvm disk exhaustion
 
@@ -142,22 +163,22 @@ freeze, since free space wasn't checked at the time, but worth monitoring going 
 
 ## Next steps, in priority order
 
-1. ~~Finish the rebuild.~~ **Done 2026-11-03** — 11/15 scenarios now build complete, 2
-   partial, 2 blocked; see the results table above.
-2. Resolve blocker #1 (`ubuntu:13.04`) and the Metasploit `bundle install` failure, if
+1. ~~Finish the rebuild.~~ **Done 2026-11-03** — 13/15 scenarios now build complete, 2
+   blocked; see the results table above.
+2. ~~Identify and fix the `/images`/`filesplits` COPY failures.~~ **Done 2026-11-03** —
+   both resolved; see blocker #4 above.
+3. Resolve blocker #1 (`ubuntu:13.04`) and the Metasploit `bundle install` failure, if
    Heartbleed/Bruteforce turn out to be needed after all — deliberately deprioritized this
    round as the two lowest-relevance scenarios against KB's eBPF hook set (no process
    exec/file-access/privilege-change signature; see the "Relevance to KB" note above).
-3. Identify the scenario behind the `/images` COPY failure (still open — see blocker #4),
-   and source/regenerate ZipSlip's missing `filesplits/` data directory.
 4. **Before any real `lidds_runner.py --ack-isolated` run** (not just image builds): confirm
-   `kbvm` is network-isolated (host-only, `vboxnet0`, no default route — this session set
-   that up and verified it from outside the guest; see networking section of the session
-   history) and `kbd` is in the mode you intend (observe-only still needs the operator's
-   explicit go-ahead per `[[kbvm-environment]]`/`Attack-LabTest-Suite.md` §6.2, same
-   standing rule as the scripted-scenario lab).
-5. Carry the Chrome→Chromium substitution caveat (blocker #3) into any paper/report text
-   that cites LID-DS as the reproduced benchmark.
+   `kbvm` is network-isolated (host-only, `vboxnet0`, no default route — verified from the
+   host as of this update) and `kbd` is in the mode you intend (observe-only still needs
+   the operator's explicit go-ahead per `[[kbvm-environment]]`/`Attack-LabTest-Suite.md`
+   §6.2, same standing rule as the scripted-scenario lab).
+5. Carry both substitution caveats into any paper/report text that cites LID-DS as the
+   reproduced benchmark: Chrome→Chromium (blocker #3) and ZipSlip's synthetic
+   filesplits data replacing the now-discontinued Wikipedia abstract dump (blocker #4).
 
 ## Documentation consulted
 

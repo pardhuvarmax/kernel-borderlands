@@ -24,6 +24,31 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ### Fixed
 
+- **LID-DS Tier-3 attack lab: the last 2 of 15 scenarios' `normal` images failed to build,
+  both from the same shape of bug — a data-prep script invoked with the system `python3`
+  instead of the project's `venv37`, where its actual dependencies are installed.**
+  `EPS_CWE-434/normal/Dockerfile`'s `ADD images /home/images` and
+  `ZipSlip/normal/Dockerfile`'s `COPY filesplits/ /home/filesplits/` both referenced
+  directories that `build_images.sh` is supposed to generate first
+  (`normal/download_images.py`, `prepare_zips.py` respectively), but both scripts crashed
+  immediately with `ModuleNotFoundError` (missing `wget`) under system `python3`, and
+  `build_images.sh` has no `set -e` so the build proceeded anyway and failed on the missing
+  directory. Running each script with `~/LID-DS/venv37/bin/python3` instead fixed
+  `EPS_CWE-434` outright (500 placeholder images downloaded from picsum.photos and
+  converted to EPS via ImageMagick, ~3 minutes). `ZipSlip` surfaced a second, independent
+  problem once the script actually ran: its download target
+  (`dumps.wikimedia.org/dewiki/latest/dewiki-latest-abstract1.xml.gz`) now returns
+  `403 Forbidden` — confirmed this isn't a missing-header issue but that Wikimedia has
+  discontinued "abstract" dumps entirely (absent from dewiki's current index and every
+  dated snapshot checked back to 2025-01-01). Fixed with a local substitute-data generator
+  (`gen_zipslip_filesplits.py`, kbvm-only, not in this repo) producing synthetic XML in the
+  same shape/size, since the ZipSlip CVE's zip-extraction path-traversal bug doesn't depend
+  on the zip payload being real Wikipedia text. Both are content substitutions and are
+  flagged as such in the doc, same as the existing Chrome→Chromium caveat. LID-DS scenario
+  build status is now 13/15 complete, 2 blocked on `ubuntu:13.04` (unchanged, deliberately
+  deprioritized). `kbvm` was bridged to the internet for this work and re-isolated to
+  host-only afterward, verified from the host (no default route, Tailscale unreachable).
+  See `docs/development/attack-lab-lidds-setup.md` for full detail.
 - **LID-DS Tier-3 attack lab: 5 of 15 scenarios' victim images failed to build because the
   archive.debian.org EOL-repo fix (`docs/development/attack-lab-lidds-setup.md` blocker #2)
   had only been applied to Dockerfiles that `FROM debian:9.2`/`debian:10` directly.** Found
