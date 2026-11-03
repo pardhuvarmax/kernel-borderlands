@@ -1,6 +1,9 @@
-# LID-DS 2021 Setup Notes (Tier 3, Attack Lab Plan) — 2026-11-02
+# LID-DS 2021 Setup Notes (Tier 3, Attack Lab Plan) — 2026-11-02, updated 2026-11-03
 
-Status: **environment provisioned, image builds partially working, no capture run yet**.
+Status: **11 of 15 scenarios build cleanly (victim+normal+exploit, or normal+exploit
+where the scenario has no victim image); 2 partial (missing only `normal`); 2 blocked
+(`ubuntu:13.04`). No capture run yet; `kbvm` needs to be re-isolated to host-only before
+one — see "Next steps" below.**
 Per `scripts/attack-lab/README.md`'s "Real exploits: LID-DS 2021" section and the Attack
 Lab Plan (`~/Downloads/Kernel Borderlands Attack Lab Plan.md`, Nov 1 2026), LID-DS lives in
 its own checkout on `kbvm` (`~/LID-DS`), **never copied into this repo** (GPL-3.0). This
@@ -21,13 +24,37 @@ is already committed — see `scripts/attack-lab/lidds_runner.py` and its README
 
 ## Docker image build results (`build_all.sh`, 15 scenarios)
 
-Table below is from the **first** build pass, before the blocker #2 and #3 fixes. A rebuild
-with both fixes applied was started but interrupted by a host suspend (see
-`[[kbvm-environment]]`-style freeze notes in session history for 2026-11-02/03) before
-finishing — re-run `sudo ~/LID-DS/build_all.sh` (or the disk-guarded
-`~/LID-DS/build_with_guard.sh`) and update this table with the real result. One scenario
-(`CVE-2018-3760/normal`) was spot-rebuilt standalone after the fixes and succeeded cleanly,
-so expect most of the "Failed"/"Partial" rows below to improve.
+**First pass** (before any fix) is kept below for history. **Current state**, after the
+blocker #2/#3 fixes (archive repos, Chromium swap) plus a second round that found and
+fixed the archive-repo fix missing from 5 **victim** Dockerfiles whose base image sits on
+an EOL Debian release indirectly (`vulhub/rails:5.0.7`, `ruby:2.5.1`,
+`apache/unomi:1.5.1`, `vulnerables/web-dvwa` ×2) — the first fix pass only patched
+Dockerfiles that `FROM debian:9.2`/`debian:10` directly, missing these. Confirmed by
+running `/etc/os-release` inside each base image (bypassing its custom `ENTRYPOINT` with
+`docker run --entrypoint sh`): all 5 are Debian 9 (stretch). Verified by rebuilding each
+scenario's own `./build_images.sh` end to end, not just a standalone `docker build`.
+
+| Status (current) | Scenarios |
+| --- | --- |
+| Complete (victim+normal+exploit, or normal+exploit where no victim is used) | CVE-2012-2122, CVE-2017-12635_6, CVE-2017-7529, CVE-2018-3760, CVE-2019-5418, CVE-2020-13942, CVE-2020-23839, CVE-2020-9484, CWE-89-SQL-injection, Juice-Shop, PHP_CWE-434 |
+| Partial (2/3 — missing `normal` only) | EPS_CWE-434 (blocker #4, `/images` COPY error — not yet identified which scenario's Dockerfile this actually belongs to; a grep for `images`-named COPY lines across all 15 scenarios found nothing besides `EPS_CWE-434/exploit`'s unrelated, already-working `COPY image_0501.eps`), ZipSlip (blocker #4, confirmed: `ZipSlip/normal/Dockerfile` does `COPY filesplits/ /home/filesplits/` but that directory doesn't exist in the checkout — a missing data file, not a config fix) |
+| Blocked (`ubuntu:13.04`, blocker #1) | Bruteforce_CWE-307 (victim + exploit — exploit also separately fails in the vendored Metasploit `bundle install` step, exit 5, not triaged), CVE-2014-0160/Heartbleed (victim + exploit, same two blockers) |
+
+**Relevance to KB, if prioritizing which blockers to chase further:** KB's eBPF sensor
+hooks (`docs/architecture/hookpoints.md`) see process fork/exec, privilege changes,
+sensitive-file access, and network connections — not in-memory/protocol-only flaws.
+Bruteforce and Heartbleed are the two lowest-relevance scenarios against that hook set
+(Heartbleed is a pure in-memory OpenSSL read overrun with no process/file/privilege
+signature; Bruteforce is mostly repeated auth/network connections). The `ubuntu:13.04`
+and Metasploit-build blockers were deliberately left unfixed this round on that basis —
+the 11 now-complete scenarios already cover the higher-relevance RCE/file-access/
+path-traversal cases (CVE-2020-9484 Tomcat deserialization, CVE-2020-13942 Unomi
+expression injection, CVE-2017-12635_6 CouchDB priv-esc→RCE, EPS/PHP_CWE-434 file
+upload, ZipSlip path-traversal write, CVE-2019-5418/CVE-2018-3760 Rails path traversal
+reads).
+
+<details>
+<summary>First build pass (before blocker #2/#3 fixes) — kept for history</summary>
 
 | Status (first pass, pre-fix) | Scenarios |
 | --- | --- |
@@ -35,6 +62,8 @@ so expect most of the "Failed"/"Partial" rows below to improve.
 | Partial (2/3 images) | CVE-2012-2122, CVE-2017-12635_6, CVE-2017-7529, CVE-2019-5418, ZipSlip |
 | Minimal (1/3) | EPS_CWE-434, PHP_CWE-434 |
 | Failed (0/3) | Bruteforce_CWE-307, CVE-2014-0160 (Heartbleed), CVE-2018-3760, CVE-2020-13942, CVE-2020-23839, CWE-89-SQL-injection, Juice-Shop |
+
+</details>
 
 ## Known blockers (in the vendored `~/LID-DS` checkout, not this repo)
 
@@ -51,6 +80,15 @@ so expect most of the "Failed"/"Partial" rows below to improve.
    `/etc/apt/apt.conf.d/99archive`. Applied to 16 Dockerfiles across 11 scenarios (every
    `FROM debian:9.2`/`FROM debian:10` in the checkout). This fix is **local to kbvm's
    `~/LID-DS` checkout only** — re-cloning LID-DS loses it; reapply before rebuilding.
+   **2026-11-03 follow-up:** this first pass only caught Dockerfiles that `FROM debian:X`
+   directly. 5 victim Dockerfiles `FROM` a third-party image itself built on an EOL Debian
+   release — `CVE-2018-3760/victim` (`vulhub/rails:5.0.7`), `CVE-2019-5418/victim`
+   (`ruby:2.5.1`), `CVE-2020-13942/victim` (`apache/unomi:1.5.1`), `CWE-89-SQL-injection/victim`
+   and `PHP_CWE-434/victim` (both `vulnerables/web-dvwa`) — and needed the same fix applied
+   separately. Confirmed each base image's codename (`docker run --rm --entrypoint sh <image>
+   -c "cat /etc/os-release"`, bypassing the image's own `ENTRYPOINT`, which otherwise runs
+   its app server instead of the detection command) before patching: all 5 are Debian 9
+   (stretch). All 5 now build; see the results table above.
 3. **Chrome/glibc incompatibility (blocked most "normal"/browser-driving containers)** — the
    shared `normal/Dockerfile` template (debian:9.2 + `xvfb` + `google-chrome-stable`, used by
    13 Dockerfiles across 10 scenarios, 12 of them via Selenium + `chromedriver`, 1 via plain
@@ -77,8 +115,17 @@ so expect most of the "Failed"/"Partial" rows below to improve.
    browser-driven "normal" traffic was regenerated with Chromium due to the glibc
    incompatibility, not with the original Chrome build.
 4. Two `COPY`-step failures (`"/filesplits": not found`, `"/images": not found`) seen in the
-   original `build_all.log` — not triaged; likely a missing data file expected by a specific
-   scenario's build context (not yet identified which scenario).
+   original `build_all.log`. **2026-11-03: one triaged.** `/filesplits` is
+   `ZipSlip/normal/Dockerfile`'s `COPY filesplits/ /home/filesplits/` — the `filesplits/`
+   directory is genuinely absent from the checkout, a missing data file rather than a config
+   problem; needs sourcing or regenerating, not yet done. `/images` is still unidentified: a
+   grep for `images`-named `COPY` lines across all 15 scenarios' Dockerfiles found only
+   `EPS_CWE-434/exploit/Dockerfile`'s `COPY image_0501.eps` (singular file, already builds
+   fine) — not the error's source. The failure recurs in rebuild logs around a
+   `debian:9.2`+archive-fix+`curl/python3/pip` sequence that looks like `EPS_CWE-434/normal`,
+   but that Dockerfile's only `COPY` (per direct inspection) is `COPY normal.py
+   /home/normal.py` — no `images` reference. Needs a fresh, isolated `docker build` of just
+   that one Dockerfile with full output to pin down the real source.
 
 ## A real, independent finding from this session: kbvm disk exhaustion
 
@@ -95,13 +142,14 @@ freeze, since free space wasn't checked at the time, but worth monitoring going 
 
 ## Next steps, in priority order
 
-1. **Finish the rebuild.** `kbvm`'s disk is now 200GB (grown from 100GB this session, ~98GB
-   free) so disk exhaustion shouldn't recur; re-run `sudo ~/LID-DS/build_all.sh` on the
-   bridged/internet network posture and update the results table above with real numbers.
-2. Resolve blocker #1 (`ubuntu:13.04`) separately — affects Heartbleed and Bruteforce
-   specifically; same two-phase-network-posture caveat applies once a real exploit scenario
-   is ready to run (see §4 below).
-3. Triage the two `COPY` failures (#4 above) once a scenario needing them is identified.
+1. ~~Finish the rebuild.~~ **Done 2026-11-03** — 11/15 scenarios now build complete, 2
+   partial, 2 blocked; see the results table above.
+2. Resolve blocker #1 (`ubuntu:13.04`) and the Metasploit `bundle install` failure, if
+   Heartbleed/Bruteforce turn out to be needed after all — deliberately deprioritized this
+   round as the two lowest-relevance scenarios against KB's eBPF hook set (no process
+   exec/file-access/privilege-change signature; see the "Relevance to KB" note above).
+3. Identify the scenario behind the `/images` COPY failure (still open — see blocker #4),
+   and source/regenerate ZipSlip's missing `filesplits/` data directory.
 4. **Before any real `lidds_runner.py --ack-isolated` run** (not just image builds): confirm
    `kbvm` is network-isolated (host-only, `vboxnet0`, no default route — this session set
    that up and verified it from outside the guest; see networking section of the session
