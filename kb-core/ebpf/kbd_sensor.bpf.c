@@ -43,6 +43,7 @@ char LICENSE[] SEC("license") = "GPL";
 #define KB_EVT_MEMORY_MMAP       7
 #define KB_EVT_MEMORY_MPROTECT   8
 #define KB_EVT_TLS_PLAINTEXT     9
+#define KB_EVT_PTRACE            11  // keep in sync with include/kb_scoring.h (10 = telemetry-dropped marker)
 #define KB_EVT_DROPPED_TELEMETRY 10
 
 struct kb_unified_event {
@@ -858,6 +859,43 @@ int kb_handle_process_vm_writev(struct trace_event_raw_sys_enter *ctx)
     e->prot = 0;
     e->rwx = 1;
     e->anonymous = 1;
+    KB_SUBMIT_EVENT(ctx, e);
+    return 0;
+}
+
+// ptrace(2) on ANOTHER process, restricted to the requests that attach to it
+// or change its memory/registers (the injection and debugger-takeover
+// primitives). PTRACE_TRACEME, PTRACE_CONT, PTRACE_SYSCALL, PEEK* and the
+// like are not reported: strace/gdb stepping would flood the ring buffer.
+// Sets KB_EV_PTRACE_USED in userspace. tracepoint args: [0]=request, [1]=pid.
+SEC("tracepoint/syscalls/sys_enter_ptrace")
+int kb_handle_ptrace(struct trace_event_raw_sys_enter *ctx)
+{
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    if (pid == 0) return 0;
+
+    long request = (long)ctx->args[0];
+    switch (request) {
+    case 4:       // PTRACE_POKETEXT
+    case 5:       // PTRACE_POKEDATA
+    case 6:       // PTRACE_POKEUSR
+    case 13:      // PTRACE_SETREGS
+    case 15:      // PTRACE_SETFPREGS
+    case 16:      // PTRACE_ATTACH
+    case 0x4206:  // PTRACE_SEIZE
+        break;
+    default:
+        return 0;
+    }
+
+    __u32 target_pid = (__u32)ctx->args[1];
+    if (target_pid == pid) return 0;
+
+    struct kb_unified_event *e = kb_reserve_event();
+    if (!e) return 0;
+    kb_fill_common(e, pid, KB_EVT_PTRACE);
+    e->length = target_pid;     // target process, as in process_vm_writev above
+    e->syscall_nr = (__u32)request;
     KB_SUBMIT_EVENT(ctx, e);
     return 0;
 }

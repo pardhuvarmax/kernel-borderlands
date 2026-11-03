@@ -138,6 +138,9 @@ static void score_event(const struct kb_unified_event *e,
             *dim = KB_DIM_MEMORY;
             *score = e->rwx ? 90.0 : (e->anonymous ? 25.0 : 5.0);
             break;
+        case KB_EVT_PTRACE: // attach/poke/setregs on another process
+            *dim = KB_DIM_PROCESS; *score = 60.0;
+            break;
         default:
             *dim = KB_DIM_PROCESS; *score = 0.0;
     }

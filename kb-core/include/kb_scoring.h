@@ -38,6 +38,9 @@ typedef enum {
 #define KB_EVT_NETWORK_BIND      6
 #define KB_EVT_MEMORY_MMAP       7
 #define KB_EVT_MEMORY_MPROTECT   8
+// 9 = TLS plaintext and 10 = telemetry-dropped marker are emitted by the
+// sensor but handled outside the scoring table.
+#define KB_EVT_PTRACE            11  // ptrace attach / write request on another process
 
 struct kb_unified_event {
     uint32_t pid;

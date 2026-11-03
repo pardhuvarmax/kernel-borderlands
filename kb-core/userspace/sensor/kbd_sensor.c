@@ -1735,6 +1735,10 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
                     kb_evidence_push_seq(ev, KB_SEQ_C2_PORT);
                 }
                 break;
+            case KB_EVT_PTRACE:
+                kb_evidence_set_flag(ev, KB_EV_PTRACE_USED, ts);
+                kb_evidence_push_seq(ev, KB_SEQ_PTRACE);
+                break;
             case KB_EVT_NETWORK_BIND:
                 kb_evidence_set_flag(ev, KB_EV_BIND_LISTENER, ts);
                 kb_evidence_push_seq(ev, KB_SEQ_BIND_LISTEN);
@@ -2034,6 +2038,7 @@ static const char *event_type_name(__u8 t)
         case KB_EVT_NETWORK_BIND:     return "network_bind";
         case KB_EVT_MEMORY_MMAP:      return "memory_mmap";
         case KB_EVT_MEMORY_MPROTECT:  return "memory_mprotect";
+        case KB_EVT_PTRACE:           return "ptrace";
         case 9:                       return "tls_plaintext";
         case 10:                      return "telemetry_dropped";
         default:                      return "unknown";
@@ -2272,6 +2277,10 @@ static int handle_event(void *ctx, void *data, size_t sz)
             if (bridge_fd >= 0) {
                 kb_bridge_send_net_flow(bridge_fd, e->pid, e->daddr, e->dport, e->ts_ns);
             }
+            break;
+
+        case KB_EVT_PTRACE:
+            fprintf(evout, "ptrace request=%u TargetPID=%llu\n", e->syscall_nr, (unsigned long long)e->length);
             break;
 
         case KB_EVT_NETWORK_BIND:

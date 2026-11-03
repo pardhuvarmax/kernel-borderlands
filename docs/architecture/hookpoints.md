@@ -15,7 +15,7 @@ here are additions worth considering:
 
 **Process & Execution**
 - `kprobe:do_execveat_common` — catches `execveat()` (exec from file descriptor), a common LOLBin evasion vector
-- `tracepoint:syscalls:sys_enter_ptrace` — detects ptrace attachment between processes (debugger injection, GDB-based exploitation). Proposed, not implemented: `sched:sched_process_ptrace`, named in earlier drafts, is not a real tracepoint
+- `tracepoint:syscalls:sys_enter_ptrace` — detects ptrace attachment between processes (debugger injection, GDB-based exploitation). **Implemented** (`kb_handle_ptrace`, event type 11): reports only `PTRACE_ATTACH`, `PTRACE_SEIZE`, `POKETEXT/POKEDATA/POKEUSR` and `SETREGS/SETFPREGS` on another process, not TRACEME, CONT, SYSCALL or PEEK*. `sched:sched_process_ptrace`, named in earlier drafts, is not a real tracepoint
 - `kprobe:kernel_clone` — lower-level than sched tracepoints; catches clone flags like `CLONE_NEWUSER` (unprivileged namespace abuse)
 
 **Privilege & Credential**
