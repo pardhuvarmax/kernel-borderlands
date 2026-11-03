@@ -21,7 +21,15 @@ is already committed — see `scripts/attack-lab/lidds_runner.py` and its README
 
 ## Docker image build results (`build_all.sh`, 15 scenarios)
 
-| Status | Scenarios |
+Table below is from the **first** build pass, before the blocker #2 and #3 fixes. A rebuild
+with both fixes applied was started but interrupted by a host suspend (see
+`[[kbvm-environment]]`-style freeze notes in session history for 2026-11-02/03) before
+finishing — re-run `sudo ~/LID-DS/build_all.sh` (or the disk-guarded
+`~/LID-DS/build_with_guard.sh`) and update this table with the real result. One scenario
+(`CVE-2018-3760/normal`) was spot-rebuilt standalone after the fixes and succeeded cleanly,
+so expect most of the "Failed"/"Partial" rows below to improve.
+
+| Status (first pass, pre-fix) | Scenarios |
 | --- | --- |
 | Complete (victim+normal+exploit) | CVE-2020-9484 |
 | Partial (2/3 images) | CVE-2012-2122, CVE-2017-12635_6, CVE-2017-7529, CVE-2019-5418, ZipSlip |
@@ -43,14 +51,31 @@ is already committed — see `scripts/attack-lab/lidds_runner.py` and its README
    `/etc/apt/apt.conf.d/99archive`. Applied to 16 Dockerfiles across 11 scenarios (every
    `FROM debian:9.2`/`FROM debian:10` in the checkout). This fix is **local to kbvm's
    `~/LID-DS` checkout only** — re-cloning LID-DS loses it; reapply before rebuilding.
-3. **Chrome/glibc incompatibility (blocks most "normal"-traffic containers)** — the shared
-   `normal/Dockerfile` template (debian:9.2 + `xvfb` + `google-chrome-stable`, used by ~11
-   scenarios) installs *current* Chrome from Google's live apt repo, which needs
-   `glibc >= 2.25`; stretch ships `glibc 2.24`. Confirmed via a direct rebuild of
-   `Bruteforce_CWE-307/normal` (succeeds through blocker #2's fix, fails here). **Not
-   resolved** — needs either a pinned old Chrome `.deb` compatible with stretch's glibc (if
-   still hosted anywhere) or swapping the normal-traffic generator to a different headless
-   browser/base image. This is where investigation stopped (see "Next steps").
+3. **Chrome/glibc incompatibility (blocked most "normal"/browser-driving containers)** — the
+   shared `normal/Dockerfile` template (debian:9.2 + `xvfb` + `google-chrome-stable`, used by
+   13 Dockerfiles across 10 scenarios, 12 of them via Selenium + `chromedriver`, 1 via plain
+   `webbrowser.open()`) installs *current* Chrome from Google's live apt repo, which needs
+   `glibc >= 2.25`; stretch ships `glibc 2.24`. **Fixed**, confirmed by a clean rebuild of
+   `CVE-2018-3760/normal` (previously failed here): swapped `google-chrome-stable` for
+   Debian stretch's own archived `chromium` + `chromium-driver` packages (both
+   `73.0.3683.75-1~deb9u1`, version-matched since they're built together in the same stretch
+   snapshot — installs via the same `archive.debian.org` fix from blocker #2, no Google repo
+   needed at all). Also: removed each Dockerfile's redundant manual
+   `chromedriver.storage.googleapis.com/2.42/...` download (pinned to an old, Chrome-66-era
+   driver that conflicted with the apt-installed one); pinned `pip3 install 'selenium<4'`
+   (classic API — Selenium 4's "Selenium Manager" tries to auto-download/match a driver
+   online at runtime, which both isn't needed here and would need internet during actual
+   scenario runs, defeating the isolation requirement in `[[kbvm-environment]]`/the Attack Lab
+   Plan's safety rules); added `chrome_options.binary_location = "/usr/bin/chromium"`
+   explicitly in all 13 client scripts so ChromeDriver never has to guess the browser binary.
+   **Caveat for any write-up that cites this as reproducing LID-DS**: the "normal" traffic
+   these containers generate now comes from **Chromium, not Google Chrome** — different
+   build, different default behaviour (rendering engine lineage is shared, but telemetry,
+   default flags, and version are not identical to what LID-DS's original published dataset
+   used). A reviewer familiar with LID-DS could reasonably flag this as a deviation from the
+   benchmark if it's presented as an unqualified reproduction; say explicitly that
+   browser-driven "normal" traffic was regenerated with Chromium due to the glibc
+   incompatibility, not with the original Chrome build.
 4. Two `COPY`-step failures (`"/filesplits": not found`, `"/images": not found`) seen in the
    original `build_all.log` — not triaged; likely a missing data file expected by a specific
    scenario's build context (not yet identified which scenario).
@@ -70,19 +95,21 @@ freeze, since free space wasn't checked at the time, but worth monitoring going 
 
 ## Next steps, in priority order
 
-1. Decide how to spend further effort on blocker #3 (Chrome/glibc) — it's the highest-
-   leverage fix (blocks ~11 scenarios' normal-traffic container) but open-ended (archived
-   Chrome build may not exist; may need a different browser-automation approach entirely).
+1. **Finish the rebuild.** `kbvm`'s disk is now 200GB (grown from 100GB this session, ~98GB
+   free) so disk exhaustion shouldn't recur; re-run `sudo ~/LID-DS/build_all.sh` on the
+   bridged/internet network posture and update the results table above with real numbers.
 2. Resolve blocker #1 (`ubuntu:13.04`) separately — affects Heartbleed and Bruteforce
    specifically; same two-phase-network-posture caveat applies once a real exploit scenario
-   is ready to run (see §3 below).
-3. Triage the two `COPY` failures (#4) once a scenario needing them is identified.
+   is ready to run (see §4 below).
+3. Triage the two `COPY` failures (#4 above) once a scenario needing them is identified.
 4. **Before any real `lidds_runner.py --ack-isolated` run** (not just image builds): confirm
    `kbvm` is network-isolated (host-only, `vboxnet0`, no default route — this session set
    that up and verified it from outside the guest; see networking section of the session
    history) and `kbd` is in the mode you intend (observe-only still needs the operator's
    explicit go-ahead per `[[kbvm-environment]]`/`Attack-LabTest-Suite.md` §6.2, same
    standing rule as the scripted-scenario lab).
+5. Carry the Chrome→Chromium substitution caveat (blocker #3) into any paper/report text
+   that cites LID-DS as the reproduced benchmark.
 
 ## Documentation consulted
 
