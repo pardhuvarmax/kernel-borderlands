@@ -278,3 +278,23 @@ int kb_bridge_send_net_flow(int fd, uint32_t pid, uint32_t daddr, uint16_t dport
 
     return send_framed(fd, &w, sizeof(w));
 }
+
+int kb_bridge_send_process_counters(int fd, uint32_t pid, uint64_t start_time_ns, uint64_t window_end_ns,
+                                    uint32_t sensitive_file_count, uint32_t cred_change_count,
+                                    uint32_t dropped_events, uint32_t seq_signature)
+{
+    struct kb_wire_process_counters w = {0};
+    w.hdr.magic    = KB_WIRE_MAGIC;
+    w.hdr.version  = KB_WIRE_VERSION;
+    w.hdr.msg_type = KB_WIRE_MSG_PROCESS_COUNTERS;
+
+    w.pid                  = pid;
+    w.start_time_ns        = start_time_ns;
+    w.window_end_ns        = window_end_ns;
+    w.sensitive_file_count = sensitive_file_count;
+    w.cred_change_count    = cred_change_count;
+    w.dropped_events       = dropped_events;
+    w.seq_signature        = seq_signature;
+
+    return send_framed(fd, &w, sizeof(w));
+}

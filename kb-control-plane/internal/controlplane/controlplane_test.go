@@ -644,11 +644,11 @@ func TestRecordStoreResult_ConcurrentCallsDontRace(t *testing.T) {
 	wg.Wait()
 }
 
-// The learned-policy feature contract (schema v4) is served from this event:
+// The learned-policy feature contract (schema v5) is served from this event:
 // all six sensor dimension scores must be present, by name, plus dest_class/
 // dest_port (new in v2) defaulting to "no NetFlow seen yet" for a pid that
 // has made no connection.
-func TestOnProcessState_EmitsFeatureSchemaV4(t *testing.T) {
+func TestOnProcessState_EmitsFeatureSchemaV5(t *testing.T) {
 	cp := newTestControlPlane(t)
 	ch := make(chan *pb.KBEvent, 1)
 	cp.subMu.Lock()
@@ -661,7 +661,7 @@ func TestOnProcessState_EmitsFeatureSchemaV4(t *testing.T) {
 	}
 	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 5, UID: 0, Comm: "x", DimScore: dims, EMAScore: 55, EventCount: 7})
 	ev := <-ch
-	if ev.Metadata["feature_schema"] != "4" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
+	if ev.Metadata["feature_schema"] != "5" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
 		t.Fatalf("missing schema/event_count/uid: %v", ev.Metadata)
 	}
 	if ev.Metadata["dest_class"] != "0" || ev.Metadata["dest_port"] != "0" {
@@ -776,6 +776,52 @@ func TestOnProcessState_TreeFeaturesAggregateUpTheTree(t *testing.T) {
 	}
 	if md["dim_file"] != "0.00" {
 		t.Errorf("per-process dim_file must stay the process's own, got %q", md["dim_file"])
+	}
+}
+
+var _ ipc.ProcessCountersHandler = (*ControlPlane)(nil)
+
+// Schema v5: counters sent by the sensor (msg_type 11) are joined into the next
+// process_state; a pid that never sent any leaves the keys absent (older sensor);
+// telemetry_gap is measured from dropped_events; exit evicts the entry.
+func TestOnProcessState_CountersJoinedAndEvicted(t *testing.T) {
+	cp := newTestControlPlane(t)
+	ch := make(chan *pb.KBEvent, 4)
+	cp.subMu.Lock()
+	cp.eventSubs = append(cp.eventSubs, ch)
+	cp.subMu.Unlock()
+
+	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 700, Comm: "x"})
+	md := (<-ch).Metadata
+	if _, ok := md["sensitive_file_count"]; ok {
+		t.Fatalf("no counters sent: keys must be absent, got %v", md)
+	}
+	if _, ok := md["telemetry_gap"]; ok {
+		t.Fatalf("telemetry_gap must not be asserted without a counters message: %v", md)
+	}
+
+	cp.OnProcessCounters(&ipc.ProcessCountersMsg{PID: 700, SensitiveFileCount: 3, CredChangeCount: 2,
+		DroppedEvents: 9, SeqSignature: ipc.SeqSigCredThenConnect | ipc.SeqSigConnectThenMemExec})
+	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 700, Comm: "x"})
+	md = (<-ch).Metadata
+	want := map[string]string{"feature_schema": "5", "sensitive_file_count": "3", "cred_change_count": "2",
+		"dropped_events": "9", "seq_cred_then_connect": "1", "seq_shell_then_connect": "0",
+		"seq_connect_then_memexec": "1", "telemetry_gap": "1"}
+	for k, v := range want {
+		if md[k] != v {
+			t.Errorf("%s = %q, want %q", k, md[k], v)
+		}
+	}
+
+	cp.OnProcessCounters(&ipc.ProcessCountersMsg{PID: 701, SensitiveFileCount: 1})
+	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 701, Comm: "y"})
+	if md = (<-ch).Metadata; md["telemetry_gap"] != "0" {
+		t.Errorf("no drops reported: telemetry_gap = %q, want 0", md["telemetry_gap"])
+	}
+
+	cp.OnProcessExit(&ipc.ProcessExitMsg{PID: 700})
+	if _, ok := cp.countersCache.Load(uint32(700)); ok {
+		t.Error("exit must evict the counters entry")
 	}
 }
 

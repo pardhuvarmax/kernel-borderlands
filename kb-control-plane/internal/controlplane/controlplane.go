@@ -131,9 +131,13 @@ type ControlPlane struct {
 	// often (once per connect), so the read-mostly map fits better.
 	netFlowCache sync.Map // pid uint32 -> netFlowSample
 
-	// tree aggregates file/network evidence over a process's family
-	// (parent + siblings) for the schema-v4 tree_* features; see tree.go.
+	// tree aggregates file/network evidence over a process's subtree for
+	// the schema-v4 tree_* features; see tree.go.
 	tree *treeCache
+
+	// countersCache holds the latest per-process counters (msg_type 11) so
+	// OnProcessState can attach them (schema v5). Evicted on process exit.
+	countersCache sync.Map // pid uint32 -> ipc.ProcessCountersMsg
 }
 
 // netFlowSample is what netFlowCache stores per pid: just enough to derive
@@ -591,13 +595,13 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	}
 	cp.recordStoreResult(err)
 
-	// Feature schema v4 (kb-aads/features/schema.py): every field below is a
+	// Feature schema v5 (kb-aads/features/schema.py): every field below is a
 	// value the sensor/kbd actually computed for this process, so a learned
 	// policy can be trained and served on the same inputs. Keep the keys in
 	// sync with that file. The legacy dim_syscall/dim_privilege/composite/
 	// zone/uid keys stay for existing consumers.
 	md := map[string]string{
-		"feature_schema": "4",
+		"feature_schema": "5",
 		"zone":           ipc.KBZone(msg.Zone).String(),
 		"composite":      fmt.Sprintf("%.2f", msg.CompositeScore),
 		"dim_syscall":    fmt.Sprintf("%.2f", msg.DimScore[ipc.DimCount-5]),
@@ -639,6 +643,20 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	md["tree_dim_file"] = fmt.Sprintf("%.2f", tf)
 	md["tree_dim_network"] = fmt.Sprintf("%.2f", tn)
 	md["tree_file_net"] = fmt.Sprintf("%.2f", tb)
+	// Schema v5: sensor-side counters (msg_type 11), when this pid has sent any.
+	// A sensor that never sends them (older build) leaves the keys absent, which
+	// the schema reads as its documented defaults. telemetry_gap is MEASURED:
+	// 1 once the sensor reported dropped events for this pid, else 0.
+	if v, ok := cp.countersCache.Load(msg.PID); ok {
+		c := v.(ipc.ProcessCountersMsg)
+		md["sensitive_file_count"] = fmt.Sprintf("%d", c.SensitiveFileCount)
+		md["cred_change_count"] = fmt.Sprintf("%d", c.CredChangeCount)
+		md["dropped_events"] = fmt.Sprintf("%d", c.DroppedEvents)
+		md["seq_cred_then_connect"] = boolStr(c.SeqSignature&ipc.SeqSigCredThenConnect != 0)
+		md["seq_shell_then_connect"] = boolStr(c.SeqSignature&ipc.SeqSigShellThenConnect != 0)
+		md["seq_connect_then_memexec"] = boolStr(c.SeqSignature&ipc.SeqSigConnectThenMemExec != 0)
+		md["telemetry_gap"] = boolStr(c.DroppedEvents > 0)
+	}
 	cp.fanOutEvent(&pb.KBEvent{
 		Pid:        msg.PID,
 		Ppid:       msg.PPID,
@@ -650,11 +668,24 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	})
 }
 
+// OnProcessCounters implements ipc.ProcessCountersHandler (msg_type 11).
+func (cp *ControlPlane) OnProcessCounters(msg *ipc.ProcessCountersMsg) {
+	cp.countersCache.Store(msg.PID, *msg)
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
 func (cp *ControlPlane) OnProcessExit(msg *ipc.ProcessExitMsg) {
 	// Delete volatile cache entries to prevent PID reuse vulnerabilities
 	cp.commCache.Delete(msg.PID)
 	cp.netFlowCache.Delete(msg.PID)
-	cp.tree.Exit(msg.PID) // keeps contributing to its family briefly; see tree.go
+	cp.tree.Exit(msg.PID) // keeps contributing to its ancestors briefly; see tree.go
+	cp.countersCache.Delete(msg.PID)
 
 	// Push exit details to L2 DB
 	if err := cp.store.TerminateProcessState(msg.PID, msg.ExitTimeNs, msg.ExitCode); err != nil {

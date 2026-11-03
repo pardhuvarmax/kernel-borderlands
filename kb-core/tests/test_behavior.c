@@ -323,6 +323,44 @@ static void test_b1_shell_connect_flag_combination(void)
            (KB_EV_SPAWNED_SHELL | KB_EV_OUTBOUND_CONNECT));
 }
 
+static void test_process_counters_and_latched_sequence_patterns(void)
+{
+    kb_evidence_init();
+    kb_evidence_t *ev = kb_evidence_get_or_create(4242, 1, 0, "t", 7);
+    assert(ev && !kb_evidence_counters_dirty(ev));
+
+    // credential access then connect -> bit 0; shell then connect -> bit 1
+    kb_evidence_push_seq(ev, KB_SEQ_SHADOW_ACCESS);
+    assert(ev->seq_sig == 0);
+    kb_evidence_push_seq(ev, KB_SEQ_EXEC_SHELL);
+    kb_evidence_push_seq(ev, KB_SEQ_OUTBOUND_CONNECT);
+    assert(ev->seq_sig == (KB_SEQSIG_CRED_THEN_CONNECT | KB_SEQSIG_SHELL_THEN_CONNECT));
+    // connect then executable memory -> bit 2
+    kb_evidence_push_seq(ev, KB_SEQ_RWX_MAP);
+    assert(ev->seq_sig & KB_SEQSIG_CONNECT_THEN_MEMEXEC);
+
+    // order matters: memory-exec BEFORE any connect sets nothing
+    kb_evidence_t *ev2 = kb_evidence_get_or_create(4243, 1, 0, "t", 8);
+    kb_evidence_push_seq(ev2, KB_SEQ_RWX_MAP);
+    kb_evidence_push_seq(ev2, KB_SEQ_OUTBOUND_CONNECT);
+    assert(ev2->seq_sig == 0);
+
+    // latched: still set after the 32-entry ring has wrapped past the originals
+    for (int i = 0; i < 3 * KB_EVIDENCE_SEQ_LEN; i++)
+        kb_evidence_push_seq(ev, KB_SEQ_EXEC);
+    assert(ev->seq_sig == (KB_SEQSIG_CRED_THEN_CONNECT | KB_SEQSIG_SHELL_THEN_CONNECT | KB_SEQSIG_CONNECT_THEN_MEMEXEC));
+
+    // counters: saturating, dirty until sent
+    assert(kb_evidence_counters_dirty(ev));            // seq_sig changed
+    ev->sent_sig = ev->seq_sig;
+    assert(!kb_evidence_counters_dirty(ev));
+    kb_counter_inc(&ev->sensitive_file_count, 1);
+    assert(kb_evidence_counters_dirty(ev));
+    ev->sensitive_file_count = 0xFFFFFFFFu;
+    kb_counter_inc(&ev->sensitive_file_count, 5);
+    assert(ev->sensitive_file_count == 0xFFFFFFFFu);
+}
+
 int main(void)
 {
     printf("╔══════════════════════════════════════════════╗\n");
@@ -341,6 +379,7 @@ int main(void)
     RUN_TEST(test_exec_flag_has_tty_bit);
     RUN_TEST(test_rapid_connect_burst);
     RUN_TEST(test_b1_shell_connect_flag_combination);
+    RUN_TEST(test_process_counters_and_latched_sequence_patterns);
 
     printf("\nAll unit tests passed successfully!\n");
     return 0;

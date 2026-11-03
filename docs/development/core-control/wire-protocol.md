@@ -19,6 +19,7 @@ Payload types:
   msg_type=8 → CWP protected-workload registry (kbd → sensor, no sender yet)
   msg_type=9 → net flow sample (sensor → kbd, exfiltration detection)
   msg_type=10 → kb_wire_containment_ack      (sensor → kbd, reply to every msg_type=5)
+  msg_type=11 → kb_wire_process_counters     (sensor → kbd, per-process counters; additive)
 
 Every payload starts with kb_wire_header:
   uint16 magic   = 0x4B42 ("KB")
@@ -194,6 +195,29 @@ non-`APPLIED` decision as `CONTAINMENT_REFUSED_BY_SENSOR`.
 Compatibility: additive. `KB_WIRE_VERSION` stays 3, the `msg_type = 5` layout
 is unchanged, and a `kbd` that does not know `msg_type = 10` ignores it.
 
+## msg_type = 11 — ProcessCounters (sensor → kbd, over `/run/kb/kbd.sock`)
+Packed struct (`kb_wire_process_counters`, `kb_bridge.h`), all little-endian. Design and rationale:
+`docs/development/core-control/process-counters-design.md`.
+```
+kb_wire_header hdr             4
+uint32 pid                      4
+uint64 start_time_ns            8   // PID-reuse guard, same as msg_type 1
+uint64 window_end_ns            8   // clock-monotonic ns of the send
+uint32 sensitive_file_count     4   // cumulative, saturating
+uint32 cred_change_count        4   // cumulative, saturating
+uint32 bytes_sent_kib           4   // RESERVED: always 0 until a write()/sendto() hook exists
+uint32 dropped_events           4   // telemetry events dropped for this pid (cumulative)
+uint32 seq_signature            4   // bit0 credential access then connect, bit1 shell then connect, bit2 connect then RWX/anon-exec/cross-process write; latched
+uint32 _reserved                4
+```
+Total: 48 bytes (asserted with `_Static_assert` in `kb_bridge.h`; `parseProcessCounters` rejects anything shorter).
+Sent from `kbd_sensor.c`'s userspace event path only when a counter changed, at most once per second per pid,
+and flushed when the process exits; nothing is sent while the bridge is down. **Compatibility:** additive,
+`KB_WIRE_VERSION` stays 3, a `kbd` that does not know msg_type 11 ignores it, and a new `kbd` leaves the
+schema-v5 keys absent for a sensor that never sends it. `kbd` joins the latest counters into the next
+`process_state` event (`kb-control-plane/internal/controlplane/controlplane.go`) and derives `telemetry_gap`
+from `dropped_events`.
+
 ## Dimension Index Map
   0 = KB_DIM_PROCESS    weight=0.20
   1 = KB_DIM_SYSCALL    weight=0.25
@@ -208,7 +232,7 @@ is unchanged, and a `kbd` that does not know `msg_type = 10` ignores it.
   2 = BORDERLANDS
 
 ## Socket Paths
-  /run/kb/kbd.sock   Telemetry only, sensor → kbd (msg_type 1, 2, 4, 9, 10).
+  /run/kb/kbd.sock   Telemetry only, sensor → kbd (msg_type 1, 2, 4, 9, 10, 11).
   /run/kb/kbct.sock  Control only, kbd → sensor (msg_type 5, 6, 7, 8) — split
                      from kbd.sock so a telemetry burst can never stall or kill
                      containment delivery. See

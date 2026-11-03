@@ -1,8 +1,6 @@
-# Per-process counters message (design proposal)
+# Per-process counters message (design, partly implemented)
 
-**Status: PROPOSED. No code exists. Implementation needs explicit operator sign-off** (it adds a wire
-message between `kb-core` and `kb-control-plane`, `docs/architecture/kbd-contracts.md`'s "C and Go sides
-change together" rule, and it invalidates the existing attack-lab corpora for retraining).
+**Status: PARTLY IMPLEMENTED (2026-11-03, on the operator's instruction).** msg_type 11 with the userspace-only counters (sensitive-file count, credential-change count, per-pid drops, latched sequence patterns) exists in `kb-core` and `kb-control-plane`; see `wire-protocol.md` for the contract. **`bytes_sent` is NOT implemented:** its wire field is reserved and always 0, and the `write`/`sendto` hook still needs its own review and VM load test. The text below is the original proposal (a wire message between `kb-core` and `kb-control-plane` falls under `docs/architecture/kbd-contracts.md`'s "C and Go sides change together" rule, and it invalidates the existing attack-lab corpora for retraining).
 
 Plan items covered: B4 (`bytes_sent`), the sensor-side half of B5 (sensitive-file count, credential-change
 count, sequence evidence) and B6 (per-process drop counts so `telemetry_gap` is measured). Background:

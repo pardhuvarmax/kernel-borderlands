@@ -95,6 +95,34 @@ type ContainmentAckHandler interface {
     OnContainmentAck(msg *ContainmentAckMsg)
 }
 
+// ProcessCountersMsg mirrors C's struct kb_wire_process_counters exactly
+// (kb_bridge.h, 48 bytes). BytesSentKiB is reserved and always 0 until the
+// sensor has a write()/sendto() hook; do not treat 0 as "measured zero".
+type ProcessCountersMsg struct {
+    PID                uint32
+    StartTimeNs        uint64
+    WindowEndNs        uint64
+    SensitiveFileCount uint32
+    CredChangeCount    uint32
+    BytesSentKiB       uint32
+    DroppedEvents      uint32
+    SeqSignature       uint32
+}
+
+// Sequence-signature bits (kb_evidence.h KB_SEQSIG_*).
+const (
+    SeqSigCredThenConnect   uint32 = 0x1
+    SeqSigShellThenConnect  uint32 = 0x2
+    SeqSigConnectThenMemExec uint32 = 0x4
+)
+
+// ProcessCountersHandler is an optional extension of MessageHandler, same
+// pattern as ContainmentAckHandler: a handler that also implements it receives
+// msg_type 11; others (and older kbd builds) simply ignore it.
+type ProcessCountersHandler interface {
+    OnProcessCounters(msg *ProcessCountersMsg)
+}
+
 type MessageHandler interface {
     OnProcessState(msg *ProcessStateMsg)
     OnZoneTransition(msg *ZoneTransitionMsg)
@@ -203,6 +231,24 @@ func parseNetFlow(buf []byte) (*NetFlowMsg, error) {
     return msg, nil
 }
 
+func parseProcessCounters(buf []byte) (*ProcessCountersMsg, error) {
+    const expected = 48 // hdr(4)+pid(4)+start(8)+window_end(8)+5*uint32(20)+reserved(4); must equal sizeof(struct kb_wire_process_counters)
+    if len(buf) < expected {
+        return nil, fmt.Errorf("process counters: want %d bytes got %d", expected, len(buf))
+    }
+    off := 4 // skip header
+    msg := &ProcessCountersMsg{}
+    msg.PID = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.StartTimeNs = binary.LittleEndian.Uint64(buf[off:]); off += 8
+    msg.WindowEndNs = binary.LittleEndian.Uint64(buf[off:]); off += 8
+    msg.SensitiveFileCount = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.CredChangeCount = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.BytesSentKiB = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.DroppedEvents = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.SeqSignature = binary.LittleEndian.Uint32(buf[off:])
+    return msg, nil
+}
+
 type Reader struct{ conn net.Conn; handler MessageHandler }
 
 func NewReader(conn net.Conn, h MessageHandler) *Reader { return &Reader{conn, h} }
@@ -259,6 +305,12 @@ func (r *Reader) ReadLoop() error {
         case WireMsgNetFlow:
             if msg, err := parseNetFlow(buf); err == nil {
                 r.handler.OnNetFlow(msg)
+            }
+        case MsgTypeProcessCounters:
+            if h, ok := r.handler.(ProcessCountersHandler); ok {
+                if msg, err := parseProcessCounters(buf); err == nil {
+                    h.OnProcessCounters(msg)
+                }
             }
         case MsgTypeContainmentAck:
             if h, ok := r.handler.(ContainmentAckHandler); ok {

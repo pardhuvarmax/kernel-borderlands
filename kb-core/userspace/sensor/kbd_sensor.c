@@ -1666,6 +1666,34 @@ static kb_zone_t map_state_to_zone(kb_behavior_state_t state)
     }
 }
 
+// Send this process's counters to kbd (msg_type 11) when any changed, at most once
+// per second per pid unless force (exit flush). A kbd that does not know the
+// message ignores it. Nothing is sent while the bridge is down.
+#define KB_COUNTERS_MIN_INTERVAL_NS 1000000000ULL
+static void maybe_send_process_counters(kb_evidence_t *ev, uint64_t ts_ns, int force)
+{
+    if (!ev || !kb_evidence_counters_dirty(ev))
+        return;
+    if (!force && ev->last_counters_send_ns &&
+        ts_ns - ev->last_counters_send_ns < KB_COUNTERS_MIN_INTERVAL_NS)
+        return;
+    bridge_ensure_connected();
+    if (bridge_fd < 0)
+        return;
+    if (kb_bridge_send_process_counters(bridge_fd, ev->pid, ev->start_time_ns, ts_ns,
+                                        ev->sensitive_file_count, ev->cred_change_count,
+                                        ev->dropped_events, ev->seq_sig) == 0) {
+        ev->sent_sensitive = ev->sensitive_file_count;
+        ev->sent_cred = ev->cred_change_count;
+        ev->sent_dropped = ev->dropped_events;
+        ev->sent_sig = ev->seq_sig;
+        ev->last_counters_send_ns = ts_ns;
+        if (transition_log_allowed())
+            printf("[COUNTERS] PID=%u sensitive=%u cred=%u dropped=%u seq=0x%x\n", ev->pid,
+                   ev->sensitive_file_count, ev->cred_change_count, ev->dropped_events, ev->seq_sig);
+    }
+}
+
 static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_event *e)
 {
     kb_scoring_result_t r = kb_scoring_update(e);
@@ -1697,6 +1725,11 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
                 break;
             }
             case KB_EVT_PRIVILEGE_CHANGE:
+                // Real credential changes only (commit_creds). Capability probes
+                // (new_euid == 0xFFFFFFFF) are not counted: desktop processes fire them
+                // constantly, which made the counter noise.
+                if (e->new_euid != 0xFFFFFFFF)
+                    kb_counter_inc(&ev->cred_change_count, 1);
                 if (e->new_euid == 0xFFFFFFFF) {
                     kb_evidence_set_flag(ev, KB_EV_CAP_GAINED, ts);
                     kb_evidence_push_seq(ev, KB_SEQ_PRIVILEGE_UP);
@@ -1711,6 +1744,7 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
                 break;
             case KB_EVT_FILE_ACCESS:
                 if (e->sensitive) {
+                    kb_counter_inc(&ev->sensitive_file_count, 1);
                     if (strstr((const char *)e->filename, "shadow")) {
                         kb_evidence_set_flag(ev, KB_EV_SHADOW_ACCESS, ts);
                     } else if (strstr((const char *)e->filename, "passwd")) {
@@ -1765,9 +1799,14 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
                     break;
                 }
                 break;
+            case KB_EVT_PROCESS_EXIT:
+                maybe_send_process_counters(ev, ts, 1);   // exit flush
+                break;
             default:
                 break;
         }
+        if (e->event_type != KB_EVT_PROCESS_EXIT)
+            maybe_send_process_counters(ev, ts, 0);
 
         kb_behavior_result_t r_beh = kb_behavior_evaluate(ev);
         if (r_beh.state_changed) {
@@ -2227,7 +2266,14 @@ static int handle_event(void *ctx, void *data, size_t sz)
             fprintf(evout, "\n");
             break;
 
-        case 10:
+        case 10: {
+            // Per-pid drop accounting (B6): the kernel's marker carries the number dropped.
+            kb_evidence_t *dev = kb_evidence_get(e->pid);
+            if (dev) {
+                kb_counter_inc(&dev->dropped_events, e->length > 0xFFFFFFFFULL ? 0xFFFFFFFFu : (uint32_t)e->length);
+                maybe_send_process_counters(dev, e->ts_ns, 0);
+            }
+            }
             fprintf(evout, "Overloaded Batch: PID %u occurred %llu times in the last second, %llu events dropped\n", e->pid, 100 + (unsigned long long)e->length, (unsigned long long)e->length);
             break;
 

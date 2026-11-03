@@ -161,6 +161,26 @@ void kb_evidence_push_seq(kb_evidence_t *ev, kb_seq_event_t entry)
     ev->seq_head = (ev->seq_head + 1) % KB_EVIDENCE_SEQ_LEN;
     if (ev->seq_len < KB_EVIDENCE_SEQ_LEN)
         ev->seq_len++;
+
+    // Latch the named patterns (see KB_SEQSIG_*).
+    switch (entry) {
+    case KB_SEQ_SHADOW_ACCESS: case KB_SEQ_SSH_KEY_ACCESS: case KB_SEQ_CRED_FILE:
+        ev->seen_cred = 1;
+        break;
+    case KB_SEQ_EXEC_SHELL:
+        ev->seen_shell = 1;
+        break;
+    case KB_SEQ_OUTBOUND_CONNECT:
+        if (ev->seen_cred)  ev->seq_sig |= KB_SEQSIG_CRED_THEN_CONNECT;
+        if (ev->seen_shell) ev->seq_sig |= KB_SEQSIG_SHELL_THEN_CONNECT;
+        ev->seen_connect = 1;
+        break;
+    case KB_SEQ_RWX_MAP: case KB_SEQ_ANON_EXEC: case KB_SEQ_PROC_MEM_WRITE:
+        if (ev->seen_connect) ev->seq_sig |= KB_SEQSIG_CONNECT_THEN_MEMEXEC;
+        break;
+    default:
+        break;
+    }
 }
 
 // Copy sequence in chronological order into out_buf

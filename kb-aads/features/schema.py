@@ -9,13 +9,13 @@ Rules (docs/development/control-aads/learned-policy-retraining.md):
   2. Names, order, ranges and missing-value rules are fixed per SCHEMA_VERSION.
      Changing any of them requires a new version; checkpoints record the
      version they were trained on and are refused otherwise (gate_checkpoint).
-  3. kbd emits the same keys in KBEvent.metadata (feature_schema = "4"; see
+  3. kbd emits the same keys in KBEvent.metadata (feature_schema = "5"; see
      OnProcessState in kb-control-plane/internal/controlplane/controlplane.go).
 """
 import json
 import os
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 # (name, low, high, missing_default). Values are clipped to [low, high].
 # Scores are the sensor's 0-100 dimension scores; zone 0/1/2; flags 0/1.
@@ -49,6 +49,18 @@ SCHEMA_VERSION = "4"
 # dim_* are unchanged. Limits: walk bounded to 6 levels / 256 nodes; a long-lived
 # parent whose descendants collectively read files and connect looks like "both"
 # indefinitely; children re-parented to init leave the tree.
+#
+# v5 adds sensor-side counters carried by wire msg_type 11 (process_counters;
+# docs/development/core-control/process-counters-design.md), joined by kbd into
+# process_state: sensitive_file_count, cred_change_count, dropped_events (all
+# cumulative per process, clipped at 10000 here; apply log scaling in the model,
+# not in this contract) and three latched sequence-pattern flags
+# (seq_cred_then_connect, seq_shell_then_connect, seq_connect_then_memexec).
+# telemetry_gap is now MEASURED when the sensor sends counters: 1 once any event of
+# this process was dropped. NOT included: bytes_sent (the wire field is reserved and
+# always 0 until a write()/sendto() hook exists). A sensor that never sends msg_type 11
+# leaves these keys absent and they take the defaults below, which means "no data",
+# not "measured zero".
 FEATURES = [
     ("score",          0.0, 100.0, 0.0),   # kbd EMA score
     ("zone",           0.0,   2.0, 0.0),   # SAFE/SUSPICIOUS/BORDERLANDS
@@ -67,6 +79,12 @@ FEATURES = [
     ("tree_dim_file",    0.0, 100.0, 0.0), # max dim_file over the process subtree
     ("tree_dim_network", 0.0, 100.0, 0.0), # max dim_network over the process subtree
     ("tree_file_net",    0.0, 100.0, 0.0), # min of the two: both kinds of evidence somewhere in the subtree
+    ("sensitive_file_count", 0.0, 10000.0, 0.0), # sensitive-path opens by this process (cumulative)
+    ("cred_change_count",    0.0, 10000.0, 0.0), # credential changes (commit_creds) by this process (cumulative)
+    ("dropped_events",       0.0, 10000.0, 0.0), # telemetry events dropped for this process (cumulative)
+    ("seq_cred_then_connect",   0.0, 1.0, 0.0),  # credential/sensitive access, later an outbound connect
+    ("seq_shell_then_connect",  0.0, 1.0, 0.0),  # shell exec, later an outbound connect
+    ("seq_connect_then_memexec", 0.0, 1.0, 0.0), # outbound connect, later RWX/anon-exec/cross-process write
 ]
 NAMES = [f[0] for f in FEATURES]
 
@@ -113,7 +131,9 @@ def from_event_message(msg: dict, prev_score=None) -> dict:
     raw["dest_class"] = md.get("dest_class")
     raw["dest_port"] = md.get("dest_port")
     raw["dest_known"] = md.get("dest_known")
-    for k in ("tree_dim_file", "tree_dim_network", "tree_file_net"):
+    for k in ("tree_dim_file", "tree_dim_network", "tree_file_net",
+              "sensitive_file_count", "cred_change_count", "dropped_events",
+              "seq_cred_then_connect", "seq_shell_then_connect", "seq_connect_then_memexec"):
         raw[k] = md.get(k)
     return raw
 

@@ -21,7 +21,9 @@ def test_serving_features_match_what_kbd_emits():
     # keys kbd puts in KBEvent.metadata (controlplane.go OnProcessState)
     kbd_keys = {"dim_process", "dim_syscall", "dim_privilege", "dim_file", "dim_network", "dim_memory",
                 "dest_class", "dest_port", "dest_known",
-                "tree_dim_file", "tree_dim_network", "tree_file_net"}
+                "tree_dim_file", "tree_dim_network", "tree_file_net",
+                "sensitive_file_count", "cred_change_count", "dropped_events",
+                "seq_cred_then_connect", "seq_shell_then_connect", "seq_connect_then_memexec"}
     assert kbd_keys <= set(schema.NAMES)
 
 
@@ -75,3 +77,20 @@ def test_tree_features_default_to_zero_and_are_read_and_clipped():
     assert v[schema.NAMES.index("tree_dim_file")] == 80.0
     assert v[schema.NAMES.index("tree_dim_network")] == 70.0
     assert v[schema.NAMES.index("tree_file_net")] == 100.0  # clipped
+
+
+def test_counter_features_default_to_zero_and_are_read_and_clipped():
+    names = ["sensitive_file_count", "cred_change_count", "dropped_events",
+             "seq_cred_then_connect", "seq_shell_then_connect", "seq_connect_then_memexec"]
+    v = schema.build_vector({"score": 50})
+    assert all(v[schema.NAMES.index(k)] == 0.0 for k in names)
+    md = {"dim_process": "1", "sensitive_file_count": "3", "cred_change_count": "99999",
+          "dropped_events": "9", "seq_cred_then_connect": "1", "seq_connect_then_memexec": "1",
+          "telemetry_gap": "1"}
+    raw = schema.from_event_message({"metadata": md})
+    v = schema.build_vector(raw)
+    assert v[schema.NAMES.index("sensitive_file_count")] == 3.0
+    assert v[schema.NAMES.index("cred_change_count")] == 10000.0      # clipped
+    assert v[schema.NAMES.index("seq_shell_then_connect")] == 0.0
+    assert v[schema.NAMES.index("seq_connect_then_memexec")] == 1.0
+    assert v[schema.NAMES.index("telemetry_gap")] == 1.0              # measured gap reaches the vector

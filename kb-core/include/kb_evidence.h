@@ -144,6 +144,18 @@ typedef struct {
     uint64_t recent_ts[KB_CONNECT_BURST_SLOTS];
     uint8_t  recent_head;
 
+    // Per-process counters exported to kbd as msg_type 11 (process_counters;
+    // docs/development/core-control/process-counters-design.md). Cumulative and
+    // saturating. seq_sig is LATCHED (a pattern seen once stays set), so it does
+    // not depend on the 32-entry sequence ring still holding the events.
+    uint32_t sensitive_file_count;
+    uint32_t cred_change_count;
+    uint32_t dropped_events;
+    uint32_t seq_sig;               // KB_SEQSIG_* bits
+    uint8_t  seen_cred, seen_shell, seen_connect;
+    uint32_t sent_sensitive, sent_cred, sent_dropped, sent_sig; // last values sent to kbd
+    uint64_t last_counters_send_ns;
+
     // Advisory: EMA score (kept for dashboard/trends, not for state decisions)
     double   advisory_ema;
     double   advisory_composite;
@@ -184,6 +196,23 @@ uint64_t     kb_evidence_classify_exec_path(const char *path);
 // Record a connect() to daddr at ts_ns. Returns 1 when more than
 // KB_CONNECT_BURST_IPS distinct destinations were seen within the window.
 int          kb_evidence_note_connect(kb_evidence_t *ev, uint32_t daddr, uint64_t ts_ns);
+
+// Named sequence patterns exported in the process_counters message (a model
+// cannot generalise from a raw hash). Latched by kb_evidence_push_seq.
+#define KB_SEQSIG_CRED_THEN_CONNECT   0x1u  // credential/sensitive-file access, later an outbound connect
+#define KB_SEQSIG_SHELL_THEN_CONNECT  0x2u  // shell exec, later an outbound connect
+#define KB_SEQSIG_CONNECT_THEN_MEMEXEC 0x4u // outbound connect, later RWX / anonymous-exec / cross-process write
+
+// Saturating increment for the cumulative counters.
+static inline void kb_counter_inc(uint32_t *c, uint32_t by) {
+    *c = (*c > 0xFFFFFFFFu - by) ? 0xFFFFFFFFu : *c + by;
+}
+
+// 1 if any exported counter changed since it was last sent to kbd.
+static inline int kb_evidence_counters_dirty(const kb_evidence_t *ev) {
+    return ev->sensitive_file_count != ev->sent_sensitive || ev->cred_change_count != ev->sent_cred ||
+           ev->dropped_events != ev->sent_dropped || ev->seq_sig != ev->sent_sig;
+}
 
 // Check if a flag is set
 static inline int kb_evidence_has(const kb_evidence_t *ev, uint64_t flag) {

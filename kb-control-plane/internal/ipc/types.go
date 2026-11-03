@@ -92,6 +92,9 @@ const (
 	MsgTypeProcessExit    byte   = 4
 	// MsgTypeContainmentAck is sensor -> kbd (kbct.sock, kbd.sock for older sensors), unlike msg_type 5.
 	MsgTypeContainmentAck byte = 10
+	// MsgTypeProcessCounters is sensor -> kbd (kbd.sock): per-process counters, additive,
+	// see docs/development/core-control/wire-protocol.md msg_type 11.
+	MsgTypeProcessCounters byte = 11
 
 	headerSize     = 4  // magic(2) + version(1) + msgtype(1)
 	cmdPayloadSize = 72 // 4 + 4 + 64

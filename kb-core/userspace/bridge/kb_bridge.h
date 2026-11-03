@@ -65,6 +65,10 @@
 // as its volume proxy instead, not real byte volume; see that file's
 // doc comment for the accuracy trade-off this implies.
 #define KB_WIRE_MSG_NET_FLOW  9
+// Sensor -> kbd per-process counters (docs/development/core-control/process-counters-design.md).
+// Additive: KB_WIRE_VERSION stays 3 and a kbd that does not know msg_type 11 ignores it.
+// Sent at most once per second per pid, only when a counter changed, and flushed at exit.
+#define KB_WIRE_MSG_PROCESS_COUNTERS  11
 // Sensor -> kbd reply to every containment command (KB_WIRE_MSG_CONTAINMENT_CMD)
 // it processes, over the telemetry socket (kbd.sock). Tells kbd what the
 // sensor's CPM/CWP gates and the contained_pids_map write actually did, so
@@ -123,6 +127,19 @@ struct kb_wire_net_flow {
     uint16_t _reserved;
     uint64_t ts_ns;   // clock-monotonic ns, matches e->ts_ns
 };
+struct kb_wire_process_counters {
+    struct kb_wire_header hdr;
+    uint32_t pid;
+    uint64_t start_time_ns;        // PID-reuse guard, same as kb_wire_process_state
+    uint64_t window_end_ns;        // clock-monotonic ns of the send
+    uint32_t sensitive_file_count; // cumulative, saturating
+    uint32_t cred_change_count;    // cumulative, saturating
+    uint32_t bytes_sent_kib;       // RESERVED, always 0 until the write()/sendto() hook exists
+    uint32_t dropped_events;       // telemetry events dropped for this pid (cumulative)
+    uint32_t seq_signature;        // KB_SEQSIG_* bits (kb_evidence.h)
+    uint32_t _reserved;
+};
+_Static_assert(sizeof(struct kb_wire_process_counters) == 48, "kb_wire_process_counters must be 48 bytes (wire-protocol.md)");
 #pragma pack(pop)
 
 // ---- connection lifecycle ----
@@ -156,6 +173,9 @@ int kb_bridge_send_zone_transition(int fd, uint32_t pid, uint64_t start_time_ns,
 int kb_bridge_send_process_exit(int fd, uint32_t pid, uint64_t exit_time_ns, uint32_t exit_code);
 
 int kb_bridge_send_net_flow(int fd, uint32_t pid, uint32_t daddr, uint16_t dport, uint64_t ts_ns);
+int kb_bridge_send_process_counters(int fd, uint32_t pid, uint64_t start_time_ns, uint64_t window_end_ns,
+                                    uint32_t sensitive_file_count, uint32_t cred_change_count,
+                                    uint32_t dropped_events, uint32_t seq_signature);
 
 int kb_bridge_send_containment_ack(int fd, uint32_t pid, uint32_t level, uint32_t decision);
 
