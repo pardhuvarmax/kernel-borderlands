@@ -250,6 +250,8 @@ REAL_BYTE_SCENARIOS = {
     "exfil_slow_real": ("attack", "exfil_slow"), "c2_beacon_real": ("attack", "c2_real"),
     "benign_backup_bulk": ("benign", "backup_bulk"), "benign_heartbeat_real": ("benign", "heartbeat"),
     "benign_telemetry_small": ("benign", "telemetry_small"),
+    "exfil_via_known_host_real": ("attack", "exfil_known"), "benign_backup_new_host": ("benign", "backup_new"),
+    "benign_telemetry_new_host": ("benign", "telemetry_new"),
 }
 
 
@@ -297,5 +299,18 @@ def test_real_byte_scenarios_really_send_bytes_over_loopback(name, tmp_path, mon
 
 def test_scenario_groups_split_legacy_and_real_bytes():
     g = _pl.GROUPS
-    assert set(g["legacy"]) | set(g["real_bytes"]) == set(g["all"]) and not set(g["legacy"]) & set(g["real_bytes"])
-    assert len(g["legacy"]) == 18 and len(g["real_bytes"]) == 7
+    assert len(g["legacy"]) == 18 and len(g["real_bytes"]) == 7 and len(g["dest_mix"]) == 3
+    assert set(g["legacy"]) | set(g["v2"]) == set(g["all"]) and not set(g["legacy"]) & set(g["v2"])
+
+
+def test_destination_mix_breaks_the_address_split_between_attack_and_benign():
+    """known_destinations lists KNOWN_HOSTS: some attack must go to a listed host and some benign work
+    to an unlisted one, otherwise dest_known would separate the classes by construction."""
+    import re
+    src = open(os.path.join(LAB, "payloads.py")).read()
+    attack_src = src[src.index("def exfil_via_known_host_real"):src.index("def backup_new_host_workload")]
+    benign_src = src[src.index("def backup_new_host_workload"):src.index("SCENARIOS = {")]
+    assert '"127.0.0.3"' in attack_src and "NEW_HOSTS" in benign_src
+    assert not set(_pl.KNOWN_HOSTS) & set(_pl.NEW_HOSTS)
+    for h in _pl.KNOWN_HOSTS + _pl.NEW_HOSTS:
+        _pl.assert_loopback(h)

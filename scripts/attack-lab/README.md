@@ -45,6 +45,11 @@ The original attacks only `connect_ex()` to a loopback address with no listener,
 
 `--scenarios` also takes groups: `all` (every scenario), `legacy` (the 18 scenarios of the first corpora, to stay comparable with them) and `real_bytes`. Variants come from the seed (rounds, sizes, intervals, ports). Not yet captured on the VM.
 
+## Unattended windows (`batch.py`) and the destination mix
+`batch.py` runs ON the VM and does one time-boxed capture window with guaranteed restore: it checks the preconditions (kb-checker hold, no leftover drop-ins, kbd and kb-sensor active), backs up `policy.yaml`, applies the window-only settings (`KB_OBSERVE_ONLY=1` on kbd, `KB_SENSOR_EXIT_STATE=all` and `KB_BYTES_SENT=1` on kb-sensor, `known_destinations` in policy), runs one `runner.py` per seed without starting a seed that would not finish inside `--max-minutes`, and ALWAYS restores (also on error or SIGTERM) and verifies, printing `RESTORE OK` or a loud `RESTORE FAILED`. It needs `--ack-isolated` and `--ack-observe-only` (the operator's approval for the window). `--dry-run` prints the plan.
+
+`known_destinations` is only informative if it does not give the label away. The original scenarios send attacks to `127.0.0.2/.4` and benign work to `127.0.0.3/.5`, so listing the benign hosts would separate them by construction. Therefore: capture the `legacy` group with `--known-hosts ""` (the feature stays 0) and the `v2` group (the 7 real-byte scenarios plus 3 destination-mix scenarios: an attack that uploads to a LISTED host, and benign backups/telemetry to unlisted hosts) with the default `--known-hosts 127.0.0.3,127.0.0.5`. Do not pool the two without keeping that in mind.
+
 ## Running a capture
 1. Put `kbd` in **observe-only** mode so automatic containment cannot truncate the attacks (the runner refuses otherwise):
    ```
