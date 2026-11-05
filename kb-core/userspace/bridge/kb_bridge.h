@@ -134,10 +134,10 @@ struct kb_wire_process_counters {
     uint64_t window_end_ns;        // clock-monotonic ns of the send
     uint32_t sensitive_file_count; // cumulative, saturating
     uint32_t cred_change_count;    // cumulative, saturating
-    uint32_t bytes_sent_kib;       // RESERVED, always 0 until the write()/sendto() hook exists
+    uint32_t bytes_sent_kib;       // bytes sent on AF_INET/AF_INET6 sockets >> 10; MEASURED only if flags bit0 is set, else 0 = no data
     uint32_t dropped_events;       // telemetry events dropped for this pid (cumulative)
     uint32_t seq_signature;        // KB_SEQSIG_* bits (kb_evidence.h)
-    uint32_t _reserved;
+    uint32_t flags;                // bit0 = bytes_sent_kib is measured (KB_COUNTERS_FLAG_BYTES_SENT_ACTIVE)
 };
 _Static_assert(sizeof(struct kb_wire_process_counters) == 48, "kb_wire_process_counters must be 48 bytes (wire-protocol.md)");
 #pragma pack(pop)
@@ -175,7 +175,8 @@ int kb_bridge_send_process_exit(int fd, uint32_t pid, uint64_t exit_time_ns, uin
 int kb_bridge_send_net_flow(int fd, uint32_t pid, uint32_t daddr, uint16_t dport, uint64_t ts_ns);
 int kb_bridge_send_process_counters(int fd, uint32_t pid, uint64_t start_time_ns, uint64_t window_end_ns,
                                     uint32_t sensitive_file_count, uint32_t cred_change_count,
-                                    uint32_t dropped_events, uint32_t seq_signature);
+                                    uint32_t bytes_sent_kib, uint32_t dropped_events,
+                                    uint32_t seq_signature, uint32_t flags);
 
 int kb_bridge_send_containment_ack(int fd, uint32_t pid, uint32_t level, uint32_t decision);
 

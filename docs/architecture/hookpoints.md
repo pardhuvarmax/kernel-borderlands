@@ -49,3 +49,6 @@ here are additions worth considering:
 - `tracepoint:irq:softirq_entry` on unusual vectors — can flag deferred execution tricks
 
 The highest-value additions for KB specifically are `process_vm_writev`, `security_capable`, `do_execveat_common`, and the `/proc/*/mem` write hook — those four cover injection and privilege probing patterns that the current hook set leaves partially blind to.
+
+**Network volume (B4, opt-in)**
+- `kprobe:security_socket_sendmsg` — bytes sent on IPv4/IPv6 sockets, summed per process in a BPF map (no per-event ring-buffer output). Covers `sendto`, `sendmsg`, `sendmmsg` and `write` on a socket with the size already available, so no file-descriptor lookup is needed. **Implemented** (`kb_handle_sock_sendmsg`), loaded only when the sensor starts with `KB_BYTES_SENT=1`. Does not see payload content or direction beyond "sent", and does not count AF_UNIX.

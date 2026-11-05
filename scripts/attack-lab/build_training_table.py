@@ -110,7 +110,7 @@ def build_run(run_dir):
     emitted = set()
     for col in ("dest_class", "dest_port", "dest_known", "sensitive_file_count", "cred_change_count",
                 "dropped_events", "seq_cred_then_connect", "seq_shell_then_connect",
-                "seq_connect_then_memexec", "telemetry_gap") + tuple(TREE):
+                "seq_connect_then_memexec", "bytes_sent_kib", "telemetry_gap") + tuple(TREE):
         if col in ps.columns and ps[col].notna().any():       # kbd emitted it in this run
             raw[col] = ps[col]
             emitted.add(col)

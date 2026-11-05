@@ -644,11 +644,11 @@ func TestRecordStoreResult_ConcurrentCallsDontRace(t *testing.T) {
 	wg.Wait()
 }
 
-// The learned-policy feature contract (schema v5) is served from this event:
+// The learned-policy feature contract (schema v6) is served from this event:
 // all six sensor dimension scores must be present, by name, plus dest_class/
 // dest_port (new in v2) defaulting to "no NetFlow seen yet" for a pid that
 // has made no connection.
-func TestOnProcessState_EmitsFeatureSchemaV5(t *testing.T) {
+func TestOnProcessState_EmitsFeatureSchemaV6(t *testing.T) {
 	cp := newTestControlPlane(t)
 	ch := make(chan *pb.KBEvent, 1)
 	cp.subMu.Lock()
@@ -661,7 +661,7 @@ func TestOnProcessState_EmitsFeatureSchemaV5(t *testing.T) {
 	}
 	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 5, UID: 0, Comm: "x", DimScore: dims, EMAScore: 55, EventCount: 7})
 	ev := <-ch
-	if ev.Metadata["feature_schema"] != "5" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
+	if ev.Metadata["feature_schema"] != "6" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
 		t.Fatalf("missing schema/event_count/uid: %v", ev.Metadata)
 	}
 	if ev.Metadata["dest_class"] != "0" || ev.Metadata["dest_port"] != "0" {
@@ -804,13 +804,23 @@ func TestOnProcessState_CountersJoinedAndEvicted(t *testing.T) {
 		DroppedEvents: 9, SeqSignature: ipc.SeqSigCredThenConnect | ipc.SeqSigConnectThenMemExec})
 	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 700, Comm: "x"})
 	md = (<-ch).Metadata
-	want := map[string]string{"feature_schema": "5", "sensitive_file_count": "3", "cred_change_count": "2",
+	want := map[string]string{"feature_schema": "6", "sensitive_file_count": "3", "cred_change_count": "2",
 		"dropped_events": "9", "seq_cred_then_connect": "1", "seq_shell_then_connect": "0",
 		"seq_connect_then_memexec": "1", "telemetry_gap": "1"}
 	for k, v := range want {
 		if md[k] != v {
 			t.Errorf("%s = %q, want %q", k, md[k], v)
 		}
+	}
+
+	// bytes_sent_kib only appears when the sensor says it measured it (flags bit0)
+	if _, ok := md["bytes_sent_kib"]; ok {
+		t.Errorf("bytes_sent_kib must be absent when the sensor did not run the byte hook: %v", md)
+	}
+	cp.OnProcessCounters(&ipc.ProcessCountersMsg{PID: 702, BytesSentKiB: 5120, Flags: ipc.CountersFlagBytesSentActive})
+	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 702, Comm: "z"})
+	if got := (<-ch).Metadata["bytes_sent_kib"]; got != "5120" {
+		t.Errorf("bytes_sent_kib = %q, want 5120", got)
 	}
 
 	cp.OnProcessCounters(&ipc.ProcessCountersMsg{PID: 701, SensitiveFileCount: 1})

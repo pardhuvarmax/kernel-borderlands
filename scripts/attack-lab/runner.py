@@ -170,6 +170,16 @@ def sensor_exit_state():
     return "anomalous"
 
 
+def sensor_bytes_sent():
+    """True/False if the sensor's service environment says KB_BYTES_SENT=1 (the byte-counting hook
+    is loaded; bytes_sent_kib is measured), None if it cannot be determined. Without it the corpus
+    simply has no bytes_sent_kib column filled and nothing errors."""
+    if not shutil.which("systemctl"):
+        return None
+    out = sh(["systemctl", "show", "kb-sensor", "-p", "Environment", "--value"])
+    return "KB_BYTES_SENT=1" in out.split()
+
+
 def audit_entries(socket_path):
     """kbd's audit log via the shipped `kbctl audit export` (the Python gRPC
     stubs in kb-aads/comms predate that RPC). None if it cannot be read."""
@@ -226,6 +236,9 @@ def main():
     ap.add_argument("--allow-partial-exit-state", action="store_true",
                     help="record even though the sensor does not publish exit snapshots for every process "
                          "(KB_SENSOR_EXIT_STATE != all): short-lived benign executions then produce no events.")
+    ap.add_argument("--allow-no-bytes-sent", action="store_true",
+                    help="record even though the sensor is not counting bytes sent (KB_BYTES_SENT=1 missing): "
+                         "bytes_sent_kib is then absent from the whole corpus.")
     ap.add_argument("--allow-containment", action="store_true",
                     help="record even though kbd applies automatic containment (distorts the data: "
                          "attacks get throttled/killed mid-run). Off by default.")
@@ -282,6 +295,19 @@ def main():
               "(the manifest says which mode was in effect).", file=sys.stderr)
         return 2
 
+    bytes_sent = sensor_bytes_sent()
+    if bytes_sent is not True and not a.allow_no_bytes_sent:
+        print("refusing to run: the sensor is not counting bytes sent"
+              + (" (could not determine it)" if bytes_sent is None else "") + ".\n"
+              "The byte-counting hook is off by default (KB_BYTES_SENT=1 loads it); without it the corpus has no\n"
+              "bytes_sent_kib, the signal that separates a real backup from exfiltration, and nothing would warn you.\n"
+              "Set it for the capture:\n"
+              "    sudo systemctl edit kb-sensor     # [Service]  Environment=KB_BYTES_SENT=1\n"
+              "    sudo systemctl restart kb-sensor\n"
+              "and remove the override afterwards. Or pass --allow-no-bytes-sent to record without it "
+              "(the manifest says so).", file=sys.stderr)
+        return 2
+
     from capture import Capture
     run_id = time.strftime("%Y%m%dT%H%M%S")
     root = os.path.join(a.out, run_id)
@@ -302,6 +328,7 @@ def main():
         "scenarios": names, "kbd_stats_before": kbd_stats(a.socket),
         "containment_active": observe_only is not True,
         "sensor_exit_state": exit_state,
+        "sensor_bytes_sent": bytes_sent,
         "started_wall_ns": time.time_ns(),
     }
     executions = []

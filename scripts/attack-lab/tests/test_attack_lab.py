@@ -230,3 +230,12 @@ def test_sensor_exit_state_is_read_from_the_service_environment(monkeypatch):
         assert runner.sensor_exit_state() == want
     monkeypatch.setattr(runner.shutil, "which", lambda _: None)
     assert runner.sensor_exit_state() is None
+
+
+def test_sensor_bytes_sent_is_read_from_the_service_environment(monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda _: "/bin/systemctl")
+    for env, want in (("KB_BYTES_SENT=1", True), ("FOO=1 KB_BYTES_SENT=1", True), ("KB_BYTES_SENT=0", False), ("", False)):
+        monkeypatch.setattr(runner, "sh", lambda *_a, _e=env, **_k: _e)
+        assert runner.sensor_bytes_sent() is want
+    monkeypatch.setattr(runner.shutil, "which", lambda _: None)
+    assert runner.sensor_bytes_sent() is None

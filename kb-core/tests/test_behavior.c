@@ -361,6 +361,22 @@ static void test_process_counters_and_latched_sequence_patterns(void)
     assert(ev->sensitive_file_count == 0xFFFFFFFFu);
 }
 
+static void test_bytes_sent_helper_is_monotone_saturating_and_dirties_counters(void)
+{
+    kb_evidence_init();
+    kb_evidence_t *ev = kb_evidence_get_or_create(5150, 1, 0, "t", 9);
+    assert(ev && !kb_evidence_counters_dirty(ev));
+    kb_evidence_set_bytes_sent(ev, 5ULL * 1024 * 1024 + 100);       // 5 MiB and a bit
+    assert(ev->bytes_sent_kib == 5 * 1024);
+    assert(kb_evidence_counters_dirty(ev));
+    ev->sent_bytes_kib = ev->bytes_sent_kib;
+    assert(!kb_evidence_counters_dirty(ev));
+    kb_evidence_set_bytes_sent(ev, 1024);                            // an evicted/re-created map entry must not lower it
+    assert(ev->bytes_sent_kib == 5 * 1024);
+    kb_evidence_set_bytes_sent(ev, 0xFFFFFFFFFFFFFFFFULL);           // saturates instead of wrapping
+    assert(ev->bytes_sent_kib == 0xFFFFFFFFu);
+}
+
 int main(void)
 {
     printf("╔══════════════════════════════════════════════╗\n");
@@ -380,6 +396,7 @@ int main(void)
     RUN_TEST(test_rapid_connect_burst);
     RUN_TEST(test_b1_shell_connect_flag_combination);
     RUN_TEST(test_process_counters_and_latched_sequence_patterns);
+    RUN_TEST(test_bytes_sent_helper_is_monotone_saturating_and_dirties_counters);
 
     printf("\nAll unit tests passed successfully!\n");
     return 0;

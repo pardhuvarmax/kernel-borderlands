@@ -96,18 +96,23 @@ type ContainmentAckHandler interface {
 }
 
 // ProcessCountersMsg mirrors C's struct kb_wire_process_counters exactly
-// (kb_bridge.h, 48 bytes). BytesSentKiB is reserved and always 0 until the
-// sensor has a write()/sendto() hook; do not treat 0 as "measured zero".
+// (kb_bridge.h, 48 bytes). BytesSentKiB counts bytes on IPv4/IPv6 sockets, but only when the
+// sensor was started with KB_BYTES_SENT=1 (Flags bit0); otherwise 0 means "no data", not "zero".
 type ProcessCountersMsg struct {
     PID                uint32
     StartTimeNs        uint64
     WindowEndNs        uint64
     SensitiveFileCount uint32
     CredChangeCount    uint32
-    BytesSentKiB       uint32
+    BytesSentKiB       uint32 // meaningful only when Flags&CountersFlagBytesSentActive != 0
     DroppedEvents      uint32
     SeqSignature       uint32
+    Flags              uint32
 }
+
+// CountersFlagBytesSentActive: the sensor ran its byte-counting hook, so BytesSentKiB is MEASURED
+// (0 = nothing sent). Without it BytesSentKiB is 0 meaning "no data" (kb_bridge.h KB_COUNTERS_FLAG_*).
+const CountersFlagBytesSentActive uint32 = 0x1
 
 // Sequence-signature bits (kb_evidence.h KB_SEQSIG_*).
 const (
@@ -232,7 +237,7 @@ func parseNetFlow(buf []byte) (*NetFlowMsg, error) {
 }
 
 func parseProcessCounters(buf []byte) (*ProcessCountersMsg, error) {
-    const expected = 48 // hdr(4)+pid(4)+start(8)+window_end(8)+5*uint32(20)+reserved(4); must equal sizeof(struct kb_wire_process_counters)
+    const expected = 48 // hdr(4)+pid(4)+start(8)+window_end(8)+5*uint32(20)+flags(4); must equal sizeof(struct kb_wire_process_counters)
     if len(buf) < expected {
         return nil, fmt.Errorf("process counters: want %d bytes got %d", expected, len(buf))
     }
@@ -245,7 +250,8 @@ func parseProcessCounters(buf []byte) (*ProcessCountersMsg, error) {
     msg.CredChangeCount = binary.LittleEndian.Uint32(buf[off:]); off += 4
     msg.BytesSentKiB = binary.LittleEndian.Uint32(buf[off:]); off += 4
     msg.DroppedEvents = binary.LittleEndian.Uint32(buf[off:]); off += 4
-    msg.SeqSignature = binary.LittleEndian.Uint32(buf[off:])
+    msg.SeqSignature = binary.LittleEndian.Uint32(buf[off:]); off += 4
+    msg.Flags = binary.LittleEndian.Uint32(buf[off:])
     return msg, nil
 }
 

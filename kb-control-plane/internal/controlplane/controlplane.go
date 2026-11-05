@@ -595,13 +595,13 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	}
 	cp.recordStoreResult(err)
 
-	// Feature schema v5 (kb-aads/features/schema.py): every field below is a
+	// Feature schema v6 (kb-aads/features/schema.py): every field below is a
 	// value the sensor/kbd actually computed for this process, so a learned
 	// policy can be trained and served on the same inputs. Keep the keys in
 	// sync with that file. The legacy dim_syscall/dim_privilege/composite/
 	// zone/uid keys stay for existing consumers.
 	md := map[string]string{
-		"feature_schema": "5",
+		"feature_schema": "6",
 		"zone":           ipc.KBZone(msg.Zone).String(),
 		"composite":      fmt.Sprintf("%.2f", msg.CompositeScore),
 		"dim_syscall":    fmt.Sprintf("%.2f", msg.DimScore[ipc.DimCount-5]),
@@ -656,6 +656,11 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 		md["seq_shell_then_connect"] = boolStr(c.SeqSignature&ipc.SeqSigShellThenConnect != 0)
 		md["seq_connect_then_memexec"] = boolStr(c.SeqSignature&ipc.SeqSigConnectThenMemExec != 0)
 		md["telemetry_gap"] = boolStr(c.DroppedEvents > 0)
+		// bytes_sent_kib (schema v6) only when the sensor says it measured it; otherwise the key is
+		// absent (no data), never a fake zero.
+		if c.Flags&ipc.CountersFlagBytesSentActive != 0 {
+			md["bytes_sent_kib"] = fmt.Sprintf("%d", c.BytesSentKiB)
+		}
 	}
 	cp.fanOutEvent(&pb.KBEvent{
 		Pid:        msg.PID,

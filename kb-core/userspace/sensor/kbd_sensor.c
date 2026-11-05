@@ -459,6 +459,46 @@ static void check_ringbuf_drops(struct kbd_sensor_bpf *skel)
     }
 }
 
+// Merge the kernel's per-pid byte counts (kb_bytes_sent) into the evidence records and send any
+// changed counters to kbd. Only called when kb_bytes_sent_active. Walks the whole map: the caller
+// applies the same time-based duty cap as the entropy scan.
+struct kb_bytes_sent_val { uint64_t bytes; uint64_t calls; };
+static void maybe_send_process_counters(kb_evidence_t *ev, uint64_t ts_ns, int force);  // defined below
+static int bytes_sent_map_fd = -1;   // set at start when kb_bytes_sent_active
+
+// Fold one pid's kernel byte count into its evidence record; delete_after for the exit path.
+static void collect_bytes_sent(uint32_t pid, kb_evidence_t *ev, int delete_after)
+{
+    struct kb_bytes_sent_val v;
+    if (bytes_sent_map_fd < 0)
+        return;
+    if (bpf_map_lookup_elem(bytes_sent_map_fd, &pid, &v) == 0) {
+        if (ev)
+            kb_evidence_set_bytes_sent(ev, v.bytes);
+        if (delete_after)
+            bpf_map_delete_elem(bytes_sent_map_fd, &pid);
+    }
+}
+
+static void scan_bytes_sent(struct kbd_sensor_bpf *skel, uint64_t ts_ns)
+{
+    int fd = bpf_map__fd(skel->maps.kb_bytes_sent);
+    uint32_t key, next;
+    int have = bpf_map_get_next_key(fd, NULL, &next) == 0;
+    while (have) {
+        key = next;
+        have = bpf_map_get_next_key(fd, &key, &next) == 0;
+        struct kb_bytes_sent_val v;
+        if (bpf_map_lookup_elem(fd, &key, &v) != 0)
+            continue;
+        kb_evidence_t *ev = kb_evidence_get(key);
+        if (!ev)
+            continue;
+        kb_evidence_set_bytes_sent(ev, v.bytes);
+        maybe_send_process_counters(ev, ts_ns, 0);
+    }
+}
+
 static void scan_syscall_entropy(struct kbd_sensor_bpf *skel)
 {
     int counts_fd = bpf_map__fd(skel->maps.kb_syscall_counts);
@@ -1670,6 +1710,8 @@ static kb_zone_t map_state_to_zone(kb_behavior_state_t state)
 // per second per pid unless force (exit flush). A kbd that does not know the
 // message ignores it. Nothing is sent while the bridge is down.
 #define KB_COUNTERS_MIN_INTERVAL_NS 1000000000ULL
+// 1 when KB_BYTES_SENT=1 was set at start: the byte-counting kprobe is loaded and bytes_sent_kib is measured.
+static int kb_bytes_sent_active;
 static void maybe_send_process_counters(kb_evidence_t *ev, uint64_t ts_ns, int force)
 {
     if (!ev || !kb_evidence_counters_dirty(ev))
@@ -1682,15 +1724,18 @@ static void maybe_send_process_counters(kb_evidence_t *ev, uint64_t ts_ns, int f
         return;
     if (kb_bridge_send_process_counters(bridge_fd, ev->pid, ev->start_time_ns, ts_ns,
                                         ev->sensitive_file_count, ev->cred_change_count,
-                                        ev->dropped_events, ev->seq_sig) == 0) {
+                                        ev->bytes_sent_kib, ev->dropped_events, ev->seq_sig,
+                                        kb_bytes_sent_active ? KB_COUNTERS_FLAG_BYTES_SENT_ACTIVE : 0) == 0) {
         ev->sent_sensitive = ev->sensitive_file_count;
         ev->sent_cred = ev->cred_change_count;
         ev->sent_dropped = ev->dropped_events;
         ev->sent_sig = ev->seq_sig;
+        ev->sent_bytes_kib = ev->bytes_sent_kib;
         ev->last_counters_send_ns = ts_ns;
         if (transition_log_allowed())
-            printf("[COUNTERS] PID=%u sensitive=%u cred=%u dropped=%u seq=0x%x\n", ev->pid,
-                   ev->sensitive_file_count, ev->cred_change_count, ev->dropped_events, ev->seq_sig);
+            printf("[COUNTERS] PID=%u sensitive=%u cred=%u dropped=%u seq=0x%x bytes_kib=%u%s\n", ev->pid,
+                   ev->sensitive_file_count, ev->cred_change_count, ev->dropped_events, ev->seq_sig,
+                   ev->bytes_sent_kib, kb_bytes_sent_active ? "" : "(off)");
     }
 }
 
@@ -1800,6 +1845,7 @@ static kb_scoring_result_t process_behavior_and_score(const struct kb_unified_ev
                 }
                 break;
             case KB_EVT_PROCESS_EXIT:
+                collect_bytes_sent(pid, ev, 1);           // final byte count, then free the map entry
                 maybe_send_process_counters(ev, ts, 1);   // exit flush
                 break;
             default:
@@ -2483,6 +2529,15 @@ int main(void)
     // itself doesn't exist without BPF LSM support, not just this specific
     // field/helper). Probed, not assumed, and logged either way so a
     // missing hook is visible rather than silently absent.
+    // B4: the byte-counting kprobe is opt-in (KB_BYTES_SENT=1) until its overhead has been
+    // measured; without it the program is not loaded and bytes_sent_kib is "no data".
+    {
+        const char *b = getenv("KB_BYTES_SENT");
+        kb_bytes_sent_active = (b && strcmp(b, "1") == 0);
+        bpf_program__set_autoload(skel->progs.kb_handle_sock_sendmsg, kb_bytes_sent_active);
+        printf("[SENSOR] bytes_sent accounting: %s (KB_BYTES_SENT=1 enables it)\n",
+               kb_bytes_sent_active ? "ON" : "off");
+    }
     bool kb_lsm_supported = libbpf_probe_bpf_prog_type(BPF_PROG_TYPE_LSM, NULL) > 0;
     bpf_program__set_autoload(skel->progs.kb_lsm_file_open, kb_lsm_supported);
     bpf_program__set_autoload(skel->progs.kb_lsm_bprm_check, kb_lsm_supported);
@@ -2499,6 +2554,8 @@ int main(void)
     err = kbd_sensor_bpf__load(skel);
     if (!err)
         self_skip_map_fd = bpf_map__fd(skel->maps.kb_self_syscalls_skipped);
+    if (!err && kb_bytes_sent_active)
+        bytes_sent_map_fd = bpf_map__fd(skel->maps.kb_bytes_sent);
     if (err) {
         fprintf(stderr, "Failed to load BPF skeleton: %d\n", err);
         kbd_sensor_bpf__destroy(skel);
@@ -2589,6 +2646,7 @@ int main(void)
     printf("All 6 hooks attached. Streaming unified events...\n");
     printf("Press Ctrl+C to stop.\n\n");
 
+    uint64_t next_bytes_ns = 0;
     uint64_t next_scan_ns = 0, next_reap_ns = 0, next_cwp_sweep_ns = now_ns() + KB_CWP_ORPHAN_SWEEP_MIN_INTERVAL_NS;
     while (running) {
 #if !KB_USE_PERFBUF
@@ -2615,6 +2673,12 @@ int main(void)
             if (took > scan_ns_max)
                 scan_ns_max = took;
             next_scan_ns = next_job_ns(t, KB_ENTROPY_SCAN_MIN_INTERVAL_NS);
+        }
+
+        if (kb_bytes_sent_active && now_ns() >= next_bytes_ns) {
+            uint64_t t0 = now_ns();
+            scan_bytes_sent(skel, t0);
+            next_bytes_ns = next_job_ns(t0, KB_COUNTERS_MIN_INTERVAL_NS);
         }
 
         // Stale scoring-table entries (exit events lost to ring-buffer overflow)

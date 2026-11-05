@@ -23,7 +23,8 @@ def test_serving_features_match_what_kbd_emits():
                 "dest_class", "dest_port", "dest_known",
                 "tree_dim_file", "tree_dim_network", "tree_file_net",
                 "sensitive_file_count", "cred_change_count", "dropped_events",
-                "seq_cred_then_connect", "seq_shell_then_connect", "seq_connect_then_memexec"}
+                "seq_cred_then_connect", "seq_shell_then_connect", "seq_connect_then_memexec",
+                "bytes_sent_kib"}
     assert kbd_keys <= set(schema.NAMES)
 
 
@@ -94,3 +95,11 @@ def test_counter_features_default_to_zero_and_are_read_and_clipped():
     assert v[schema.NAMES.index("seq_shell_then_connect")] == 0.0
     assert v[schema.NAMES.index("seq_connect_then_memexec")] == 1.0
     assert v[schema.NAMES.index("telemetry_gap")] == 1.0              # measured gap reaches the vector
+
+
+def test_bytes_sent_kib_defaults_to_zero_is_read_and_clipped():
+    assert schema.build_vector({"score": 50})[schema.NAMES.index("bytes_sent_kib")] == 0.0
+    raw = schema.from_event_message({"metadata": {"dim_process": "1", "bytes_sent_kib": "5120"}})
+    assert schema.build_vector(raw)[schema.NAMES.index("bytes_sent_kib")] == 5120.0
+    raw = schema.from_event_message({"metadata": {"dim_process": "1", "bytes_sent_kib": "99999999999"}})
+    assert schema.build_vector(raw)[schema.NAMES.index("bytes_sent_kib")] == 10000000.0

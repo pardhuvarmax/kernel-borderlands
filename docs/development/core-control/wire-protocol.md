@@ -205,14 +205,14 @@ uint64 start_time_ns            8   // PID-reuse guard, same as msg_type 1
 uint64 window_end_ns            8   // clock-monotonic ns of the send
 uint32 sensitive_file_count     4   // cumulative, saturating
 uint32 cred_change_count        4   // cumulative, saturating
-uint32 bytes_sent_kib           4   // RESERVED: always 0 until a write()/sendto() hook exists
+uint32 bytes_sent_kib           4   // KiB sent on AF_INET/AF_INET6 sockets; MEASURED only if flags bit0 is set, else 0 = no data
 uint32 dropped_events           4   // telemetry events dropped for this pid (cumulative)
 uint32 seq_signature            4   // bit0 credential access then connect, bit1 shell then connect, bit2 connect then RWX/anon-exec/cross-process write; latched
-uint32 _reserved                4
+uint32 flags                    4   // bit0 = bytes_sent_kib is measured (the sensor ran KB_BYTES_SENT=1)
 ```
 Total: 48 bytes (asserted with `_Static_assert` in `kb_bridge.h`; `parseProcessCounters` rejects anything shorter).
 Sent from `kbd_sensor.c`'s userspace event path only when a counter changed, at most once per second per pid,
-and flushed when the process exits; nothing is sent while the bridge is down. **Compatibility:** additive,
+and flushed when the process exits. `bytes_sent_kib` comes from a kprobe on `security_socket_sendmsg` (covers `sendto`, `sendmsg`, `sendmmsg` and `write` on a socket; AF_UNIX excluded) that adds to a per-pid BPF map the sensor reads about once a second; that hook is loaded only when the sensor starts with `KB_BYTES_SENT=1` (off by default until its overhead is measured on a quiet host), nothing is sent while the bridge is down. **Compatibility:** additive,
 `KB_WIRE_VERSION` stays 3, a `kbd` that does not know msg_type 11 ignores it, and a new `kbd` leaves the
 schema-v5 keys absent for a sensor that never sends it. `kbd` joins the latest counters into the next
 `process_state` event (`kb-control-plane/internal/controlplane/controlplane.go`) and derives `telemetry_gap`

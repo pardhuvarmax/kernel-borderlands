@@ -9,13 +9,13 @@ Rules (docs/development/control-aads/learned-policy-retraining.md):
   2. Names, order, ranges and missing-value rules are fixed per SCHEMA_VERSION.
      Changing any of them requires a new version; checkpoints record the
      version they were trained on and are refused otherwise (gate_checkpoint).
-  3. kbd emits the same keys in KBEvent.metadata (feature_schema = "5"; see
+  3. kbd emits the same keys in KBEvent.metadata (feature_schema = "6"; see
      OnProcessState in kb-control-plane/internal/controlplane/controlplane.go).
 """
 import json
 import os
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 # (name, low, high, missing_default). Values are clipped to [low, high].
 # Scores are the sensor's 0-100 dimension scores; zone 0/1/2; flags 0/1.
@@ -61,6 +61,13 @@ SCHEMA_VERSION = "5"
 # always 0 until a write()/sendto() hook exists). A sensor that never sends msg_type 11
 # leaves these keys absent and they take the defaults below, which means "no data",
 # not "measured zero".
+#
+# v6 adds bytes_sent_kib: kibibytes the process sent on IPv4/IPv6 sockets (sendto, sendmsg and
+# write on a socket, counted by a kprobe on security_socket_sendmsg), cumulative, clipped at
+# 10,000,000 here (apply log scaling in the model). It is MEASURED only when the sensor ran the
+# hook (KB_BYTES_SENT=1, off by default): otherwise kbd leaves the key out and it takes the default
+# 0, which then means "no data", not "sent nothing". Local AF_UNIX traffic is not counted, loopback
+# TCP is. Only emitted with a process_counters message (sent when any counter changed).
 FEATURES = [
     ("score",          0.0, 100.0, 0.0),   # kbd EMA score
     ("zone",           0.0,   2.0, 0.0),   # SAFE/SUSPICIOUS/BORDERLANDS
@@ -85,6 +92,7 @@ FEATURES = [
     ("seq_cred_then_connect",   0.0, 1.0, 0.0),  # credential/sensitive access, later an outbound connect
     ("seq_shell_then_connect",  0.0, 1.0, 0.0),  # shell exec, later an outbound connect
     ("seq_connect_then_memexec", 0.0, 1.0, 0.0), # outbound connect, later RWX/anon-exec/cross-process write
+    ("bytes_sent_kib",    0.0, 10000000.0, 0.0), # KiB sent on IPv4/IPv6 sockets (cumulative); only when the sensor ran KB_BYTES_SENT=1
 ]
 NAMES = [f[0] for f in FEATURES]
 
@@ -133,7 +141,8 @@ def from_event_message(msg: dict, prev_score=None) -> dict:
     raw["dest_known"] = md.get("dest_known")
     for k in ("tree_dim_file", "tree_dim_network", "tree_file_net",
               "sensitive_file_count", "cred_change_count", "dropped_events",
-              "seq_cred_then_connect", "seq_shell_then_connect", "seq_connect_then_memexec"):
+              "seq_cred_then_connect", "seq_shell_then_connect", "seq_connect_then_memexec",
+              "bytes_sent_kib"):
         raw[k] = md.get(k)
     return raw
 

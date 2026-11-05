@@ -13,11 +13,12 @@ func counterFrame() []byte {
 	binary.LittleEndian.PutUint32(b[4:], 4242)
 	binary.LittleEndian.PutUint64(b[8:], 111)
 	binary.LittleEndian.PutUint64(b[16:], 222)
-	binary.LittleEndian.PutUint32(b[24:], 3)   // sensitive_file_count
-	binary.LittleEndian.PutUint32(b[28:], 2)   // cred_change_count
-	binary.LittleEndian.PutUint32(b[32:], 0)   // bytes_sent_kib (reserved)
-	binary.LittleEndian.PutUint32(b[36:], 9)   // dropped_events
-	binary.LittleEndian.PutUint32(b[40:], 0x5) // seq_signature
+	binary.LittleEndian.PutUint32(b[24:], 3)                           // sensitive_file_count
+	binary.LittleEndian.PutUint32(b[28:], 2)                           // cred_change_count
+	binary.LittleEndian.PutUint32(b[32:], 5120)                        // bytes_sent_kib
+	binary.LittleEndian.PutUint32(b[36:], 9)                           // dropped_events
+	binary.LittleEndian.PutUint32(b[40:], 0x5)                         // seq_signature
+	binary.LittleEndian.PutUint32(b[44:], CountersFlagBytesSentActive) // flags
 	return b
 }
 
@@ -27,7 +28,7 @@ func TestParseProcessCounters_RoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := ProcessCountersMsg{PID: 4242, StartTimeNs: 111, WindowEndNs: 222, SensitiveFileCount: 3,
-		CredChangeCount: 2, BytesSentKiB: 0, DroppedEvents: 9, SeqSignature: 0x5}
+		CredChangeCount: 2, BytesSentKiB: 5120, DroppedEvents: 9, SeqSignature: 0x5, Flags: CountersFlagBytesSentActive}
 	if *m != want {
 		t.Fatalf("got %+v want %+v", *m, want)
 	}

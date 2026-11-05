@@ -40,7 +40,7 @@ DIMS = ["process", "syscall", "privilege", "file", "network", "memory"]
 # Names match kb-aads/features/schema.py; all are numeric.
 EXTRA_FEATURES = ["dest_class", "dest_port", "dest_known", "tree_dim_file", "tree_dim_network", "tree_file_net",
                   "sensitive_file_count", "cred_change_count", "dropped_events", "seq_cred_then_connect",
-                  "seq_shell_then_connect", "seq_connect_then_memexec", "telemetry_gap"]
+                  "seq_shell_then_connect", "seq_connect_then_memexec", "bytes_sent_kib", "telemetry_gap"]
 
 
 def build_events(real, executions):
@@ -125,7 +125,7 @@ def write_all(df, base):
 README = """# Attack-lab corpus {run_id}
 
 Captured on `{host}` (kernel {kernel}), package {package}, feature schema v{schema}.
-`kbd` observe-only (automatic containment OFF): {observe_only}. Sensor exit-state publish: `{exit_state}`.
+`kbd` observe-only (automatic containment OFF): {observe_only}. Sensor exit-state publish: `{exit_state}`. Bytes-sent counting: `{bytes_sent}`.
 {n_exec} executions ({n_events} events, {n_gaps} stream gaps), seed {seed}, {repeats} repeats per scenario.
 
 ## Files
@@ -144,7 +144,7 @@ Telemetry (schema v1; these are the only columns a model may use):
 `composite`, `event_count`, `dim_process`, `dim_syscall`, `dim_privilege`, `dim_file`, `dim_network`, `dim_memory`,
 `feature_schema`, and from schema v2 on (empty for older runs) `dest_class`, `dest_port`, `dest_known`, `tree_dim_file`,
 `tree_dim_network`, `tree_file_net`, `sensitive_file_count`, `cred_change_count`, `dropped_events`, `seq_cred_then_connect`,
-`seq_shell_then_connect`, `seq_connect_then_memexec`, `telemetry_gap`. For `zone_transition` rows also `from_zone`, `to_zone`; `allowlisted` is set by kbd when an
+`seq_shell_then_connect`, `seq_connect_then_memexec`, `bytes_sent_kib` (only when the sensor ran `KB_BYTES_SENT=1`), `telemetry_gap`. For `zone_transition` rows also `from_zone`, `to_zone`; `allowlisted` is set by kbd when an
 allowlisted, verified system binary was exempted from automatic containment.
 `ema_score` is kbd's `KBEvent.score_delta` (a misnomer: it carries the EMA score).
 `recv_ns` is wall-clock time the event was received; `sensor_ts` is the sensor's own clock (not wall time).
@@ -192,6 +192,7 @@ def main():
     open(os.path.join(root, "README.md"), "w").write(README.format(
         run_id=man["run_id"], host=man["host"], kernel=man["kernel"], package=man["package"], schema=man["feature_schema"],
         observe_only="yes" if not man["containment_active"] else "NO (containment was active)",
+        bytes_sent={True: "ON (bytes_sent_kib measured)", False: "OFF (bytes_sent_kib absent)"}.get(man.get("sensor_bytes_sent"), "not recorded (older run: not available)"),
         exit_state=man.get("sensor_exit_state") or "not recorded (the exporter used to claim `all` without checking)",
         n_exec=len(executions), n_events=len(real), n_gaps=man["stream_gaps"], seed=man["seed"], repeats=man["repeats"],
         holdout=a.holdout))

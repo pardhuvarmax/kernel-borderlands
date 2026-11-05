@@ -153,6 +153,9 @@ typedef struct {
     uint32_t dropped_events;
     uint32_t seq_sig;               // KB_SEQSIG_* bits
     uint8_t  seen_cred, seen_shell, seen_connect;
+    uint64_t bytes_sent;            // cumulative bytes on AF_INET/AF_INET6 sockets (KB_BYTES_SENT=1 only)
+    uint32_t bytes_sent_kib;        // bytes_sent >> 10, saturating
+    uint32_t sent_bytes_kib;
     uint32_t sent_sensitive, sent_cred, sent_dropped, sent_sig; // last values sent to kbd
     uint64_t last_counters_send_ns;
 
@@ -211,7 +214,20 @@ static inline void kb_counter_inc(uint32_t *c, uint32_t by) {
 // 1 if any exported counter changed since it was last sent to kbd.
 static inline int kb_evidence_counters_dirty(const kb_evidence_t *ev) {
     return ev->sensitive_file_count != ev->sent_sensitive || ev->cred_change_count != ev->sent_cred ||
-           ev->dropped_events != ev->sent_dropped || ev->seq_sig != ev->sent_sig;
+           ev->dropped_events != ev->sent_dropped || ev->seq_sig != ev->sent_sig ||
+           ev->bytes_sent_kib != ev->sent_bytes_kib;
+}
+
+// process_counters message flags (kb_wire_process_counters.flags).
+#define KB_COUNTERS_FLAG_BYTES_SENT_ACTIVE 0x1u  // the sensor ran the byte-counting hook: bytes_sent_kib is MEASURED (0 = none sent)
+
+// Record the cumulative byte count read from the sensor's per-pid map; keeps the highest value
+// (the map entry can be evicted and re-created) and derives the saturating KiB figure.
+static inline void kb_evidence_set_bytes_sent(kb_evidence_t *ev, uint64_t bytes) {
+    if (bytes < ev->bytes_sent) return;
+    ev->bytes_sent = bytes;
+    uint64_t kib = bytes >> 10;
+    ev->bytes_sent_kib = kib > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)kib;
 }
 
 // Check if a flag is set

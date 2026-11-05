@@ -117,6 +117,22 @@ struct {
     __type(value, __u64);
 } kb_syscall_totals SEC(".maps");
 
+// Per-process bytes handed to network sockets (B4). Filled by kb_handle_sock_sendmsg
+// ONLY when the sensor was started with KB_BYTES_SENT=1 (the program is not loaded
+// otherwise). Userspace reads and aggregates it about once a second; nothing is
+// submitted to the ring buffer per send, so a chatty process cannot flood telemetry.
+// LRU so PID churn ages entries out; userspace deletes the entry after reading it at exit.
+struct kb_bytes_sent_val {
+    __u64 bytes;
+    __u64 calls;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 16384);
+    __type(key,   __u32);
+    __type(value, struct kb_bytes_sent_val);
+} kb_bytes_sent SEC(".maps");
+
 // LRU_HASH, not HASH: this map is keyed by a composite (pid<<32|syscall_nr)
 // value, so kb_handle_exit cannot target a single process's entries for
 // deletion the way it can for kb_syscall_totals/kb_cred_prev (it doesn't
@@ -507,6 +523,9 @@ int kb_handle_exit(struct trace_event_raw_sched_process_template *ctx)
     // normal churn rather than filling permanently.
     bpf_map_delete_elem(&kb_syscall_totals, &pid);
     bpf_map_delete_elem(&kb_cred_prev, &pid);
+    // kb_bytes_sent is deliberately NOT cleared here: userspace reads the final count when it
+    // processes the exit event and then deletes the entry, so a process that sends and exits
+    // within the one-second scan interval does not lose its last bytes. LRU bounds the rest.
     return 0;
 }
 
@@ -897,6 +916,40 @@ int kb_handle_ptrace(struct trace_event_raw_sys_enter *ctx)
     e->length = target_pid;     // target process, as in process_vm_writev above
     e->syscall_nr = (__u32)request;
     KB_SUBMIT_EVENT(ctx, e);
+    return 0;
+}
+
+// Bytes sent on IPv4/IPv6 sockets, per process (B4). security_socket_sendmsg(sock, msg,
+// size) runs for sendto, sendmsg, sendmmsg AND write() on a socket, so one hook covers every
+// send path with the byte count already in hand and no fd-to-socket lookup. AF_UNIX (journald,
+// the sensor's own sockets, X11) is excluded. Loaded only when KB_BYTES_SENT=1.
+SEC("kprobe/security_socket_sendmsg")
+int kb_handle_sock_sendmsg(struct pt_regs *ctx)
+{
+    if (kb_is_self())
+        return 0;
+    int size = (int)PT_REGS_PARM3(ctx);
+    if (size <= 0)
+        return 0;
+    struct socket *sock = (struct socket *)PT_REGS_PARM1(ctx);
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    if (!sk)
+        return 0;
+    __u16 family = BPF_CORE_READ(sk, __sk_common.skc_family);
+    if (family != 2 /* AF_INET */ && family != 10 /* AF_INET6 */)
+        return 0;
+
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    if (pid == 0)
+        return 0;
+    struct kb_bytes_sent_val *v = bpf_map_lookup_elem(&kb_bytes_sent, &pid);
+    if (v) {
+        __sync_fetch_and_add(&v->bytes, (__u64)size);
+        __sync_fetch_and_add(&v->calls, 1);
+    } else {
+        struct kb_bytes_sent_val init = { .bytes = (__u64)size, .calls = 1 };
+        bpf_map_update_elem(&kb_bytes_sent, &pid, &init, BPF_ANY);
+    }
     return 0;
 }
 
