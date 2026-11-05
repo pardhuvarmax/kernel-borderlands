@@ -33,6 +33,18 @@ Benign: `benign_compile`, `benign_database`, `benign_web`, `benign_admin`, `beni
 
 **Benign work that reads secrets AND uses the network.** The benign halves above make no network connection, so "has network activity" separates them from the attacks by construction. `benign_backup_remote` (the same `sudo tar` over `/etc`, then a real upload to a loopback backup host) and `benign_credential_report` (a counts-only `/etc/shadow` audit whose summary is sent to a loopback monitoring endpoint) read the same secrets and move real bytes. Any "secret read plus network in one process tree" rule has to be tested against them. They differ from the attacks in destination (a loopback "backup host" port, not the C2-style ports) and volume, which today's `process_state` telemetry does not carry.
 
+## Real-byte scenarios (`--scenarios real_bytes`)
+The original attacks only `connect_ex()` to a loopback address with no listener, so they transmit **nothing**; a byte counter cannot tell them from silence (corpus `20261105T214545`). These seven move real bytes to a loopback sink inside the payload's own tree, in matched attack/benign pairs (loopback only, no exploit code, files under `--workdir`, ports drawn from the same set for attack and benign so a port cannot leak the label):
+
+| Attack | Size / shape | Matched benign |
+| --- | --- | --- |
+| `exfil_small_real` | secrets staged with `sudo tar` and uploaded, a few KB | `benign_telemetry_small` (non-secret inventory, same size class) |
+| `exfil_slow_real` | 512 B every 4 to 6 s | `benign_telemetry_small` |
+| `exfil_bulk_real` | secrets plus a 16 to 48 MiB blob, uploaded (volume looks like a backup) | `benign_backup_bulk` (`/etc` plus the same size of data to a backup host) |
+| `c2_beacon_real` | fixed-interval check-ins with replies and an occasional 20 KB result | `benign_heartbeat_real` (same interval, size and ports) |
+
+`--scenarios` also takes groups: `all` (every scenario), `legacy` (the 18 scenarios of the first corpora, to stay comparable with them) and `real_bytes`. Variants come from the seed (rounds, sizes, intervals, ports). Not yet captured on the VM.
+
 ## Running a capture
 1. Put `kbd` in **observe-only** mode so automatic containment cannot truncate the attacks (the runner refuses otherwise):
    ```

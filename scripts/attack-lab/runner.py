@@ -225,7 +225,9 @@ def main():
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--ack-isolated", action="store_true",
                     help="I confirm this is an isolated lab VM (required to run anything)")
-    ap.add_argument("--scenarios", default="all")
+    ap.add_argument("--scenarios", default="all",
+                    help="comma-separated names, or a group: all (every scenario), legacy (the 18 of the first three "
+                         "corpora), real_bytes (the 7 scenarios that send real bytes)")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--gap", type=float, default=6.0, help="seconds between executions")
@@ -249,7 +251,8 @@ def main():
             print(f"{n:26s} {kind:7s} family={fam:20s} ~{secs}s")
         return 0
 
-    names = sorted(SCENARIOS) if a.scenarios == "all" else a.scenarios.split(",")
+    from payloads import GROUPS
+    names = list(GROUPS[a.scenarios]) if a.scenarios in GROUPS else a.scenarios.split(",")
     unknown = [n for n in names if n not in SCENARIOS]
     if unknown:
         print(f"unknown scenarios: {unknown}", file=sys.stderr)

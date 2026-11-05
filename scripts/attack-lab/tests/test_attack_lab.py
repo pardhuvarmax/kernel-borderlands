@@ -239,3 +239,63 @@ def test_sensor_bytes_sent_is_read_from_the_service_environment(monkeypatch):
         assert runner.sensor_bytes_sent() is want
     monkeypatch.setattr(runner.shutil, "which", lambda _: None)
     assert runner.sensor_bytes_sent() is None
+
+
+# ---- real-byte scenarios (added with plan Workstream D) -------------------------------------
+import payloads as _pl  # noqa: E402  (already importable via sys.path above)
+
+REAL_BYTE_SCENARIOS = {
+    # name: (kind, family, must_send_bytes)
+    "exfil_small_real": ("attack", "exfil_small"), "exfil_bulk_real": ("attack", "exfil_bulk"),
+    "exfil_slow_real": ("attack", "exfil_slow"), "c2_beacon_real": ("attack", "c2_real"),
+    "benign_backup_bulk": ("benign", "backup_bulk"), "benign_heartbeat_real": ("benign", "heartbeat"),
+    "benign_telemetry_small": ("benign", "telemetry_small"),
+}
+
+
+def test_real_byte_scenarios_are_registered_with_the_right_kind_and_family():
+    for name, (kind, family) in REAL_BYTE_SCENARIOS.items():
+        assert _pl.SCENARIOS[name][0] == kind and _pl.SCENARIOS[name][1] == family
+    # every attack has a benign counterpart in the same size/interval class
+    assert {"benign_backup_bulk", "benign_heartbeat_real", "benign_telemetry_small"} <= set(_pl.SCENARIOS)
+
+
+def _fake_run(cmd, **kw):
+    """Stand in for sudo/tar/uname/df: create the archive tar would have written, or some stdout."""
+    if "tar" in cmd:
+        out = cmd[cmd.index("tar") + 2]
+        with open(out, "wb") as f:
+            f.write(b"A" * 3072)
+    out = kw.get("stdout")
+    if hasattr(out, "write"):   # a real subprocess writes bytes whatever the handle's mode; the stub must match the handle
+        out.write(b"stub output\n" if "b" in getattr(out, "mode", "") else "stub output\n")
+    return 0
+
+
+@pytest.mark.parametrize("name", sorted(REAL_BYTE_SCENARIOS))
+def test_real_byte_scenarios_really_send_bytes_over_loopback(name, tmp_path, monkeypatch):
+    import random
+    monkeypatch.setattr(_pl, "run", _fake_run)
+    monkeypatch.setattr(_pl, "BULK_MIB", (1, 1))
+    monkeypatch.setattr(_pl, "SLOW_SENDS", 2)
+    monkeypatch.setattr(_pl, "BEACONS", 3)
+    monkeypatch.setattr(_pl.time, "sleep", lambda _s: None)
+    log = []
+    act = lambda action, malicious=False, **kw: log.append({"action": action, "malicious": malicious, **kw})  # noqa: E731
+    _pl.SCENARIOS[name][2](str(tmp_path), random.Random(1), act)
+    kind = REAL_BYTE_SCENARIOS[name][0]
+    sent = sum(r.get("bytes", 0) for r in log)
+    if name in ("c2_beacon_real", "benign_heartbeat_real"):
+        assert any(r["action"] in ("beacon", "heartbeat") for r in log)   # beacons log the check-in, bytes are on the wire
+    else:
+        assert sent > 0, f"{name} logged no bytes sent: {log}"
+    if kind == "attack":
+        assert all(r["malicious"] for r in log if r["action"] in ("send_out", "beacon"))
+    else:
+        assert not any(r["malicious"] for r in log)
+
+
+def test_scenario_groups_split_legacy_and_real_bytes():
+    g = _pl.GROUPS
+    assert set(g["legacy"]) | set(g["real_bytes"]) == set(g["all"]) and not set(g["legacy"]) & set(g["real_bytes"])
+    assert len(g["legacy"]) == 18 and len(g["real_bytes"]) == 7
