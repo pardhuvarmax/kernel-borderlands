@@ -252,6 +252,7 @@ REAL_BYTE_SCENARIOS = {
     "benign_telemetry_small": ("benign", "telemetry_small"),
     "exfil_via_known_host_real": ("attack", "exfil_known"), "benign_backup_new_host": ("benign", "backup_new"),
     "benign_telemetry_new_host": ("benign", "telemetry_new"),
+    "c2_beacon_via_known_host_real": ("attack", "c2_known"), "benign_heartbeat_new_host": ("benign", "heartbeat_new"),
 }
 
 
@@ -287,19 +288,19 @@ def test_real_byte_scenarios_really_send_bytes_over_loopback(name, tmp_path, mon
     _pl.SCENARIOS[name][2](str(tmp_path), random.Random(1), act)
     kind = REAL_BYTE_SCENARIOS[name][0]
     sent = sum(r.get("bytes", 0) for r in log)
-    if name in ("c2_beacon_real", "benign_heartbeat_real"):
-        assert any(r["action"] in ("beacon", "heartbeat") for r in log)   # beacons log the check-in, bytes are on the wire
+    if name in ("c2_beacon_real", "benign_heartbeat_real", "c2_beacon_via_known_host_real", "benign_heartbeat_new_host"):
+        assert any(r["action"] in ("beacon", "heartbeat", "beacon_via_trusted_host", "heartbeat_to_new_host") for r in log)   # beacons log the check-in, bytes are on the wire
     else:
         assert sent > 0, f"{name} logged no bytes sent: {log}"
     if kind == "attack":
-        assert all(r["malicious"] for r in log if r["action"] in ("send_out", "beacon"))
+        assert all(r["malicious"] for r in log if r["action"] in ("send_out", "beacon", "beacon_via_trusted_host"))
     else:
         assert not any(r["malicious"] for r in log)
 
 
 def test_scenario_groups_split_legacy_and_real_bytes():
     g = _pl.GROUPS
-    assert len(g["legacy"]) == 18 and len(g["real_bytes"]) == 7 and len(g["dest_mix"]) == 3
+    assert len(g["legacy"]) == 18 and len(g["real_bytes"]) == 7 and len(g["dest_mix"]) == 5
     assert set(g["legacy"]) | set(g["v2"]) == set(g["all"]) and not set(g["legacy"]) & set(g["v2"])
 
 

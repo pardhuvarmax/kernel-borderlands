@@ -50,6 +50,8 @@ The original attacks only `connect_ex()` to a loopback address with no listener,
 
 `known_destinations` is only informative if it does not give the label away. The original scenarios send attacks to `127.0.0.2/.4` and benign work to `127.0.0.3/.5`, so listing the benign hosts would separate them by construction. Therefore: capture the `legacy` group with `--known-hosts ""` (the feature stays 0) and the `v2` group (the 7 real-byte scenarios plus 3 destination-mix scenarios: an attack that uploads to a LISTED host, and benign backups/telemetry to unlisted hosts) with the default `--known-hosts 127.0.0.3,127.0.0.5`. Do not pool the two without keeping that in mind.
 
+The beacon pair is made fair by two more destination-mix scenarios: `c2_beacon_via_known_host_real` (the same beaconing through a LISTED host, `dest_known` = 1) and `benign_heartbeat_new_host` (the same heartbeat to an UNLISTED host, `dest_known` = 0). With them the `v2` group has 12 scenarios (about 25 minutes per seed); `dest_mix` has 5.
+
 ## Running a capture
 1. Put `kbd` in **observe-only** mode so automatic containment cannot truncate the attacks (the runner refuses otherwise):
    ```

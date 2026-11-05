@@ -714,6 +714,48 @@ def telemetry_new_host_workload(wd, rng, act):
         sink.close()
 
 
+def c2_beacon_via_known_host_real(wd, rng, act):
+    """Beaconing through a TRUSTED host (a compromised relay inside the allow-list): the same interval,
+    payload size and ports as c2_beacon_real, but the destination is listed in known_destinations
+    (dest_known = 1). MATCHED with benign_heartbeat_new_host (the same traffic to an unlisted host), so
+    for this pair the destination label points the OTHER way from c2_beacon_real / benign_heartbeat_real."""
+    host = rng.choice(KNOWN_HOSTS)
+    port = rng.choice(SHARED_PORTS)
+    srv = _ReplySink(host, port)
+    srv.start()
+    try:
+        interval = rng.uniform(0.8, 1.2)
+        for i in range(BEACONS):
+            act("beacon_via_trusted_host", malicious=True, n=i)
+            _beacon(host, srv.port, os.urandom(rng.randint(120, 260)))
+            if i % 7 == 6:
+                act("result_upload", malicious=True, n=i)
+                _beacon(host, srv.port, os.urandom(20000))
+            time.sleep(interval)
+    finally:
+        srv.close()
+
+
+def heartbeat_new_host_workload(wd, rng, act):
+    """HARD NEGATIVE: the monitoring heartbeat of heartbeat_real_workload, but to a newly provisioned
+    monitoring host that is NOT in known_destinations (dest_known = 0)."""
+    host = rng.choice(NEW_HOSTS)
+    port = rng.choice(SHARED_PORTS)
+    srv = _ReplySink(host, port)
+    srv.start()
+    try:
+        interval = rng.uniform(0.8, 1.2)
+        for i in range(BEACONS):
+            act("heartbeat_to_new_host", n=i)
+            _beacon(host, srv.port, os.urandom(rng.randint(120, 260)))
+            if i % 7 == 6:
+                act("metrics_upload", n=i)
+                _beacon(host, srv.port, os.urandom(20000))
+            time.sleep(interval)
+    finally:
+        srv.close()
+
+
 SCENARIOS = {
     # name: (kind, family, function, approx_seconds)
     "credential_access":      ("attack", "credential_access",    credential_access,       8),
@@ -746,6 +788,8 @@ SCENARIOS = {
     "exfil_via_known_host_real": ("attack", "exfil_known",       exfil_via_known_host_real, 12),
     "benign_backup_new_host":  ("benign", "backup_new",          backup_new_host_workload, 14),
     "benign_telemetry_new_host": ("benign", "telemetry_new",     telemetry_new_host_workload, 12),
+    "c2_beacon_via_known_host_real": ("attack", "c2_known",      c2_beacon_via_known_host_real, 28),
+    "benign_heartbeat_new_host": ("benign", "heartbeat_new",     heartbeat_new_host_workload, 28),
 }
 
 
@@ -753,7 +797,8 @@ SCENARIOS = {
 # before the real-byte scenarios existed (use it to stay comparable with them); "real_bytes" is the new set.
 REAL_BYTE_NAMES = ("exfil_small_real", "exfil_bulk_real", "exfil_slow_real", "c2_beacon_real",
                    "benign_backup_bulk", "benign_heartbeat_real", "benign_telemetry_small")
-DEST_MIX_NAMES = ("exfil_via_known_host_real", "benign_backup_new_host", "benign_telemetry_new_host")
+DEST_MIX_NAMES = ("exfil_via_known_host_real", "benign_backup_new_host", "benign_telemetry_new_host",
+                  "c2_beacon_via_known_host_real", "benign_heartbeat_new_host")
 GROUPS = {
     "all": tuple(sorted(SCENARIOS)),
     "legacy": tuple(sorted(n for n in SCENARIOS if n not in REAL_BYTE_NAMES and n not in DEST_MIX_NAMES)),
