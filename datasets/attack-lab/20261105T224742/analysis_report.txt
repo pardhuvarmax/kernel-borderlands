@@ -1,0 +1,16 @@
+run 20261105T224742  host=UbuntuVM-eBPF  kernel=6.8.0-147-generic  package=1.1.0  schema=6
+containment_active=False  audit_export_ok=True  stream_gaps=0
+events=97991  attributed=425 (0.4%; the rest is background desktop activity)
+executions=35  with zero attributed events: 0 []
+
+kind   family                n events/exec peak score  reached SUSP+        95% CI reached BORD would-contain
+attack c2_real               5         3.8       11.8         0/5    [0.00,0.43]        0/5           0/5
+attack exfil_bulk            5         6.2       22.9         5/5    [0.57,1.00]        0/5           0/5
+attack exfil_slow            5         9.6       20.8         5/5    [0.57,1.00]        0/5           0/5
+attack exfil_small           5        25.6       20.8         5/5    [0.57,1.00]        0/5           0/5
+benign backup_bulk           5         6.2       20.8         5/5    [0.57,1.00]        0/5           0/5
+benign heartbeat             5         4.0       11.8         0/5    [0.00,0.43]        0/5           0/5
+benign telemetry_small       5        29.6       11.6         5/5    [0.57,1.00]        0/5           0/5
+
+fixed rule engine, executions flagged SUSPICIOUS or higher: attacks 15/20 (75%, CI [0.53,0.89]); benign 10/15 (67%, CI [0.42,0.85])
+time from first malicious action to first kbd zone audit (flagged attacks, n=6): median 15 ms, max 2678 ms
