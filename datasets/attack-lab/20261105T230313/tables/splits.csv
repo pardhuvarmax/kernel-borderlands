@@ -1,0 +1,6 @@
+execution_id,scenario,family,kind,split
+20261105T230313-benign_telemetry_small-000,benign_telemetry_small,telemetry_small,benign,test
+20261105T230313-benign_telemetry_small-001,benign_telemetry_small,telemetry_small,benign,train
+20261105T230313-benign_telemetry_small-002,benign_telemetry_small,telemetry_small,benign,train
+20261105T230313-benign_telemetry_small-004,benign_telemetry_small,telemetry_small,benign,test
+20261105T230313-benign_telemetry_small-003,benign_telemetry_small,telemetry_small,benign,train

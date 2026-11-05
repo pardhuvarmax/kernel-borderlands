@@ -1,0 +1,6 @@
+execution_id,scenario,family,kind,seed,root_pid,n_pids,n_pids_polled,n_pids_from_events,start_ns,end_ns,duration_s,first_malicious_ns,exit_code,timed_out,n_events,peak_ema_score,max_zone,n_zone_audit_entries,n_would_contain,kbd_audit_actions,split
+20261105T230313-benign_telemetry_small-000,benign_telemetry_small,telemetry_small,benign,577090037,15189,9,1,8,1793899993795127429,1793899995983772451,2.189,,0,False,10,11.51200008392334,SAFE,0,0,{},test
+20261105T230313-benign_telemetry_small-001,benign_telemetry_small,telemetry_small,benign,271041745,15200,17,3,14,1793900002998740221,1793900007254932902,4.256,,0,False,18,11.665350914001465,SAFE,0,0,{},train
+20261105T230313-benign_telemetry_small-002,benign_telemetry_small,telemetry_small,benign,1095513148,15221,13,1,12,1793900014280457211,1793900018785049432,4.505,,0,False,14,11.51200008392334,SAFE,0,0,{},train
+20261105T230313-benign_telemetry_small-004,benign_telemetry_small,telemetry_small,benign,2127877499,15236,9,2,7,1793900025801780713,1793900028999930674,3.198,,0,False,10,11.51200008392334,SAFE,0,0,{},test
+20261105T230313-benign_telemetry_small-003,benign_telemetry_small,telemetry_small,benign,506456969,15247,9,1,8,1793900036062626339,1793900037693657071,1.631,,0,False,10,11.51200008392334,SAFE,0,0,{},train

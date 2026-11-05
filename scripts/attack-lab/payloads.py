@@ -612,9 +612,9 @@ def heartbeat_real_workload(wd, rng, act):
 
 
 def telemetry_small_workload(wd, rng, act):
-    """HARD NEGATIVE matched to exfil_small_real and exfil_slow_real: tens of KB of non-secret
-    system information (uname, disk usage, OS release and a package inventory) uploaded to a
-    monitoring endpoint. No shell is used (a `sh -c` made an earlier version look like a no-tty
+    """HARD NEGATIVE matched to exfil_small_real and exfil_slow_real: about 20 to 40 KB per upload of non-secret
+    system information (uname, disk usage, OS release and a package inventory, trimmed to 20 to 40 KB
+    per upload) sent to a monitoring endpoint. No shell is used (a `sh -c` made an earlier version look like a no-tty
     shell to the SPAWNED_SHELL rule) and the size is in the same class as the small exfiltration."""
     sink = _Sink("127.0.0.3")
     sink.start()
@@ -628,6 +628,10 @@ def telemetry_small_workload(wd, rng, act):
                 run(["cat", "/etc/os-release"], stdout=f)
                 if run(["dpkg-query", "-W"], stdout=f) != 0:        # package inventory; fall back to a binary listing
                     run(["ls", "-l", "/usr/bin"], stdout=f)
+            # keep each upload in the size class of exfil_small_real (about 25 KiB per round): the full
+            # package inventory is ~70 KiB, which overshot the attack's size by a factor of 2 to 3
+            with open(report, "r+b") as f:
+                f.truncate(rng.randint(20_000, 40_000))
             sent = _upload("127.0.0.3", sink.port, report)
             act("upload_inventory", round=rnd, bytes=sent)
             time.sleep(rng.uniform(0.5, 1.5))
