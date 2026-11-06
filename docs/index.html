@@ -1528,6 +1528,29 @@
 
     .doc-name small { display:block;font-size:9.5px;color:var(--dim);margin-top:3px;letter-spacing:.04em; }
     .doc-item:hover .doc-name small { color:var(--muted); }
+    .rel-box { margin-top:20px;border:1px solid var(--border2);background:var(--s1);position:relative;overflow:hidden; }
+    .rel-box::before { content:'';position:absolute;left:0;top:0;height:1px;width:40%;background:linear-gradient(90deg,transparent,var(--ember),transparent);animation:rel-sweep 5s ease-in-out infinite; }
+    @keyframes rel-sweep { 0%{transform:translateX(-100%)} 100%{transform:translateX(250%)} }
+    .rel-head { display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;padding:16px 22px;border-bottom:1px solid var(--border2);background:var(--s2); }
+    .rel-k { font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:.05em; }
+    .rel-sub { font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted); }
+    .rel-list { position:relative;padding:8px 22px 4px; }
+    .rel-list::before { content:'';position:absolute;left:26px;top:22px;bottom:30px;width:1px;background:var(--border2); }
+    .rel-item { position:relative;display:grid;grid-template-columns:18px 92px 1fr;column-gap:12px;row-gap:4px;padding:12px 0;border-bottom:1px solid var(--border); }
+    .rel-item:last-child { border-bottom:none; }
+    .rel-dot { grid-row:1 / span 3;width:9px;height:9px;border-radius:50%;margin-top:5px;position:relative;z-index:1; }
+    .rel-item.pub .rel-dot { background:var(--volt); }
+    .rel-item.cur .rel-dot { background:#FF8C00;box-shadow:0 0 10px rgba(255,140,0,.6); }
+    .rel-item.nxt .rel-dot { background:var(--black);border:1px solid var(--ember);animation:pulse 1.8s ease-in-out infinite; }
+    .rel-v { font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--text); }
+    .rel-item.cur .rel-v { color:#FF8C00; } .rel-item.nxt .rel-v { color:var(--ember); }
+    .rel-d { font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.08em;color:var(--muted);align-self:center; }
+    .rel-t { grid-column:2 / -1;font-size:13px;color:var(--muted);font-weight:300;line-height:1.6; }
+    .rel-s { grid-column:2 / -1;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);text-decoration:none; }
+    a.rel-s { color:var(--volt); } a.rel-s:hover { color:var(--ember); }
+    .rel-item.cur .rel-s { color:#FF8C00;opacity:.8; } .rel-item.nxt .rel-s { color:var(--ember);opacity:.8; }
+    .rel-note { padding:14px 22px 18px;border-top:1px solid var(--border2);font-size:12px;color:var(--muted);line-height:1.7;font-weight:300; }
+    .rel-note a { color:var(--text); }
     .qs-links { display:flex;gap:12px;margin-top:20px;flex-wrap:wrap; }
     .member-orcid { display:inline-block;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;color:var(--ember);text-decoration:none; }
     .member-orcid:hover { color:var(--volt); }
@@ -1547,6 +1570,7 @@
       .hero-updates { flex-wrap:wrap;gap:10px; } .hu-track { flex-basis:100%;order:3; }
       .res-panel,.hold { padding:28px 22px; }
       .subsys { grid-template-columns:1fr; }
+      .term-body { overflow-x:auto;font-size:11.5px; } .term-body .tl { white-space:nowrap; }
       #hero { padding-top:112px; }
       .hero-status { flex-wrap:wrap;gap:8px 14px;font-size:9.5px;letter-spacing:.14em; }
       .hero-status::before { display:none; }
@@ -1562,7 +1586,7 @@
       .stat-val { font-size:52px; }
     }
     @media (prefers-reduced-motion:reduce) {
-      .lvl-bar,.lvl-n,.gf-pulse,.gf-link,.gf-node.gate,.hu-items,.rm-item.prog .rm-dot { animation:none!important; }
+      .rel-box::before,.rel-item.nxt .rel-dot,.lvl-bar,.lvl-n,.gf-pulse,.gf-link,.gf-node.gate,.hu-items,.rm-item.prog .rm-dot { animation:none!important; }
       .res-bar span { transition:none; }
     }
   </style>
@@ -3461,6 +3485,16 @@
         <div class="tl-gap"></div>
         <div class="tl"><span class="p">$ </span><span class="t-caret"></span></div>
       </div>
+    </div>
+    <div class="rel-box">
+      <div class="rel-head"><span class="rel-k">Release cycle</span><span class="rel-sub">versioned · changelogged · checksummed</span></div>
+      <div class="rel-list">
+        <div class="rel-item pub"><span class="rel-dot"></span><span class="rel-v">v0.1.0</span><span class="rel-d">27 Oct 2026</span><span class="rel-t">Pre-release: the first .deb and Arch packages and both field manuals.</span><a class="rel-s" href="https://github.com/pardhuvarmax/kernel-borderlands/releases/tag/v0.1.0" target="_blank" rel="noopener">GitHub release ↗</a></div>
+        <div class="rel-item pub"><span class="rel-dot"></span><span class="rel-v">v1.0.0</span><span class="rel-d">28 Oct 2026</span><span class="rel-t">First release. TERMINATE really kills, behind CPM and CWP in both <code>kbd</code> and the sensor.</span><a class="rel-s" href="https://github.com/pardhuvarmax/kernel-borderlands/releases/tag/v1.0.0" target="_blank" rel="noopener">GitHub release ↗</a></div>
+        <div class="rel-item cur"><span class="rel-dot"></span><span class="rel-v">1.1.0</span><span class="rel-d">29 Oct 2026</span><span class="rel-t">Hardening: the live agent pipeline, real swarm enforcement, flood limits, learned policies gated off.</span><span class="rel-s">in packaging · not yet a GitHub release</span></div>
+        <div class="rel-item nxt"><span class="rel-dot"></span><span class="rel-v">Unreleased</span><span class="rel-d">since 1 Nov 2026</span><span class="rel-t">All behaviour-rule evidence flags, process-tree and destination evidence, per-process and byte counters (schema v6), the perf-buffer fallback, the LSM probe and new attack-lab corpora.</span><span class="rel-s">next release</span></div>
+      </div>
+      <p class="rel-note">Each release attaches a .deb, an Arch package, both field manuals and <code>SHA256SUMS</code>. Every change between releases is logged in <a href="https://github.com/pardhuvarmax/kernel-borderlands/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a>.</p>
     </div>
     <div class="qs-links">
       <a href="https://github.com/pardhuvarmax/kernel-borderlands/releases" target="_blank" rel="noopener" class="btn-ghost">Releases ↗</a>
