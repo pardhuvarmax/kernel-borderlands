@@ -644,11 +644,11 @@ func TestRecordStoreResult_ConcurrentCallsDontRace(t *testing.T) {
 	wg.Wait()
 }
 
-// The learned-policy feature contract (schema v6) is served from this event:
+// The learned-policy feature contract (schema v7) is served from this event:
 // all six sensor dimension scores must be present, by name, plus dest_class/
 // dest_port (new in v2) defaulting to "no NetFlow seen yet" for a pid that
 // has made no connection.
-func TestOnProcessState_EmitsFeatureSchemaV6(t *testing.T) {
+func TestOnProcessState_EmitsFeatureSchemaV7(t *testing.T) {
 	cp := newTestControlPlane(t)
 	ch := make(chan *pb.KBEvent, 1)
 	cp.subMu.Lock()
@@ -661,7 +661,7 @@ func TestOnProcessState_EmitsFeatureSchemaV6(t *testing.T) {
 	}
 	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 5, UID: 0, Comm: "x", DimScore: dims, EMAScore: 55, EventCount: 7})
 	ev := <-ch
-	if ev.Metadata["feature_schema"] != "6" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
+	if ev.Metadata["feature_schema"] != "7" || ev.Metadata["event_count"] != "7" || ev.Metadata["uid"] != "0" {
 		t.Fatalf("missing schema/event_count/uid: %v", ev.Metadata)
 	}
 	if ev.Metadata["dest_class"] != "0" || ev.Metadata["dest_port"] != "0" {
@@ -804,7 +804,7 @@ func TestOnProcessState_CountersJoinedAndEvicted(t *testing.T) {
 		DroppedEvents: 9, SeqSignature: ipc.SeqSigCredThenConnect | ipc.SeqSigConnectThenMemExec})
 	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 700, Comm: "x"})
 	md = (<-ch).Metadata
-	want := map[string]string{"feature_schema": "6", "sensitive_file_count": "3", "cred_change_count": "2",
+	want := map[string]string{"feature_schema": "7", "sensitive_file_count": "3", "cred_change_count": "2",
 		"dropped_events": "9", "seq_cred_then_connect": "1", "seq_shell_then_connect": "0",
 		"seq_connect_then_memexec": "1", "telemetry_gap": "1"}
 	for k, v := range want {
@@ -832,6 +832,41 @@ func TestOnProcessState_CountersJoinedAndEvicted(t *testing.T) {
 	cp.OnProcessExit(&ipc.ProcessExitMsg{PID: 700})
 	if _, ok := cp.countersCache.Load(uint32(700)); ok {
 		t.Error("exit must evict the counters entry")
+	}
+}
+
+// timing_entropy (schema v7): absent until a flow has enough interval samples, then low for a regular timer
+// loop and high for irregular connects. Uses the beaconing detector's own entropy, no new algorithm.
+func TestOnProcessState_TimingEntropyAppearsWhenProfiledAndSeparatesRegularFromIrregular(t *testing.T) {
+	cp := newTestControlPlane(t)
+	ch := make(chan *pb.KBEvent, 8)
+	cp.subMu.Lock()
+	cp.eventSubs = append(cp.eventSubs, ch)
+	cp.subMu.Unlock()
+
+	feed := func(pid uint32, gaps []float64) string {
+		ts := uint64(1_000_000_000)
+		for _, g := range gaps {
+			cp.OnNetFlow(&ipc.NetFlowMsg{PID: pid, Daddr: 0x0200007F, Dport: 8443, TsNs: ts})
+			ts += uint64(g * 1e9)
+		}
+		cp.OnNetFlow(&ipc.NetFlowMsg{PID: pid, Daddr: 0x0200007F, Dport: 8443, TsNs: ts})
+		cp.OnProcessState(&ipc.ProcessStateMsg{PID: pid, Comm: "x"})
+		return (<-ch).Metadata["timing_entropy"]
+	}
+	if got := feed(900, []float64{1.1, 1.1, 1.1}); got != "" {
+		t.Fatalf("timing_entropy must be absent before the flow is profiled, got %q", got)
+	}
+	regular := feed(901, []float64{1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1})
+	irregular := feed(902, []float64{0.2, 3, 7, 20, 40, 0.5, 2, 8, 25, 35, 0.1, 4, 9, 22})
+	if regular == "" || irregular == "" {
+		t.Fatalf("expected timing_entropy once profiled: regular=%q irregular=%q", regular, irregular)
+	}
+	var r, i float64
+	fmt.Sscanf(regular, "%f", &r)
+	fmt.Sscanf(irregular, "%f", &i)
+	if !(r < 0.1 && i > 1.5) {
+		t.Fatalf("regular intervals must give low entropy and irregular high: regular=%v irregular=%v", r, i)
 	}
 }
 

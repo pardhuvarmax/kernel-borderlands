@@ -24,7 +24,7 @@ def test_serving_features_match_what_kbd_emits():
                 "tree_dim_file", "tree_dim_network", "tree_file_net",
                 "sensitive_file_count", "cred_change_count", "dropped_events",
                 "seq_cred_then_connect", "seq_shell_then_connect", "seq_connect_then_memexec",
-                "bytes_sent_kib"}
+                "bytes_sent_kib", "timing_entropy"}
     assert kbd_keys <= set(schema.NAMES)
 
 
@@ -103,3 +103,9 @@ def test_bytes_sent_kib_defaults_to_zero_is_read_and_clipped():
     assert schema.build_vector(raw)[schema.NAMES.index("bytes_sent_kib")] == 5120.0
     raw = schema.from_event_message({"metadata": {"dim_process": "1", "bytes_sent_kib": "99999999999"}})
     assert schema.build_vector(raw)[schema.NAMES.index("bytes_sent_kib")] == 10000000.0
+
+
+def test_timing_entropy_defaults_to_unprofiled_and_is_read():
+    assert schema.build_vector({"score": 50})[schema.NAMES.index("timing_entropy")] == 3.0
+    raw = schema.from_event_message({"metadata": {"dim_process": "1", "timing_entropy": "0.150"}})
+    assert abs(schema.build_vector(raw)[schema.NAMES.index("timing_entropy")] - 0.15) < 1e-9

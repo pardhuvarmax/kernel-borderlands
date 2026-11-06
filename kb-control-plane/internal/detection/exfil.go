@@ -31,6 +31,9 @@ const (
 	DefaultCUSUMSigmaK       = 0.5  // K = sigma/2 (§3.B)
 	DefaultCUSUMThresholdMul = 5.0  // flag at S_i > 5*sigma (§3.B: "4*sigma or 5*sigma")
 	minIntervalSamples       = 10   // §3.A/blueprint: below this, entropy is unprofiled
+	// MinIntervalSamples is minIntervalSamples exported: with fewer deltas than this the timing entropy is the
+	// "unprofiled" sentinel 3.0 and carries no information.
+	MinIntervalSamples = minIntervalSamples
 	minBucketSamples         = 5    // don't judge CUSUM off a near-empty baseline
 	maxIntervalWindow        = 100  // matches the doc's Go example's sliding window cap
 )

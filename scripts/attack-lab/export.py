@@ -40,7 +40,7 @@ DIMS = ["process", "syscall", "privilege", "file", "network", "memory"]
 # Names match kb-aads/features/schema.py; all are numeric.
 EXTRA_FEATURES = ["dest_class", "dest_port", "dest_known", "tree_dim_file", "tree_dim_network", "tree_file_net",
                   "sensitive_file_count", "cred_change_count", "dropped_events", "seq_cred_then_connect",
-                  "seq_shell_then_connect", "seq_connect_then_memexec", "bytes_sent_kib", "telemetry_gap"]
+                  "seq_shell_then_connect", "seq_connect_then_memexec", "bytes_sent_kib", "timing_entropy", "telemetry_gap"]
 
 
 def build_events(real, executions):

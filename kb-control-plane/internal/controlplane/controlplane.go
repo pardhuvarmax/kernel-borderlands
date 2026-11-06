@@ -138,6 +138,17 @@ type ControlPlane struct {
 	// countersCache holds the latest per-process counters (msg_type 11) so
 	// OnProcessState can attach them (schema v5). Evicted on process exit.
 	countersCache sync.Map // pid uint32 -> ipc.ProcessCountersMsg
+
+	// timingCache holds, per pid, the connect-timing entropy of its best-profiled flow (the one with the
+	// most interval samples), from the beaconing detector's Observe(). Exported as timing_entropy (schema
+	// v7) once a flow has detection.MinIntervalSamples deltas; absent before that.
+	timingCache sync.Map // pid uint32 -> timingSample
+}
+
+// timingSample is what timingCache stores: low entropy means regular intervals (a timer loop).
+type timingSample struct {
+	Entropy float64
+	Samples int
 }
 
 // netFlowSample is what netFlowCache stores per pid: just enough to derive
@@ -595,13 +606,13 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	}
 	cp.recordStoreResult(err)
 
-	// Feature schema v6 (kb-aads/features/schema.py): every field below is a
+	// Feature schema v7 (kb-aads/features/schema.py): every field below is a
 	// value the sensor/kbd actually computed for this process, so a learned
 	// policy can be trained and served on the same inputs. Keep the keys in
 	// sync with that file. The legacy dim_syscall/dim_privilege/composite/
 	// zone/uid keys stay for existing consumers.
 	md := map[string]string{
-		"feature_schema": "6",
+		"feature_schema": "7",
 		"zone":           ipc.KBZone(msg.Zone).String(),
 		"composite":      fmt.Sprintf("%.2f", msg.CompositeScore),
 		"dim_syscall":    fmt.Sprintf("%.2f", msg.DimScore[ipc.DimCount-5]),
@@ -662,6 +673,10 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 			md["bytes_sent_kib"] = fmt.Sprintf("%d", c.BytesSentKiB)
 		}
 	}
+	// timing_entropy (schema v7): regularity of this process's connect intervals, once profiled.
+	if v, ok := cp.timingCache.Load(msg.PID); ok {
+		md["timing_entropy"] = fmt.Sprintf("%.3f", v.(timingSample).Entropy)
+	}
 	cp.fanOutEvent(&pb.KBEvent{
 		Pid:        msg.PID,
 		Ppid:       msg.PPID,
@@ -691,6 +706,7 @@ func (cp *ControlPlane) OnProcessExit(msg *ipc.ProcessExitMsg) {
 	cp.netFlowCache.Delete(msg.PID)
 	cp.tree.Exit(msg.PID) // keeps contributing to its ancestors briefly; see tree.go
 	cp.countersCache.Delete(msg.PID)
+	cp.timingCache.Delete(msg.PID)
 
 	// Push exit details to L2 DB
 	if err := cp.store.TerminateProcessState(msg.PID, msg.ExitTimeNs, msg.ExitCode); err != nil {
@@ -734,6 +750,11 @@ func (cp *ControlPlane) OnNetFlow(msg *ipc.NetFlowMsg) {
 	cp.netFlowCache.Store(msg.PID, netFlowSample{Daddr: msg.Daddr, Dport: msg.Dport})
 
 	result := cp.exfilDetector.Observe(msg.PID, msg.Daddr, msg.Dport, msg.TsNs)
+	if result.SampleCount >= detection.MinIntervalSamples {
+		if v, ok := cp.timingCache.Load(msg.PID); !ok || v.(timingSample).Samples <= result.SampleCount {
+			cp.timingCache.Store(msg.PID, timingSample{Entropy: result.Entropy, Samples: result.SampleCount})
+		}
+	}
 	if !result.Beacon {
 		return
 	}
