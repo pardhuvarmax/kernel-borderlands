@@ -1557,6 +1557,26 @@
     .agent-desc code,.swarm-desc code,.layer-desc code,.ss-desc code,.ops-surf-desc code,.zone-desc code { font-size:.92em; }
 
     .nav-logo-text,.nav-links a,.nav-gh { white-space:nowrap; }
+    /* zone words always fit their card */
+    .zone-card { container-type:inline-size; }
+    .zone-score { font-size:min(88px,20cqi);white-space:nowrap; }
+    /* pipeline: labels live inside their own link, never over a node */
+    .pipe-row { display:grid;grid-template-columns:auto minmax(96px,1fr) auto minmax(96px,1fr) auto minmax(96px,1fr) auto;align-items:center; }
+    .pipe-link { margin:0 14px;min-width:0; }
+    .pipe-tag { top:auto;bottom:12px;left:0;right:0;transform:none;text-align:center;white-space:normal;line-height:1.5;font-size:9px;color:var(--text);opacity:.62; }
+    .pipe-node { padding:22px 22px;min-width:0; }
+    @media (max-width:1180px) {
+      .swarm-grid { grid-template-columns:repeat(3,1fr); }
+      .swarm-card:last-child { grid-column:span 2; }
+      .pipe-node { padding:18px 16px; }
+    }
+    @media (max-width:1100px) {
+      .pipe-row { display:flex;flex-direction:column;align-items:stretch;gap:0; }
+      .pipe-node { width:min(100%,380px);margin:0 auto; }
+      .pipe-link { width:1px;height:56px;margin:0 auto;flex:none; }
+      .pipe-link::after { animation:none;display:none; }
+      .pipe-tag { top:50%;bottom:auto;left:18px;right:auto;transform:translateY(-50%);text-align:left;white-space:nowrap; }
+    }
     .gf-node { min-width:0;flex:0 1 auto; }
     @media (max-width:1280px) {
       .ct-layout { grid-template-columns:minmax(0,1fr);gap:40px; }
