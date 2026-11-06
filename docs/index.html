@@ -96,9 +96,47 @@ svg text{font-family:Inter,system-ui,sans-serif}
 .s-m{fill:var(--muted);font-size:12px}
 .s-ln{stroke:var(--muted);stroke-width:1.4;fill:none}
 .s-arr{fill:var(--muted)}
+
+/* ── CINEMATIC SECTION BACKGROUNDS (same engine and animations as the previous site) ──
+   Each section gets a .cine layer as its first child, tinted with --ct (accent or accent2)
+   and positioned with --cx; content in .wrap is lifted above it. */
+.noise{position:fixed;inset:0;pointer-events:none;z-index:9990;opacity:.028;
+  background:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0/180px 180px;
+  animation:ns .12s steps(1) infinite}
+@keyframes ns{0%{transform:translate(0,0)}25%{transform:translate(-2px,1px)}50%{transform:translate(1px,-1px)}75%{transform:translate(-1px,2px)}}
+section,footer{position:relative;overflow:hidden}
+section>.wrap,footer>.wrap{position:relative;z-index:1}
+.cine{--ct:var(--accent);position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.cine.alt{--ct:var(--accent2)}
+.cine-grid{position:absolute;inset:-10%;
+  background-image:linear-gradient(color-mix(in srgb,var(--ct) 7%,transparent) 1px,transparent 1px),
+                   linear-gradient(90deg,color-mix(in srgb,var(--ct) 7%,transparent) 1px,transparent 1px);
+  background-size:54px 54px;
+  -webkit-mask-image:radial-gradient(ellipse 58% 60% at var(--cx,50%) 50%,black 0%,transparent 78%);
+  mask-image:radial-gradient(ellipse 58% 60% at var(--cx,50%) 50%,black 0%,transparent 78%)}
+.cine-glow{position:absolute;top:50%;left:var(--cx,50%);width:var(--cw,620px);height:var(--ch,400px);
+  transform:translate(-50%,-50%);
+  background:radial-gradient(ellipse at center,color-mix(in srgb,var(--ct) 13%,transparent) 0%,transparent 70%);
+  animation:cine-breathe var(--cd,6s) ease-in-out infinite}
+@keyframes cine-breathe{0%,100%{opacity:.5;transform:translate(-50%,-50%) scale(1)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.16)}}
+.cine-scan{position:absolute;left:0;right:0;height:45%;top:0;
+  background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--ct) 8%,transparent),transparent);
+  transform:translateY(-120%);animation:cine-scan-move var(--csd,11s) ease-in-out infinite}
+@keyframes cine-scan-move{0%{transform:translateY(-120%)}100%{transform:translateY(220%)}}
+.cine-drift{position:absolute;bottom:-8%;font-family:"JetBrains Mono",monospace;font-size:9px;white-space:nowrap;letter-spacing:.05em;
+  color:color-mix(in srgb,var(--ct) 80%,var(--text));opacity:0;animation:cine-drift-rise linear infinite}
+.cine-drift.o{color:color-mix(in srgb,var(--accent2) 80%,var(--text))}
+@keyframes cine-drift-rise{0%{opacity:0;transform:translateY(0)}12%{opacity:var(--ro,.3)}85%{opacity:var(--ro,.3)}100%{opacity:0;transform:translateY(-260px)}}
+@media (max-width:700px){.cine-drift:nth-of-type(n+4){display:none}}
+@media (prefers-reduced-motion:reduce){
+  .noise,.cine-glow{animation:none!important;transform:none!important}
+  .cine-glow{transform:translate(-50%,-50%)!important}
+  .cine-scan,.cine-drift{display:none!important}
+}
 </style>
 </head>
 <body>
+<div class="noise" aria-hidden="true"></div>
 
 <header class="top">
   <div class="wrap">
@@ -118,6 +156,17 @@ svg text{font-family:Inter,system-ui,sans-serif}
 
 <main>
 <section class="hero">
+  <div class="cine" aria-hidden="true" style="--cx:62%;--cd:7s;--csd:11s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+    <span class="cine-drift" style="left:5%;--ro:0.29;animation-duration:20s;animation-delay:-5s">lsm/bprm_check_security</span>
+    <span class="cine-drift o" style="left:19%;--ro:0.32;animation-duration:15s;animation-delay:-3s">kprobe/commit_creds</span>
+    <span class="cine-drift" style="left:33%;--ro:0.3;animation-duration:16s;animation-delay:-12s">SHA-256 audit chain</span>
+    <span class="cine-drift o" style="left:47%;--ro:0.26;animation-duration:15s;animation-delay:-7s">CO-RE · BTF</span>
+    <span class="cine-drift" style="left:61%;--ro:0.29;animation-duration:16s;animation-delay:-14s">level 0 → 4</span>
+    <span class="cine-drift o" style="left:75%;--ro:0.26;animation-duration:16s;animation-delay:-8s">observe-only: KB_OBSERVE_ONLY</span>
+  </div>
   <div class="wrap">
     <div class="eyebrow">Open-source research prototype · GPL-3.0</div>
     <h1>Kernel <span>Borderlands</span></h1>
@@ -137,6 +186,16 @@ svg text{font-family:Inter,system-ui,sans-serif}
 </section>
 
 <section id="how">
+  <div class="cine alt" aria-hidden="true" style="--cx:30%;--cd:6.5s;--csd:12s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+    <span class="cine-drift" style="left:5%;--ro:0.32;animation-duration:21s;animation-delay:-2s">sched_process_exec</span>
+    <span class="cine-drift o" style="left:22%;--ro:0.31;animation-duration:16s;animation-delay:-8s">score → level</span>
+    <span class="cine-drift" style="left:40%;--ro:0.26;animation-duration:15s;animation-delay:-13s">CPM · CWP</span>
+    <span class="cine-drift o" style="left:58%;--ro:0.3;animation-duration:18s;animation-delay:-2s">ack type 10</span>
+    <span class="cine-drift" style="left:75%;--ro:0.29;animation-duration:17s;animation-delay:-10s">audit · chained</span>
+  </div>
   <div class="wrap">
     <div class="eyebrow">How it works</div>
     <h2>Transitions, not events</h2>
@@ -157,6 +216,17 @@ svg text{font-family:Inter,system-ui,sans-serif}
 </section>
 
 <section id="architecture">
+  <div class="cine" aria-hidden="true" style="--cx:70%;--cd:6.5s;--csd:11s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+    <span class="cine-drift" style="left:5%;--ro:0.3;animation-duration:17s;animation-delay:-4s">kbct.sock</span>
+    <span class="cine-drift o" style="left:19%;--ro:0.26;animation-duration:19s;animation-delay:-6s">kbd.sock</span>
+    <span class="cine-drift" style="left:33%;--ro:0.26;animation-duration:18s;animation-delay:-12s">13 gRPC calls</span>
+    <span class="cine-drift o" style="left:47%;--ro:0.3;animation-duration:16s;animation-delay:-2s">L1 sync.Map · L2 SQLite WAL</span>
+    <span class="cine-drift" style="left:61%;--ro:0.31;animation-duration:18s;animation-delay:-16s">Ray actors · advisory</span>
+    <span class="cine-drift o" style="left:75%;--ro:0.29;animation-duration:21s;animation-delay:-11s">kbopd · 127.0.0.1:8082</span>
+  </div>
   <div class="wrap">
     <div class="eyebrow">Architecture</div>
     <h2>Five subsystems, Unix sockets only</h2>
@@ -196,6 +266,16 @@ svg text{font-family:Inter,system-ui,sans-serif}
 </section>
 
 <section id="detection">
+  <div class="cine alt" aria-hidden="true" style="--cx:35%;--cd:6s;--csd:10s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+    <span class="cine-drift" style="left:5%;--ro:0.28;animation-duration:22s;animation-delay:-12s">19 behaviour rules</span>
+    <span class="cine-drift o" style="left:22%;--ro:0.31;animation-duration:18s;animation-delay:-6s">entropy + CUSUM beacon</span>
+    <span class="cine-drift" style="left:40%;--ro:0.3;animation-duration:18s;animation-delay:-3s">feature schema v6</span>
+    <span class="cine-drift o" style="left:58%;--ro:0.28;animation-duration:19s;animation-delay:-16s">token bucket · rate limit</span>
+    <span class="cine-drift" style="left:75%;--ro:0.3;animation-duration:22s;animation-delay:-10s">use_learned: false</span>
+  </div>
   <div class="wrap">
     <div class="eyebrow">Detection</div>
     <h2>Scores, evidence and rules</h2>
@@ -208,6 +288,17 @@ svg text{font-family:Inter,system-ui,sans-serif}
 </section>
 
 <section id="containment">
+  <div class="cine" aria-hidden="true" style="--cx:62%;--cd:7s;--csd:11s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+    <span class="cine-drift" style="left:5%;--ro:0.3;animation-duration:16s;animation-delay:-4s">lsm/file_open</span>
+    <span class="cine-drift o" style="left:19%;--ro:0.32;animation-duration:21s;animation-delay:-6s">lsm/socket_connect</span>
+    <span class="cine-drift" style="left:33%;--ro:0.29;animation-duration:20s;animation-delay:-5s">lsm/file_mprotect</span>
+    <span class="cine-drift o" style="left:47%;--ro:0.31;animation-duration:21s;animation-delay:-2s">pidfd_open → SIGKILL</span>
+    <span class="cine-drift" style="left:61%;--ro:0.28;animation-duration:16s;animation-delay:-11s">no reply in 3 s: no kill</span>
+    <span class="cine-drift o" style="left:75%;--ro:0.3;animation-duration:20s;animation-delay:-16s">PID locked out 30 s</span>
+  </div>
   <div class="wrap">
     <div class="eyebrow">Containment</div>
     <h2>Five levels behind two gates</h2>
@@ -227,6 +318,17 @@ svg text{font-family:Inter,system-ui,sans-serif}
 </section>
 
 <section id="results">
+  <div class="cine alt" aria-hidden="true" style="--cx:50%;--cd:5.5s;--csd:12s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+    <span class="cine-drift" style="left:5%;--ro:0.32;animation-duration:22s;animation-delay:-3s">null syscall +38 ns</span>
+    <span class="cine-drift o" style="left:19%;--ro:0.29;animation-duration:16s;animation-delay:-9s">open +199 ns</span>
+    <span class="cine-drift" style="left:33%;--ro:0.31;animation-duration:16s;animation-delay:-2s">connect +290 ns</span>
+    <span class="cine-drift o" style="left:47%;--ro:0.28;animation-duration:19s;animation-delay:-15s">fork+exec +26 µs</span>
+    <span class="cine-drift" style="left:61%;--ro:0.26;animation-duration:21s;animation-delay:-12s">make +0.4%</span>
+    <span class="cine-drift o" style="left:75%;--ro:0.27;animation-duration:22s;animation-delay:-12s">kbd ≈ 28 MB RSS</span>
+  </div>
   <div class="wrap">
     <div class="eyebrow">Results so far</div>
     <h2>What has been measured</h2>
@@ -266,6 +368,15 @@ svg text{font-family:Inter,system-ui,sans-serif}
 </section>
 
 <section id="research">
+  <div class="cine" aria-hidden="true" style="--cx:30%;--cd:7s;--csd:13s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+    <span class="cine-drift" style="left:5%;--ro:0.26;animation-duration:16s;animation-delay:-16s">10.20944/preprints202610.2818.v1</span>
+    <span class="cine-drift o" style="left:28%;--ro:0.27;animation-duration:18s;animation-delay:-10s">CITATION.cff</span>
+    <span class="cine-drift" style="left:52%;--ro:0.29;animation-duration:18s;animation-delay:-13s">CITATION.bib</span>
+    <span class="cine-drift o" style="left:75%;--ro:0.27;animation-duration:22s;animation-delay:-3s">GPL-3.0</span>
+  </div>
   <div class="wrap">
     <div class="eyebrow">Research</div>
     <h2>Paper and citation</h2>
@@ -288,6 +399,16 @@ svg text{font-family:Inter,system-ui,sans-serif}
 </section>
 
 <section id="start">
+  <div class="cine alt" aria-hidden="true" style="--cx:70%;--cd:6.5s;--csd:11s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+    <span class="cine-drift" style="left:5%;--ro:0.3;animation-duration:22s;animation-delay:-13s">Linux 5.10+</span>
+    <span class="cine-drift o" style="left:22%;--ro:0.32;animation-duration:19s;animation-delay:-5s">CONFIG_DEBUG_INFO_BTF=y</span>
+    <span class="cine-drift" style="left:40%;--ro:0.31;animation-duration:21s;animation-delay:-9s">sudo kbctl up</span>
+    <span class="cine-drift o" style="left:58%;--ro:0.31;animation-duration:21s;animation-delay:-12s">kbctl audit verify</span>
+    <span class="cine-drift" style="left:75%;--ro:0.27;animation-duration:21s;animation-delay:-8s">sshd@kb-operator · :2222</span>
+  </div>
   <div class="wrap">
     <div class="eyebrow">Get started</div>
     <h2>Install and run</h2>
@@ -309,6 +430,15 @@ kbctl audit verify</code></pre>
 </section>
 
 <section id="docs">
+  <div class="cine" aria-hidden="true" style="--cx:25%;--cd:7s;--csd:12s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+    <span class="cine-drift" style="left:5%;--ro:0.27;animation-duration:16s;animation-delay:-6s">docs/</span>
+    <span class="cine-drift o" style="left:28%;--ro:0.26;animation-duration:18s;animation-delay:-8s">field manuals</span>
+    <span class="cine-drift" style="left:52%;--ro:0.28;animation-duration:22s;animation-delay:-6s">CHANGELOG.md</span>
+    <span class="cine-drift o" style="left:75%;--ro:0.27;animation-duration:19s;animation-delay:-1s">release 1.1.0</span>
+  </div>
   <div class="wrap">
     <div class="eyebrow">Documentation</div>
     <h2>Where to read next</h2>
@@ -326,6 +456,15 @@ kbctl audit verify</code></pre>
 </section>
 
 <section id="roadmap">
+  <div class="cine alt" aria-hidden="true" style="--cx:78%;--cd:8s;--csd:13s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+    <span class="cine-drift" style="left:5%;--ro:0.3;animation-duration:21s;animation-delay:-12s">LID-DS captures</span>
+    <span class="cine-drift o" style="left:28%;--ro:0.31;animation-duration:20s;animation-delay:-5s">7-day benign baseline</span>
+    <span class="cine-drift" style="left:52%;--ro:0.32;animation-duration:15s;animation-delay:-15s">Falco · Tetragon comparison</span>
+    <span class="cine-drift o" style="left:75%;--ro:0.29;animation-duration:21s;animation-delay:-13s">freeze 1.2.0</span>
+  </div>
   <div class="wrap">
     <div class="eyebrow">Roadmap</div>
     <h2>Done and next</h2>
@@ -346,6 +485,11 @@ kbctl audit verify</code></pre>
 </section>
 
 <section id="team" class="team">
+  <div class="cine" aria-hidden="true" style="--cx:50%;--cd:8s;--csd:14s">
+    <div class="cine-grid"></div>
+    <div class="cine-glow"></div>
+    <div class="cine-scan"></div>
+  </div>
   <div class="wrap">
     <div class="eyebrow">Team</div>
     <h2>Who builds it</h2>
@@ -361,6 +505,7 @@ kbctl audit verify</code></pre>
 </main>
 
 <footer>
+  <div class="cine" aria-hidden="true" style="--cd:8s"><div class="cine-grid"></div></div>
   <div class="wrap">
     <span>Kernel Borderlands · GPL-3.0 · research prototype, run only on hosts you are prepared to restrict</span>
     <span><a href="https://github.com/pardhuvarmax/kernel-borderlands">GitHub</a> · <a href="https://github.com/pardhuvarmax/kernel-borderlands/blob/main/CHANGELOG.md">Changelog</a> · <a href="https://doi.org/10.20944/preprints202610.2818.v1">Preprint</a></span>
