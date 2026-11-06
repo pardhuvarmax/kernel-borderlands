@@ -1556,6 +1556,15 @@
     .member-orcid:hover { color:var(--volt); }
     .agent-desc code,.swarm-desc code,.layer-desc code,.ss-desc code,.ops-surf-desc code,.zone-desc code { font-size:.92em; }
 
+    .nav-logo-text,.nav-links a,.nav-gh { white-space:nowrap; }
+    .gf-node { min-width:0;flex:0 1 auto; }
+    @media (max-width:1280px) {
+      .ct-layout { grid-template-columns:minmax(0,1fr);gap:40px; }
+      .nav-links { gap:24px; }
+    }
+    @media (max-width:1180px) {
+      .nav-links { display:none; }
+    }
     @media (max-width:960px) {
       #containment,#results,#research,#roadmap { padding:72px 24px; }
       .ct-layout,.res-grid,#research { grid-template-columns:minmax(0,1fr);gap:40px; }
