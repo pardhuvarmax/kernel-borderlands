@@ -1,0 +1,55 @@
+name: Deploy site
+
+# Publishes docs/ to GitHub Pages. The team photos are not in git (docs/assets/team/
+# is ignored): they are decoded here from the TEAM_PHOTO_* repository secrets
+# (base64 of each JPEG) just before the artifact is built. A missing secret just
+# leaves that card on its initials fallback.
+# Requires Settings > Pages > Source = "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - .github/workflows/deploy-site.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add team photos from secrets
+        env:
+          PARDHU: ${{ secrets.TEAM_PHOTO_PARDHU }}
+          TEJASWINI: ${{ secrets.TEAM_PHOTO_TEJASWINI }}
+          KARTHIK: ${{ secrets.TEAM_PHOTO_KARTHIK }}
+          RUPA: ${{ secrets.TEAM_PHOTO_RUPA }}
+        run: |
+          mkdir -p docs/assets/team
+          for n in pardhu tejaswini karthik rupa; do
+            v="$(printenv "${n^^}")"
+            if [ -n "$v" ]; then
+              printf '%s' "$v" | base64 -d > "docs/assets/team/$n.jpg"
+            else
+              echo "::warning::TEAM_PHOTO_${n^^} not set; $n keeps the initials fallback"
+            fi
+          done
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4

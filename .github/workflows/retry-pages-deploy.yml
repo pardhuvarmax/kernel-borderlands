@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows:
       - pages build and deployment
+      - Deploy site
     types:
       - completed
 

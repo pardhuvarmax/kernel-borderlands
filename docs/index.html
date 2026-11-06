@@ -1269,10 +1269,11 @@
     .member:hover { background:var(--s2); }
     .member:hover::before { transform:scaleX(1); }
     .member-initial {
-      width:52px;height:52px;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;
-      font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--ember);margin-bottom:24px;
+      width:96px;height:96px;position:relative;overflow:hidden;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;
+      font-family:'Bebas Neue',sans-serif;font-size:30px;color:var(--ember);margin-bottom:24px;
       transition:border-color .2s;
     }
+    .member-initial img { position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block; }
     .member:hover .member-initial { border-color:var(--ember); }
     .member-name { font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:.03em;margin-bottom:6px; }
     .member-id { font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.12em;color:var(--muted);margin-bottom:18px; }
@@ -1554,6 +1555,7 @@
     .qs-links { display:flex;gap:12px;margin-top:20px;flex-wrap:wrap; }
     .member-orcid { display:inline-block;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;color:var(--ember);text-decoration:none; }
     .member-orcid:hover { color:var(--volt); }
+    .member-links { display:flex;gap:18px;flex-wrap:wrap;margin-top:18px; }
     .agent-desc code,.swarm-desc code,.layer-desc code,.ss-desc code,.ops-surf-desc code,.zone-desc code { font-size:.92em; }
 
     .nav-logo-text,.nav-links a,.nav-gh { white-space:nowrap; }
@@ -3404,28 +3406,32 @@
 
   <div class="team-grid r" style="margin-top:64px">
     <div class="member">
-      <div class="member-initial">PV</div>
+      <div class="member-initial">PV<img src="assets/team/pardhu.jpg" alt="Photo of Pardhu Sri Rushi Varma Konduru" width="96" height="96" loading="lazy" onerror="this.remove()"></div>
       <div class="member-name">Pardhu Sri Rushi Varma Konduru</div>
       <div class="member-id">Lead · architecture · kb-core · kb-checker</div>
-      <p class="member-domain">System design, the eBPF sensor, BPF-LSM enforcement, the CPM and CWP gates, the watchdog and the documentation.</p><a class="member-orcid" href="https://orcid.org/0009-0005-3251-9944" target="_blank" rel="noopener">ORCID ↗</a>
+      <p class="member-domain">System design, the eBPF sensor, BPF-LSM enforcement, the CPM and CWP gates, the watchdog and the documentation.</p>
+      <div class="member-links"><a class="member-orcid" href="https://github.com/pardhuvarmax" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/pardhu-sri-rushi-varma-konduru-696886279/" target="_blank" rel="noopener">LINKEDIN ↗</a><a class="member-orcid" href="https://orcid.org/0009-0005-3251-9944" target="_blank" rel="noopener">ORCID ↗</a></div>
     </div>
     <div class="member">
-      <div class="member-initial">TK</div>
+      <div class="member-initial">TK<img src="assets/team/tejaswini.jpg" alt="Photo of Tejaswini Kandukoori" width="96" height="96" loading="lazy" onerror="this.remove()"></div>
       <div class="member-name">Tejaswini Kandukoori</div>
       <div class="member-id">kb-control-plane · pipeline engineering</div>
       <p class="member-domain">The kbd daemon: gRPC and IPC, storage, process lifecycle, the HTTP and SSE API, enforcement and the audit chain.</p>
+      <div class="member-links"><a class="member-orcid" href="https://github.com/Tejaswini4119" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/kandukoori-tejaswini-765774289/" target="_blank" rel="noopener">LINKEDIN ↗</a></div>
     </div>
     <div class="member">
-      <div class="member-initial">KK</div>
+      <div class="member-initial">KK<img src="assets/team/karthik.jpg" alt="Photo of Karthik Kanne" width="96" height="96" loading="lazy" onerror="this.remove()"></div>
       <div class="member-name">Karthik Kanne</div>
       <div class="member-id">kb-aads · attack lab · testing</div>
       <p class="member-domain">The Ray agents, consensus, the dataset pipeline and reinforcement-learning training, plus attack simulation and adversarial testing.</p>
+      <div class="member-links"><a class="member-orcid" href="https://github.com/karthik21002" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/kanne-karthik-02b1b1295/" target="_blank" rel="noopener">LINKEDIN ↗</a></div>
     </div>
     <div class="member">
-      <div class="member-initial">RK</div>
+      <div class="member-initial">RK<img src="assets/team/rupa.jpg" alt="Photo of Rupa Yeshvitha Karedla" width="96" height="96" loading="lazy" onerror="this.remove()"></div>
       <div class="member-name">Rupa Yeshvitha Karedla</div>
       <div class="member-id">kb-op · interface engineering</div>
       <p class="member-domain">The operator interfaces: the command-line tool, the SSH terminal console, the web dashboard and the MCP server.</p>
+      <div class="member-links"><a class="member-orcid" href="https://github.com/Rupakaredla" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/rupa-yeshvitha-karedla-4159b2289/" target="_blank" rel="noopener">LINKEDIN ↗</a></div>
     </div>
   </div>
 </section>
