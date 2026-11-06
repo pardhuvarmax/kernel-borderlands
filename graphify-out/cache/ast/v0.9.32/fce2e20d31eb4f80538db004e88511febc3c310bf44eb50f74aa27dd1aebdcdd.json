@@ -1,1 +1,0 @@
-{"nodes": [{"id": "$graphify-root$_kb_control_plane_internal_ipc_sockets_go", "label": "sockets.go", "file_type": "code", "source_file": "kb-control-plane/internal/ipc/sockets.go", "source_location": "L1"}], "edges": [], "raw_calls": []}
