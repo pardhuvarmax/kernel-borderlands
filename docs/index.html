@@ -57,8 +57,11 @@ h3{font-size:18px;margin:0 0 8px}
 .btns{display:flex;flex-wrap:wrap;gap:12px}
 .btn{display:inline-block;padding:10px 18px;border-radius:8px;border:1px solid var(--line);color:var(--text);text-decoration:none;font-weight:500;font-size:15px}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#06161a}
-.notice{margin-top:32px;border:1px solid var(--accent2);border-left:4px solid var(--accent2);background:color-mix(in srgb,var(--accent2) 8%,transparent);border-radius:8px;padding:14px 18px;font-size:15px}
+.notice{margin-top:32px;border:1px solid var(--accent2);border-left:4px solid var(--accent2);background:color-mix(in srgb,var(--accent2) 8%,var(--bg));position:relative;z-index:2;border-radius:8px;padding:14px 18px;font-size:15px}
 .notice strong{color:var(--accent2)}
+.live{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-right:8px;vertical-align:1px;animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.live{animation:none}}
 .grid{display:grid;gap:16px}
 .g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
 .g3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
@@ -181,7 +184,7 @@ section>.wrap,footer>.wrap{position:relative;z-index:1}
       <a class="btn" href="https://github.com/pardhuvarmax/kernel-borderlands">GitHub</a>
       <a class="btn" href="https://doi.org/10.20944/preprints202610.2818.v1">Preprint</a>
     </div>
-    <div class="notice"><strong>Correction to preprint v1.</strong> The learned-policy accuracy reported in v1 (97–100% per attack class) is not valid evidence: a training feature was derived from the labels. The project found this itself in release 1.1.0, now refuses those checkpoints on the live path, and is re-evaluating on sensor-derived data. A corrected v2 is in preparation. See <a href="#results">Results</a>.</div>
+    <div class="notice"><strong><span class="live" aria-hidden="true"></span>Ongoing updates.</strong> Kernel Borderlands is under active development; release 1.1.0 is current. In progress now: LID-DS real-exploit captures, retraining the learned policies on sensor-derived features, a timing signal for C2 beacons, and an overhead re-run on the current build. Preprint v2 follows. See the <a href="#roadmap">Roadmap</a>.</div>
   </div>
 </section>
 
@@ -383,7 +386,7 @@ section>.wrap,footer>.wrap{position:relative;z-index:1}
     <div class="card">
       <h3>Kernel Borderlands: An eBPF-Based Behavioral Detection and Multi-Agent Containment Architecture for Linux Server Workloads</h3>
       <p>Konduru, P.S.R.V.; Kandukoori, T.; Kanne, K.; Karedla, R.Y. <em>Preprints</em> 2026. <a href="https://doi.org/10.20944/preprints202610.2818.v1">doi:10.20944/preprints202610.2818.v1</a></p>
-      <p style="margin-top:8px">v1 describes release 1.0.0. Its learned-policy accuracy figures are superseded (see the correction above); v2 will report sensor-derived and real-exploit results.</p>
+      <p style="margin-top:8px">v1 describes release 1.0.0. Its learned-policy figures are being re-evaluated on sensor-derived data; v2 will report those and real-exploit results.</p>
     </div>
 <pre><code>@article{202610.2818,
   doi       = {10.20944/preprints202610.2818.v1},
