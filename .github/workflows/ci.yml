@@ -31,8 +31,8 @@ jobs:
       run:
         working-directory: kb-control-plane
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.25'
       - run: go build ./...
@@ -43,7 +43,7 @@ jobs:
     name: kb-core (eBPF + userspace loader — build only, see workflow header)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install build prerequisites
         run: |
           sudo apt-get update
@@ -80,7 +80,7 @@ jobs:
       run:
         working-directory: kb-checker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install native build prerequisites (BR-003)
         run: sudo apt-get update && sudo apt-get install -y libelf-dev pkg-config zlib1g-dev protobuf-compiler
@@ -97,11 +97,11 @@ jobs:
       run:
         working-directory: kb-op/kb-tui
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       # kb-tui embeds kb-dashboard/dist/ at compile time (src/dash.rs,
       # #[derive(RustEmbed)]); dist/ is gitignored, so build it first.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -128,8 +128,8 @@ jobs:
       run:
         working-directory: kb-op/${{ matrix.module }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.25'
       - run: go build ./...
@@ -143,8 +143,8 @@ jobs:
       run:
         working-directory: kb-op/kb-dashboard
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -160,8 +160,8 @@ jobs:
       run:
         working-directory: kb-aads
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
