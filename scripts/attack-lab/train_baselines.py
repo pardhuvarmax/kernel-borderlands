@@ -127,6 +127,23 @@ def main():
         ak, an, bk, bn = exec_flags(te, fl)
         P(f"{name:42} {fs:8} {fmt(ak, an):20} {fmt(bk, bn):20} {fl[bgm].sum()}/{bgm.sum()}")
 
+    # Same fixed systems, same single scoring of the test split: the per-scenario breakdown of three of
+    # them, because the aggregate hides WHICH scenarios are flagged (the hard-negative pairs).
+    P("\n=== TEST split, per scenario: executions flagged / executions (the same fixed systems, scored once) ===")
+    picks = [s_ for s_ in systems if (s_[0], s_[1]) in (("fixed rules: zone >= SUSPICIOUS", "-"),
+                                                        ("gradient-boosted tree", "v1"),
+                                                        ("gradient-boosted tree", "all"))]
+    scen = te[te.execution_id.notna()].drop_duplicates("execution_id")[["kind", "scenario"]].drop_duplicates()
+    cols_ = [f"{n[:22]} {fs}" for n, fs, _ in picks]
+    P(f"{'kind':7} {'scenario':30} " + "  ".join(f"{c:>26}" for c in cols_))
+    per = []
+    for n, fs, fn in picks:
+        fl = np.asarray(fn(te))
+        e = te[te.execution_id.notna()].assign(f=fl[te.execution_id.notna().values])
+        per.append(e.groupby(["kind", "scenario", "execution_id"]).f.max().groupby(["kind", "scenario"]).agg(["sum", "count"]))
+    for (kind, sc) in sorted(per[0].index):
+        P(f"{kind:7} {sc:30} " + "  ".join(f"{int(p_.loc[(kind, sc), 'sum'])}/{int(p_.loc[(kind, sc), 'count']):<2}".rjust(26) for p_ in per))
+
     P("\n=== Leave-one-family-out (TRAIN split only; never touches test) ===")
     P("train on train-split executions of every other family, threshold on their negatives, report recall on the held-out family")
     fams = sorted(tr[tr.kind == "attack"].family.dropna().unique())
