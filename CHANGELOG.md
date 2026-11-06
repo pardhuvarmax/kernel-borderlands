@@ -8,6 +8,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ### Changed
 
+- **Team roles on the project site (`docs/index.html`)**: the role lines under the four team cards now read Pardhu: Lead · architecture · kb-core · kb-checker (unchanged); Tejaswini: kb-control-plane · pipeline engineering; Karthik: kb-aads · attack lab · testing; Rupa: kb-op · interface engineering. (PardhuVarma Konduru)
 - **Project site rebuilt (`docs/index.html`)**: the GitHub Pages site had not changed since 2026-08-02 and described an older design (kernel 5.8+, Bubble Tea/Wish TUI, WebSockets, QLoRA, an unmeasured "2.8% overhead, target met") with links into moved documents. It is now a single static page built from the current code and data: how the loop works, the five subsystems and their sockets, detection (rules, evidence flags, feature schema v6), the five containment levels with the CPM/CWP gates and the acknowledged kill, the measured overhead (commit `450ff3e`, re-run pending), the pooled attack-lab test-split results with their caveats, the preprint citation with a correction note on v1's learned-policy figures, install steps, a documentation map whose links all resolve, a done/next roadmap and the team. No external scripts; light and dark themes; diagrams scroll sideways on phones.
 
 ### Removed
