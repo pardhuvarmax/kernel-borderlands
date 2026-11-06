@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#000000" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:ital,wght@0,300;0,400;0,500;0,600;1,300&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Kalam:wght@400&family=Inter:ital,wght@0,300;0,400;0,500;0,600;1,300&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1266,7 +1266,7 @@
       content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
       background:var(--ember);transform:scaleX(0);transform-origin:left;transition:transform .3s ease;
     }
-    .member:hover { background:var(--s2); }
+    .member:hover { background:var(--black); }
     .member:hover::before { transform:scaleX(1); }
     .member-initial {
       width:96px;height:96px;position:relative;overflow:hidden;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;
@@ -1275,9 +1275,52 @@
     }
     .member-initial img { position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block; }
     .member:hover .member-initial { border-color:var(--ember); }
+    /* Subtle ember glare behind the content: a faint orange glow follows the pointer (JS sets --mx/--my/--o); photo stays clear */
+    .member { --mx:50%;--my:50%;--o:0; }
+    .member > * { position:relative;z-index:1; }
+    .member::after {
+      content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
+      opacity:var(--o);transition:opacity .35s;
+      background:radial-gradient(circle at var(--mx) var(--my),rgba(255,69,0,.17),rgba(255,69,0,.05) 30%,transparent 55%);
+    }
+    @media (prefers-reduced-motion:reduce) {
+      .member::after { transition:none; }
+    }
+    /* Unfoldable handwritten note per author */
+    .note-btn {
+      display:inline-block;margin-top:16px;padding:0;background:none;border:0;cursor:none;
+      font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;color:var(--muted);
+      transition:color .2s;
+    }
+    .note-btn:hover,.note-btn:focus-visible { color:var(--ember); }
+    .note-btn[aria-expanded="true"] { color:var(--ember); }
+    .note-wrap { display:grid;grid-template-rows:0fr;visibility:hidden;transition:grid-template-rows .45s ease,visibility 0s .45s; }
+    .note-wrap.open { grid-template-rows:1fr;visibility:visible;transition:grid-template-rows .45s ease,visibility 0s; }
+    .note-clip { overflow:hidden;min-height:0; }
+    .note {
+      margin-top:14px;padding:16px 16px 14px 18px;position:relative;
+      background:repeating-linear-gradient(to bottom,transparent 0,transparent 23px,rgba(255,69,0,.14) 23px,rgba(255,69,0,.14) 24px),#0b0b0b;
+      border:1px solid rgba(255,69,0,.35);border-left:3px solid var(--ember);
+      font-family:'Kalam',cursive;font-weight:400;font-size:15px;line-height:24px;color:var(--ember);
+      transform:rotate(-1.2deg) rotateX(-70deg);transform-origin:top;opacity:0;
+      transition:transform .5s ease .05s,opacity .35s ease .05s;
+    }
+    .note-wrap.open .note { transform:rotate(-1.2deg) rotateX(0);opacity:1; }
+    .note::after {
+      content:'';position:absolute;top:-1px;right:-1px;width:16px;height:16px;
+      background:linear-gradient(225deg,var(--black) 50%,rgba(255,69,0,.35) 50%);
+    }
+    .note-q { font-size:16px;line-height:24px; }
+    .note-sig { text-align:right;font-size:14px;opacity:.8; }
+    @media (prefers-reduced-motion:reduce) {
+      .note-wrap,.note-wrap.open,.note { transition:none; }
+      .note { transform:rotate(-1.2deg); }
+    }
     .member-name { font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:.03em;margin-bottom:6px; }
     .member-id { font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.12em;color:var(--muted);margin-bottom:18px; }
-    .member-domain { font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.6;margin-bottom:18px; }
+        .member-row { font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.6;margin-bottom:12px; }
+    .member-k { display:block;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ember);margin-bottom:2px; }
+.member-domain { font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.6;margin-bottom:18px; }
     .member-owns { display:flex;flex-direction:column;gap:6px; }
     .member-own-tag {
       font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
@@ -3408,30 +3451,42 @@
     <div class="member">
       <div class="member-initial">PV<img src="assets/team/pardhu.jpg" alt="Photo of Pardhu Sri Rushi Varma Konduru" width="96" height="96" loading="lazy" onerror="this.remove()"></div>
       <div class="member-name">Pardhu Sri Rushi Varma Konduru</div>
-      <div class="member-id">Lead · architecture · kb-core · kb-checker</div>
-      <p class="member-domain">System design, the eBPF sensor, BPF-LSM enforcement, the CPM and CWP gates, the watchdog and the documentation.</p>
+      <div class="member-id">Project Lead · Systems &amp; Security Engineering</div>
+      <div class="member-row"><span class="member-k">Focus</span>System Design · Performance Optimization &amp; Architectures</div>
+      <div class="member-row"><span class="member-k">Subsystems</span>kb-core, kb-checker &amp; cross-operational subsystems</div>
       <div class="member-links"><a class="member-orcid" href="https://github.com/pardhuvarmax" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/pardhu-sri-rushi-varma-konduru-696886279/" target="_blank" rel="noopener">LINKEDIN ↗</a><a class="member-orcid" href="https://orcid.org/0009-0005-3251-9944" target="_blank" rel="noopener">ORCID ↗</a></div>
+      <button class="note-btn" type="button" aria-expanded="false" aria-controls="note-pardhu">UNFOLD NOTE <span aria-hidden="true">✎</span></button>
+      <div class="note-wrap" id="note-pardhu"><div class="note-clip"><div class="note"><div class="note-q">“Why take the usual route?”</div><div class="note-sig">— Pardhu</div></div></div></div>
     </div>
     <div class="member">
       <div class="member-initial">TK<img src="assets/team/tejaswini.jpg" alt="Photo of Tejaswini Kandukoori" width="96" height="96" loading="lazy" onerror="this.remove()"></div>
       <div class="member-name">Tejaswini Kandukoori</div>
-      <div class="member-id">kb-control-plane · pipeline engineering</div>
-      <p class="member-domain">The kbd daemon: gRPC and IPC, storage, process lifecycle, the HTTP and SSE API, enforcement and the audit chain.</p>
+      <div class="member-id">Subsystem Lead · Control Plane &amp; Pipelines Engineering</div>
+      <div class="member-row"><span class="member-k">Focus</span>Control Design &amp; Cross-system Integrations · IPC &amp; Networking</div>
+      <div class="member-row"><span class="member-k">Subsystems</span>kb-control-plane &amp; Socket Communications</div>
       <div class="member-links"><a class="member-orcid" href="https://github.com/Tejaswini4119" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/kandukoori-tejaswini-765774289/" target="_blank" rel="noopener">LINKEDIN ↗</a></div>
+      <button class="note-btn" type="button" aria-expanded="false" aria-controls="note-tejaswini">UNFOLD NOTE <span aria-hidden="true">✎</span></button>
+      <div class="note-wrap" id="note-tejaswini"><div class="note-clip"><div class="note"><div class="note-q">“Wait, there’s another way.”</div><div class="note-sig">— Tejaswini</div></div></div></div>
     </div>
     <div class="member">
       <div class="member-initial">KK<img src="assets/team/karthik.jpg" alt="Photo of Karthik Kanne" width="96" height="96" loading="lazy" onerror="this.remove()"></div>
       <div class="member-name">Karthik Kanne</div>
-      <div class="member-id">kb-aads · attack lab · testing</div>
-      <p class="member-domain">The Ray agents, consensus, the dataset pipeline and reinforcement-learning training, plus attack simulation and adversarial testing.</p>
+      <div class="member-id">Subsystem Lead · Adversarial Testing &amp; AI Engineering</div>
+      <div class="member-row"><span class="member-k">Focus</span>AI Pipelines &amp; Agentic Development · Security &amp; Infrastructure Testing</div>
+      <div class="member-row"><span class="member-k">Subsystems</span>kb-aads, kb-scripts &amp; cross-operational subsystems</div>
       <div class="member-links"><a class="member-orcid" href="https://github.com/karthik21002" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/kanne-karthik-02b1b1295/" target="_blank" rel="noopener">LINKEDIN ↗</a></div>
+      <button class="note-btn" type="button" aria-expanded="false" aria-controls="note-karthik">UNFOLD NOTE <span aria-hidden="true">✎</span></button>
+      <div class="note-wrap" id="note-karthik"><div class="note-clip"><div class="note"><div class="note-q">“Who’s in the box? Look outside.”</div><div class="note-sig">— Karthik</div></div></div></div>
     </div>
     <div class="member">
       <div class="member-initial">RK<img src="assets/team/rupa.jpg" alt="Photo of Rupa Yeshvitha Karedla" width="96" height="96" loading="lazy" onerror="this.remove()"></div>
       <div class="member-name">Rupa Yeshvitha Karedla</div>
-      <div class="member-id">kb-op · interface engineering</div>
-      <p class="member-domain">The operator interfaces: the command-line tool, the SSH terminal console, the web dashboard and the MCP server.</p>
+      <div class="member-id">Subsystem Lead · Technical &amp; Operational Communications · Interface Engineering</div>
+      <div class="member-row"><span class="member-k">Focus</span>UserEnd Design &amp; Development · API &amp; Developer Tooling</div>
+      <div class="member-row"><span class="member-k">Subsystems</span>kb-ops &amp; configurations &amp; policy management</div>
       <div class="member-links"><a class="member-orcid" href="https://github.com/Rupakaredla" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/rupa-yeshvitha-karedla-4159b2289/" target="_blank" rel="noopener">LINKEDIN ↗</a></div>
+      <button class="note-btn" type="button" aria-expanded="false" aria-controls="note-rupa">UNFOLD NOTE <span aria-hidden="true">✎</span></button>
+      <div class="note-wrap" id="note-rupa"><div class="note-clip"><div class="note"><div class="note-q">“Well, here we go again.”</div><div class="note-sig">— Rupa</div></div></div></div>
     </div>
   </div>
 </section>
@@ -3675,6 +3730,29 @@
       b.style.cssText = `--h:${h}px;--dur:${dur}s;--dl:${dl}s;height:4px`;
       el.appendChild(b);
     }
+  });
+
+  // Team cards: soft glare follows the pointer
+  if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches && window.matchMedia('(hover: hover)').matches){
+    document.querySelectorAll('.member').forEach(card=>{
+      card.addEventListener('pointermove',e=>{
+        const r=card.getBoundingClientRect();
+        card.style.setProperty('--mx',((e.clientX-r.left)/r.width*100)+'%');
+        card.style.setProperty('--my',((e.clientY-r.top)/r.height*100)+'%');
+        card.style.setProperty('--o',1);
+      });
+      card.addEventListener('pointerleave',()=>card.style.setProperty('--o',0));
+    });
+  }
+
+  // Team cards: unfold the handwritten note
+  document.querySelectorAll('.note-btn').forEach(btn=>{
+    const wrap=document.getElementById(btn.getAttribute('aria-controls'));
+    btn.addEventListener('click',()=>{
+      const open=wrap.classList.toggle('open');
+      btn.setAttribute('aria-expanded',open);
+      btn.firstChild.textContent=open?'FOLD NOTE ':'UNFOLD NOTE ';
+    });
   });
 
   // Hero parallax
