@@ -44,7 +44,6 @@ kb-op/kb-mcp/kb-mcp
 # Third-party dependencies
 libbpf/
 
-
 demo/
 
 data/
@@ -58,18 +57,10 @@ docs/AGENT_WORK/
 kb-control-plane/bin/kbd
 kb-op/kbctl/kbctl
 
-# graphify - keep only the human/machine-readable outputs
-graphify-out/*
-!graphify-out/graph.html
-!graphify-out/GRAPH_REPORT.md
-!graphify-out/graph.json
-!graphify-out/README.md
-
 
 
 # attack datasets
 scripts/dataset/output/raw/
-
 
 # packaged bundles (e.g. Colab training bundles) — regenerable, not source
 scripts/zips/
