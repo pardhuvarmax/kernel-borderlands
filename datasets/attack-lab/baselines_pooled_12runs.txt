@@ -1,0 +1,75 @@
+table: pooled 12 runs (the 9 runs of baselines_pooled_9runs.txt plus 20261107T223713, T230408, T232321, the first corpora with timing_entropy, schema v7) built by build_training_table.py
+rows 2376728  train 1086909  test 1289819  executions 840
+executions with rows, by split/kind: {('test', 'attack'): 178, ('test', 'benign'): 194, ('train', 'attack'): 222, ('train', 'benign'): 246}
+threshold rule: chosen on TRAIN only so that <= 0.1% of train benign+background rows are flagged
+
+=== TEST split (opened once): per-execution recall and false-positive rate, 95% Wilson intervals ===
+system                                     features attack flagged       benign flagged       bg rows flagged
+fixed rules: zone >= SUSPICIOUS            -        140/178 (72%-84%)    90/194 (40%-53%)     31368/1277589
+fixed rules: zone >= BORDERLANDS           -        18/178 (6%-15%)      0/194 (0%-2%)        1094/1277589
+logistic regression                        v1       144/178 (74%-86%)    118/194 (54%-67%)    689/1277589
+gradient-boosted tree                      v1       166/178 (89%-96%)    120/194 (55%-68%)    67/1277589
+gradient-boosted tree, no zone/score       v1       163/178 (87%-95%)    110/194 (50%-63%)    68/1277589
+logistic regression                        v1+tree  144/178 (74%-86%)    116/194 (53%-66%)    714/1277589
+gradient-boosted tree                      v1+tree  166/178 (89%-96%)    103/194 (46%-60%)    22/1277589
+gradient-boosted tree, no zone/score       v1+tree  165/178 (88%-96%)    111/194 (50%-64%)    21/1277589
+logistic regression                        all      146/178 (76%-87%)    115/194 (52%-66%)    642/1277589
+gradient-boosted tree                      all      169/178 (91%-97%)    101/194 (45%-59%)    73/1277589
+gradient-boosted tree, no zone/score       all      167/178 (89%-97%)    103/194 (46%-60%)    12/1277589
+
+=== TEST split, per scenario: executions flagged / executions (the same fixed systems, scored once) ===
+kind    scenario                         fixed rules: zone >= S -    gradient-boosted tree v1   gradient-boosted tree all
+attack  c2_beacon_real                                       0/12                        6/12                       10/12
+attack  c2_beacon_via_known_host_real                        0/8                         3/8                         1/8 
+attack  credential_access                                   12/12                       12/12                       12/12
+attack  credential_dump                                     10/10                       10/10                       10/10
+attack  evasion_slow                                        30/30                       30/30                       30/30
+attack  exfil_bulk_real                                     12/12                       12/12                       12/12
+attack  exfil_slow_real                                     12/12                       12/12                       12/12
+attack  exfil_small_real                                    12/12                       12/12                       12/12
+attack  exfil_staging                                       10/10                       10/10                       10/10
+attack  exfil_via_known_host_real                           12/12                       12/12                       12/12
+attack  memory_exploit                                       6/12                       12/12                       12/12
+attack  network_c2                                           0/12                       11/12                       12/12
+attack  privilege_escalation                                12/12                       12/12                       12/12
+attack  process_injection                                   12/12                       12/12                       12/12
+benign  benign_admin                                         0/12                        0/12                        0/12
+benign  benign_admin_privileged                             30/30                       30/30                       30/30
+benign  benign_backup_bulk                                  12/12                       12/12                       12/12
+benign  benign_backup_etc                                   10/10                       10/10                       10/10
+benign  benign_backup_new_host                              12/12                       12/12                       12/12
+benign  benign_backup_remote                                 8/8                         8/8                         8/8 
+benign  benign_compile                                       0/12                        0/12                        0/12
+benign  benign_credential_audit                             10/10                       10/10                       10/10
+benign  benign_credential_report                             8/8                         8/8                         8/8 
+benign  benign_database                                      0/12                        0/12                        0/12
+benign  benign_heartbeat_new_host                            0/8                         4/8                         7/8 
+benign  benign_heartbeat_real                                0/12                        5/12                        4/12
+benign  benign_idle                                          0/12                        0/12                        0/12
+benign  benign_telemetry_new_host                            0/12                        9/12                        0/12
+benign  benign_telemetry_small                               0/12                       11/12                        0/12
+benign  benign_web                                           0/12                        1/12                        0/12
+
+=== Leave-one-family-out (TRAIN split only; never touches test) ===
+train on train-split executions of every other family, threshold on their negatives, report recall on the held-out family
+held-out family             rules >= SUSPICIOUS                LR (v1+tree)               GBT (v1+tree)                   GBT (all)
+c2_known                          0/12 (0%-24%)               0/12 (0%-24%)              6/12 (25%-75%)               0/12 (0%-24%)
+c2_real                           0/18 (0%-18%)               0/18 (0%-18%)               4/18 (9%-45%)               1/18 (1%-26%)
+credential_access              18/18 (82%-100%)            18/18 (82%-100%)            18/18 (82%-100%)            18/18 (82%-100%)
+credential_dump                15/15 (80%-100%)            15/15 (80%-100%)            15/15 (80%-100%)            15/15 (80%-100%)
+exfil_bulk                     18/18 (82%-100%)            18/18 (82%-100%)            18/18 (82%-100%)            18/18 (82%-100%)
+exfil_known                    18/18 (82%-100%)            18/18 (82%-100%)            18/18 (82%-100%)            18/18 (82%-100%)
+exfil_slow                     18/18 (82%-100%)              5/18 (12%-51%)            18/18 (82%-100%)            18/18 (82%-100%)
+exfil_small                    18/18 (82%-100%)            18/18 (82%-100%)            18/18 (82%-100%)            18/18 (82%-100%)
+exfil_staging                  15/15 (80%-100%)            15/15 (80%-100%)            15/15 (80%-100%)            15/15 (80%-100%)
+memory_exploit                   9/18 (29%-71%)             13/18 (49%-88%)               4/18 (9%-45%)               2/18 (3%-33%)
+network_c2                        0/18 (0%-18%)               0/18 (0%-18%)             12/18 (44%-84%)               0/18 (0%-18%)
+privilege_escalation           18/18 (82%-100%)            18/18 (82%-100%)            18/18 (82%-100%)            18/18 (82%-100%)
+process_injection              18/18 (82%-100%)            18/18 (82%-100%)              9/18 (29%-71%)              9/18 (29%-71%)
+
+Caveats: tiny n (see the intervals); the rules and the learned models share the same sensor features; held-out families appear only in test; feature columns a run never emitted hold schema defaults; tree_* are reconstructed for the three older runs; nothing here is a claim about other hosts or attacks.
+
+Reading notes (added after the run, not produced by train_baselines.py):
+ - timing_entropy < 3 (a measurement) occurs only in the five scenarios that connect repeatedly: c2_beacon_real, c2_beacon_via_known_host_real, network_c2, benign_heartbeat_real, benign_heartbeat_new_host (train split, new runs). The beacon pair has the same median entropy on both sides (0.227 attack, 0.227 / 0.454 benign), so it cannot separate the pair.
+ - network_c2 reaches 11-12/12 on test but 0/18 (GBT all) when the family is held out of training in leave-one-family-out: the model learned the scenario from other seeds, it did not generalise. Older runs hold the default 3.0 for timing_entropy, so the column is also correlated with 'run has v7'.
+ - benign_heartbeat_* are still flagged (4/12 and 7/8 for GBT all) and the aggregate benign false-positive rate of the learned models (45%-59%) is not below the rules' (40%-53%).
