@@ -2028,19 +2028,19 @@
     <span class="cine-drift" style="left:34%;font-size:9px;color:rgba(255,69,0,0.28);--ro:0.28;animation-duration:15s;animation-delay:-7s">PID 4410 — SUSPICIOUS → BORDERLANDS</span>
     <span class="cine-drift" style="left:48%;font-size:8.5px;color:rgba(191,255,0,0.32);--ro:0.32;animation-duration:19s;animation-delay:-1s">alert BORDERLANDS_ENTRY</span>
     <span class="cine-drift" style="left:63%;font-size:9px;color:rgba(255,69,0,0.26);--ro:0.26;animation-duration:18s;animation-delay:-15s">auto: CGROUP throttle</span>
-    <span class="cine-drift" style="left:77%;font-size:8.5px;color:rgba(191,255,0,0.3);--ro:0.3;animation-duration:22s;animation-delay:-9s">score ≥ 75 · default</span>
+    <span class="cine-drift" style="left:77%;font-size:8.5px;color:rgba(191,255,0,0.3);--ro:0.3;animation-duration:22s;animation-delay:-9s">rule-driven · score advisory</span>
   </div>
   <div class="r">
     <div class="eyebrow">Execution Zone Model</div>
     <h2 class="section-title">THREE ZONES.<br>STATE TRANSITIONS.</h2>
-    <p class="body-text" style="margin-top:16px;max-width:640px">The behaviour engine moves every process through SAFE, OBSERVED, SUSPICIOUS, BORDERLANDS and COMPROMISED as evidence accumulates, and those states map onto three zones. The thresholds are policy: 40 and 75 by default, tunable per process name.</p>
+    <p class="body-text" style="margin-top:16px;max-width:640px">The behaviour engine moves every process through SAFE, OBSERVED, SUSPICIOUS, BORDERLANDS and COMPROMISED as evidence accumulates, and those states map onto three zones. Zones change only when a rule matches; the 0 to 100 score is advisory and never decides a zone. What policy tunes per process name is whether automatic termination or beacon containment applies.</p>
   </div>
 
   <div class="zone-grid">
     <div class="zone-card r">
       <div class="zone-score safe">SAFE</div>
       <div class="zone-label"><span class="zdot zdot-safe"></span>Safe</div>
-      <div class="zone-range">score &lt; 40 · default</div>
+      <div class="zone-range">states SAFE · OBSERVED</div>
       <p class="zone-desc">The starting state. Telemetry and evidence flags are collected for every process; nothing is restricted.</p>
       <div class="zone-actions">
         <div class="zone-action">Evidence flags tracked per process</div>
@@ -2050,8 +2050,8 @@
     <div class="zone-card r d1">
       <div class="zone-score suspicious">SUSPICIOUS</div>
       <div class="zone-label"><span class="zdot zdot-sus"></span>Suspicious</div>
-      <div class="zone-range">score ≥ 40 · default</div>
-      <p class="zone-desc">Rules or score crossed the first threshold. The swarm's Patroller escalates the PID to a Hunter, and operators see it in every console.</p>
+      <div class="zone-range">states SUSPICIOUS · RECOVERING</div>
+      <p class="zone-desc">A behaviour rule matched. The swarm's Patroller escalates the PID to a Hunter once its score passes the Patroller's own threshold (40), and operators see it in every console.</p>
       <div class="zone-actions">
         <div class="zone-action">Patroller → Hunter escalation</div>
         <div class="zone-action">Visible in dashboard, TUI and kbctl</div>
@@ -2061,7 +2061,7 @@
     <div class="zone-card r d2">
       <div class="zone-score borderlands">BORDERLANDS</div>
       <div class="zone-label"><span class="zdot zdot-bl"></span>Borderlands</div>
-      <div class="zone-range">score ≥ 75 · default</div>
+      <div class="zone-range">states BORDERLANDS · COMPROMISED · CONTAINED</div>
       <p class="zone-desc">A critical chain matched. <code>kbd</code> raises a BORDERLANDS_ENTRY alert and throttles the process automatically; a kill happens only where policy opts that process name in.</p>
       <div class="zone-actions">
         <div class="zone-action">Automatic CGROUP throttle</div>
@@ -3454,7 +3454,7 @@
       <div class="member-id">Project Lead · Systems &amp; Security Engineering</div>
       <div class="member-row"><span class="member-k">Focus</span>System Design · Performance Optimization &amp; Architectures</div>
       <div class="member-row"><span class="member-k">Subsystems</span>kb-core, kb-checker &amp; cross-operational subsystems</div>
-      <div class="member-links"><a class="member-orcid" href="https://github.com/pardhuvarmax" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/pardhu-sri-rushi-varma-konduru-696886279/" target="_blank" rel="noopener">LINKEDIN ↗</a><a class="member-orcid" href="https://orcid.org/0009-0005-3251-9944" target="_blank" rel="noopener">ORCID ↗</a></div>
+      <div class="member-links"><a class="member-orcid" href="https://github.com/pardhuvarmax" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/pardhu-sri-rushi-varma-konduru-696886279/" target="_blank" rel="noopener">LINKEDIN ↗</a><a class="member-orcid" href="https://pardhuvarma.tech/" target="_blank" rel="noopener">WEBSITE ↗</a><a class="member-orcid" href="https://orcid.org/0009-0005-3251-9944" target="_blank" rel="noopener">ORCID ↗</a></div>
       <button class="note-btn" type="button" aria-expanded="false" aria-controls="note-pardhu">UNFOLD NOTE <span aria-hidden="true">✎</span></button>
       <div class="note-wrap" id="note-pardhu"><div class="note-clip"><div class="note"><div class="note-q">“Why take the usual route?”</div><div class="note-sig">— Pardhu</div></div></div></div>
     </div>
@@ -3484,7 +3484,7 @@
       <div class="member-id">Subsystem Lead · Technical &amp; Operational Communications · Interface Engineering</div>
       <div class="member-row"><span class="member-k">Focus</span>UserEnd Design &amp; Development · API &amp; Developer Tooling</div>
       <div class="member-row"><span class="member-k">Subsystems</span>kb-ops &amp; configurations &amp; policy management</div>
-      <div class="member-links"><a class="member-orcid" href="https://github.com/Rupakaredla" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/rupa-yeshvitha-karedla-4159b2289/" target="_blank" rel="noopener">LINKEDIN ↗</a></div>
+      <div class="member-links"><a class="member-orcid" href="https://github.com/Rupakaredla" target="_blank" rel="noopener">GITHUB ↗</a><a class="member-orcid" href="https://www.linkedin.com/in/rupa-yeshvitha-karedla-4159b2289/" target="_blank" rel="noopener">LINKEDIN ↗</a><a class="member-orcid" href="https://rupa-portfolio-one.vercel.app/" target="_blank" rel="noopener">WEBSITE ↗</a></div>
       <button class="note-btn" type="button" aria-expanded="false" aria-controls="note-rupa">UNFOLD NOTE <span aria-hidden="true">✎</span></button>
       <div class="note-wrap" id="note-rupa"><div class="note-clip"><div class="note"><div class="note-q">“Well, here we go again.”</div><div class="note-sig">— Rupa</div></div></div></div>
     </div>
