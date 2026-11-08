@@ -123,9 +123,7 @@ Contains Architecture Decision Records (ADRs) documenting significant engineerin
 
 A few standalone files live directly under `docs/development/` rather than a
 subdirectory: `full-pipeline-run-guide.md` (end-to-end local run walkthrough across all
-subsystems), `worksheet.md` (working engineering notes), `git-authorship.md` (this
-repo's shared-working-copy commit-authorship convention, see also `CLAUDE.md`),
-`automated_signatures_deployment.md`, and `SSH-Hardening&MCP-Metrics.md`.
+subsystems), `worksheet.md` (working engineering notes), `automated_signatures_deployment.md`, and `SSH-Hardening&MCP-Metrics.md`.
 
 ---
 

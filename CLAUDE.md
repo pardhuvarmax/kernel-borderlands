@@ -99,7 +99,7 @@ Load-bearing references — read before touching cross-subsystem behavior:
 - **Shared structs stay byte-identical**: edits to wire structs must keep the C (`__attribute__((packed))`) and Go layouts in sync — verify against [docs/architecture/kbd-contracts.md](docs/architecture/kbd-contracts.md).
 - **Rules/policy are compiled, not hand-edited on the sensor side**: `config/policy.yaml` / `rules.yaml` are compiled by `kb-control-plane` and pushed to the C sensor over the bridge at connect time.
 - **Preserve public interfaces**: Unless explicitly requested, avoid breaking public APIs, wire formats, configuration schemas, CLI behavior, or IPC contracts.
-- **Commit authorship**: shared working copy, multiple contributors — never change repo `user.name`/`user.email`; use `git commit --author="Name <email>" -m "..."` per [docs/development/git-authorship.md](docs/development/git-authorship.md).
+- **Commit authorship**: shared working copy, multiple contributors — never change repo `user.name`/`user.email`; use `git commit --author="Name <email>" -m "..."`.
 
 ## Work Continuity & Handoff
 

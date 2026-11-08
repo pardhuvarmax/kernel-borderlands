@@ -96,3 +96,6 @@ datasets/attack-lab/training/
 
 # Team photos: local only, never committed (see CHANGELOG team cards entry)
 docs/assets/team/
+
+# Commit-authorship notes: local only, not published
+docs/development/git-authorship.md
