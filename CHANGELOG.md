@@ -8,6 +8,7 @@ All notable changes to the **Kernel Borderlands** project are documented below.
 
 ### Changed
 
+- **README logo updated**: the top-right image in `README.md` is now the new Kernel Borderlands logo, stored in the repo as `docs/assets/kb-logo.png` (2000x2000 PNG, 145 KB) instead of a GitHub user-attachments link. (PardhuVarma Konduru)
 - **Pardhu's team card focus line (`docs/index.html`)**: "System Design · Performance Optimization & Architectures" now reads "Kernel & Systems Design · Performance Optimization & Architectures". (PardhuVarma Konduru)
 - **`docs/development/git-authorship.md` is now local only**: untracked (`git rm --cached`) and added to `.gitignore`; the file stays on disk. References to it were removed from `CLAUDE.md` (the authorship rule itself stays) and `docs/README.md`. It remains in earlier commits' history. (PardhuVarma Konduru)
 - **Project site zone section corrected (`docs/index.html`)**: it said a process becomes SUSPICIOUS at score 40 and BORDERLANDS at 75 and that thresholds are tunable per process name. Per the specification (section 5.C and invariant 15.A) and `map_state_to_zone` in `kbd_sensor.c`, zones come only from the rule-driven state machine and the score is advisory; per process name, `kbd` reads only `auto_terminate` and `auto_namespace_on_exfil_beacon`. The cards now show the states each zone covers. (PardhuVarma Konduru)
