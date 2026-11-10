@@ -1,0 +1,25 @@
+[bench] round 1/5 off   null_syscall_ns=70.0 open_close_ns=736.6 mmap_mprotect_ns=1661.0 connect_ns=56020.6 udp_connect_ns=2568.4 send_128b_ns=299.5 fork_exec_us=223.9
+[bench] round 1/5 on    null_syscall_ns=153.0 open_close_ns=1284.8 mmap_mprotect_ns=2104.0 connect_ns=53971.0 udp_connect_ns=3245.5 send_128b_ns=344.1 fork_exec_us=259.3
+[bench] round 1/5 bytes null_syscall_ns=154.6 open_close_ns=1172.1 mmap_mprotect_ns=2163.7 connect_ns=56670.8 udp_connect_ns=2954.8 send_128b_ns=447.1 fork_exec_us=258.5
+[bench] round 2/5 on    null_syscall_ns=152.6 open_close_ns=1161.5 mmap_mprotect_ns=2007.3 connect_ns=54837.2 udp_connect_ns=2715.0 send_128b_ns=364.8 fork_exec_us=256.2
+[bench] round 2/5 bytes null_syscall_ns=154.1 open_close_ns=1273.8 mmap_mprotect_ns=2104.6 connect_ns=53999.8 udp_connect_ns=3114.6 send_128b_ns=463.9 fork_exec_us=284.1
+[bench] round 2/5 off   null_syscall_ns=70.0 open_close_ns=896.7 mmap_mprotect_ns=2273.9 connect_ns=53879.5 udp_connect_ns=2927.2 send_128b_ns=282.2 fork_exec_us=243.8
+[bench] round 3/5 bytes null_syscall_ns=141.7 open_close_ns=1181.9 mmap_mprotect_ns=2246.2 connect_ns=54045.8 udp_connect_ns=3035.5 send_128b_ns=450.5 fork_exec_us=271.6
+[bench] round 3/5 off   null_syscall_ns=67.8 open_close_ns=912.0 mmap_mprotect_ns=1787.0 connect_ns=53971.5 udp_connect_ns=2614.0 send_128b_ns=293.2 fork_exec_us=231.4
+[bench] round 3/5 on    null_syscall_ns=150.4 open_close_ns=1415.4 mmap_mprotect_ns=2240.8 connect_ns=53681.6 udp_connect_ns=3025.5 send_128b_ns=383.1 fork_exec_us=254.1
+[bench] round 4/5 off   null_syscall_ns=67.5 open_close_ns=829.6 mmap_mprotect_ns=1911.4 connect_ns=65565.6 udp_connect_ns=2618.7 send_128b_ns=313.5 fork_exec_us=232.1
+[bench] round 4/5 on    null_syscall_ns=164.0 open_close_ns=1378.7 mmap_mprotect_ns=2505.2 connect_ns=54057.6 udp_connect_ns=3199.6 send_128b_ns=376.4 fork_exec_us=288.7
+[bench] round 4/5 bytes null_syscall_ns=154.7 open_close_ns=1396.7 mmap_mprotect_ns=2295.2 connect_ns=53687.3 udp_connect_ns=3218.8 send_128b_ns=472.5 fork_exec_us=263.2
+[bench] round 5/5 on    null_syscall_ns=149.7 open_close_ns=1277.3 mmap_mprotect_ns=2338.0 connect_ns=53983.6 udp_connect_ns=3189.9 send_128b_ns=381.4 fork_exec_us=265.8
+[bench] round 5/5 bytes null_syscall_ns=156.5 open_close_ns=1347.2 mmap_mprotect_ns=2397.8 connect_ns=53574.8 udp_connect_ns=3432.5 send_128b_ns=507.7 fork_exec_us=270.8
+[bench] round 5/5 off   null_syscall_ns=72.3 open_close_ns=901.2 mmap_mprotect_ns=1883.7 connect_ns=56360.6 udp_connect_ns=2832.9 send_128b_ns=330.2 fork_exec_us=249.5
+[bench] RESTORE OK: drop-in removed, kbd and kb-sensor active, bytes hook off, kb-checker down
+
+operation                     off           on     on %        bytes  bytes %
+null_syscall_ns              70.0        152.6  +118.0%        154.6  +120.9%
+open_close_ns               896.7       1284.8   +43.3%       1273.8   +42.1%
+mmap_mprotect_ns           1883.7       2240.8   +19.0%       2246.2   +19.2%
+connect_ns                56020.6      53983.6    -3.6%      53999.8    -3.6%
+udp_connect_ns             2618.7       3189.9   +21.8%       3114.6   +18.9%
+send_128b_ns                299.5        376.4   +25.7%        463.9   +54.9%
+fork_exec_us                232.1        259.3   +11.7%        270.8   +16.7%

@@ -1,0 +1,356 @@
+{
+ "meta": {
+  "commit": "554209a",
+  "rounds": 5,
+  "batches": 7,
+  "cpu": 2,
+  "kernel": "6.8.0-147-generic",
+  "nproc": 6,
+  "kbd_sha256": "48aeeeb82ee9692654959feed47a60fb00aa5773ec5f4567b1de25607e4ac7ce",
+  "sensor_sha256": "1f3654f38ec1519e501fcfa6a8a3f2fbaffaac0f1199c55b6f81243cd65d79e4",
+  "start": "2026-11-10T20:23:01",
+  "cpu_model": "Intel(R) Core(TM) Ultra 9 275HX",
+  "restore_ok": true,
+  "order": [
+   [
+    "off",
+    "on",
+    "bytes"
+   ],
+   [
+    "on",
+    "bytes",
+    "off"
+   ],
+   [
+    "bytes",
+    "off",
+    "on"
+   ],
+   [
+    "off",
+    "on",
+    "bytes"
+   ],
+   [
+    "on",
+    "bytes",
+    "off"
+   ]
+  ],
+  "end": "2026-11-10T20:30:50"
+ },
+ "runs": {
+  "off": [
+   {
+    "null_syscall_ns": 70.0,
+    "open_close_ns": 736.6,
+    "mmap_mprotect_ns": 1661.0,
+    "connect_ns": 56020.6,
+    "udp_connect_ns": 2568.4,
+    "send_128b_ns": 299.5,
+    "fork_exec_us": 223.9
+   },
+   {
+    "null_syscall_ns": 70.0,
+    "open_close_ns": 896.7,
+    "mmap_mprotect_ns": 2273.9,
+    "connect_ns": 53879.5,
+    "udp_connect_ns": 2927.2,
+    "send_128b_ns": 282.2,
+    "fork_exec_us": 243.8
+   },
+   {
+    "null_syscall_ns": 67.8,
+    "open_close_ns": 912.0,
+    "mmap_mprotect_ns": 1787.0,
+    "connect_ns": 53971.5,
+    "udp_connect_ns": 2614.0,
+    "send_128b_ns": 293.2,
+    "fork_exec_us": 231.4
+   },
+   {
+    "null_syscall_ns": 67.5,
+    "open_close_ns": 829.6,
+    "mmap_mprotect_ns": 1911.4,
+    "connect_ns": 65565.6,
+    "udp_connect_ns": 2618.7,
+    "send_128b_ns": 313.5,
+    "fork_exec_us": 232.1
+   },
+   {
+    "null_syscall_ns": 72.3,
+    "open_close_ns": 901.2,
+    "mmap_mprotect_ns": 1883.7,
+    "connect_ns": 56360.6,
+    "udp_connect_ns": 2832.9,
+    "send_128b_ns": 330.2,
+    "fork_exec_us": 249.5
+   }
+  ],
+  "on": [
+   {
+    "null_syscall_ns": 153.0,
+    "open_close_ns": 1284.8,
+    "mmap_mprotect_ns": 2104.0,
+    "connect_ns": 53971.0,
+    "udp_connect_ns": 3245.5,
+    "send_128b_ns": 344.1,
+    "fork_exec_us": 259.3
+   },
+   {
+    "null_syscall_ns": 152.6,
+    "open_close_ns": 1161.5,
+    "mmap_mprotect_ns": 2007.3,
+    "connect_ns": 54837.2,
+    "udp_connect_ns": 2715.0,
+    "send_128b_ns": 364.8,
+    "fork_exec_us": 256.2
+   },
+   {
+    "null_syscall_ns": 150.4,
+    "open_close_ns": 1415.4,
+    "mmap_mprotect_ns": 2240.8,
+    "connect_ns": 53681.6,
+    "udp_connect_ns": 3025.5,
+    "send_128b_ns": 383.1,
+    "fork_exec_us": 254.1
+   },
+   {
+    "null_syscall_ns": 164.0,
+    "open_close_ns": 1378.7,
+    "mmap_mprotect_ns": 2505.2,
+    "connect_ns": 54057.6,
+    "udp_connect_ns": 3199.6,
+    "send_128b_ns": 376.4,
+    "fork_exec_us": 288.7
+   },
+   {
+    "null_syscall_ns": 149.7,
+    "open_close_ns": 1277.3,
+    "mmap_mprotect_ns": 2338.0,
+    "connect_ns": 53983.6,
+    "udp_connect_ns": 3189.9,
+    "send_128b_ns": 381.4,
+    "fork_exec_us": 265.8
+   }
+  ],
+  "bytes": [
+   {
+    "null_syscall_ns": 154.6,
+    "open_close_ns": 1172.1,
+    "mmap_mprotect_ns": 2163.7,
+    "connect_ns": 56670.8,
+    "udp_connect_ns": 2954.8,
+    "send_128b_ns": 447.1,
+    "fork_exec_us": 258.5
+   },
+   {
+    "null_syscall_ns": 154.1,
+    "open_close_ns": 1273.8,
+    "mmap_mprotect_ns": 2104.6,
+    "connect_ns": 53999.8,
+    "udp_connect_ns": 3114.6,
+    "send_128b_ns": 463.9,
+    "fork_exec_us": 284.1
+   },
+   {
+    "null_syscall_ns": 141.7,
+    "open_close_ns": 1181.9,
+    "mmap_mprotect_ns": 2246.2,
+    "connect_ns": 54045.8,
+    "udp_connect_ns": 3035.5,
+    "send_128b_ns": 450.5,
+    "fork_exec_us": 271.6
+   },
+   {
+    "null_syscall_ns": 154.7,
+    "open_close_ns": 1396.7,
+    "mmap_mprotect_ns": 2295.2,
+    "connect_ns": 53687.3,
+    "udp_connect_ns": 3218.8,
+    "send_128b_ns": 472.5,
+    "fork_exec_us": 263.2
+   },
+   {
+    "null_syscall_ns": 156.5,
+    "open_close_ns": 1347.2,
+    "mmap_mprotect_ns": 2397.8,
+    "connect_ns": 53574.8,
+    "udp_connect_ns": 3432.5,
+    "send_128b_ns": 507.7,
+    "fork_exec_us": 270.8
+   }
+  ]
+ },
+ "summary": {
+  "null_syscall_ns": {
+   "off": {
+    "median": 70.0,
+    "min": 67.5,
+    "max": 72.3,
+    "n": 5
+   },
+   "on": {
+    "median": 152.6,
+    "min": 149.7,
+    "max": 164.0,
+    "n": 5,
+    "delta": 82.6,
+    "pct": 118.0
+   },
+   "bytes": {
+    "median": 154.6,
+    "min": 141.7,
+    "max": 156.5,
+    "n": 5,
+    "delta": 84.6,
+    "pct": 120.85714285714286
+   }
+  },
+  "open_close_ns": {
+   "off": {
+    "median": 896.7,
+    "min": 736.6,
+    "max": 912.0,
+    "n": 5
+   },
+   "on": {
+    "median": 1284.8,
+    "min": 1161.5,
+    "max": 1415.4,
+    "n": 5,
+    "delta": 388.0999999999999,
+    "pct": 43.28091892494702
+   },
+   "bytes": {
+    "median": 1273.8,
+    "min": 1172.1,
+    "max": 1396.7,
+    "n": 5,
+    "delta": 377.0999999999999,
+    "pct": 42.054198728671786
+   }
+  },
+  "mmap_mprotect_ns": {
+   "off": {
+    "median": 1883.7,
+    "min": 1661.0,
+    "max": 2273.9,
+    "n": 5
+   },
+   "on": {
+    "median": 2240.8,
+    "min": 2007.3,
+    "max": 2505.2,
+    "n": 5,
+    "delta": 357.10000000000014,
+    "pct": 18.957371131284184
+   },
+   "bytes": {
+    "median": 2246.2,
+    "min": 2104.6,
+    "max": 2397.8,
+    "n": 5,
+    "delta": 362.4999999999998,
+    "pct": 19.244040983171406
+   }
+  },
+  "connect_ns": {
+   "off": {
+    "median": 56020.6,
+    "min": 53879.5,
+    "max": 65565.6,
+    "n": 5
+   },
+   "on": {
+    "median": 53983.6,
+    "min": 53681.6,
+    "max": 54837.2,
+    "n": 5,
+    "delta": -2037.0,
+    "pct": -3.6361624116842735
+   },
+   "bytes": {
+    "median": 53999.8,
+    "min": 53574.8,
+    "max": 56670.8,
+    "n": 5,
+    "delta": -2020.7999999999956,
+    "pct": -3.6072444779241843
+   }
+  },
+  "udp_connect_ns": {
+   "off": {
+    "median": 2618.7,
+    "min": 2568.4,
+    "max": 2927.2,
+    "n": 5
+   },
+   "on": {
+    "median": 3189.9,
+    "min": 2715.0,
+    "max": 3245.5,
+    "n": 5,
+    "delta": 571.2000000000003,
+    "pct": 21.812349639133934
+   },
+   "bytes": {
+    "median": 3114.6,
+    "min": 2954.8,
+    "max": 3432.5,
+    "n": 5,
+    "delta": 495.9000000000001,
+    "pct": 18.936877076411964
+   }
+  },
+  "send_128b_ns": {
+   "off": {
+    "median": 299.5,
+    "min": 282.2,
+    "max": 330.2,
+    "n": 5
+   },
+   "on": {
+    "median": 376.4,
+    "min": 344.1,
+    "max": 383.1,
+    "n": 5,
+    "delta": 76.89999999999998,
+    "pct": 25.676126878130212
+   },
+   "bytes": {
+    "median": 463.9,
+    "min": 447.1,
+    "max": 507.7,
+    "n": 5,
+    "delta": 164.39999999999998,
+    "pct": 54.89148580968279
+   }
+  },
+  "fork_exec_us": {
+   "off": {
+    "median": 232.1,
+    "min": 223.9,
+    "max": 249.5,
+    "n": 5
+   },
+   "on": {
+    "median": 259.3,
+    "min": 254.1,
+    "max": 288.7,
+    "n": 5,
+    "delta": 27.200000000000017,
+    "pct": 11.719086600603196
+   },
+   "bytes": {
+    "median": 270.8,
+    "min": 258.5,
+    "max": 284.1,
+    "n": 5,
+    "delta": 38.70000000000002,
+    "pct": 16.673847479534693
+   }
+  }
+ }
+}
