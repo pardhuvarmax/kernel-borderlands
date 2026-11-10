@@ -22,3 +22,21 @@ Run it only on the isolated lab VM: it stops the protection for a while, and it 
 | fork + exec (`/bin/true`) | 232 µs | 259 µs | +12% | 271 µs | +17% |
 
 Reading: the sensor adds roughly 80 ns to every syscall in this guest. The optional byte counter adds about 88 ns per `send` on top (the `on` and `bytes` ranges across rounds do not overlap, 344-383 vs 447-508 ns) and shows nothing measurable elsewhere. The TCP connect row varies by more than the effect (off ranged 53.9-65.6 µs). Not measured: `make -j4` and `sysbench cpu` from the site table (no harness), resident memory, and the effect of a sustained event stream on `kbd`.
+
+## E14: thread coverage of the syscall sampler
+
+`kb_handle_syscall` returns early when the thread id differs from the process id, so only a process's main thread is
+counted, and the syscall-entropy dimension of the score (weight 0.25) is built from those counts. `e14_threaded.py`
+measures the gap against ground truth (`threaded_load.c` counts its own syscalls per thread; the server phase uses
+`/proc/<pid>/io`). Phases: a single-threaded control, 4 and 16 worker threads at equal total work, and a
+thread-per-connection echo server.
+
+```bash
+gcc -O2 -pthread -o threaded_load threaded_load.c          # built by the script itself
+python3 e14_threaded.py --dry-run --out /tmp/e14dry        # offline, SIMULATES a main-thread-only sensor
+python3 e14_threaded.py --ack-vm --out ~/e14-run           # lab VM, beside the running sensor (about 2 minutes)
+```
+
+Live mode changes nothing on the system (no restart, no install, no policy or unit change); it runs a short benign
+workload and reads the `kb_syscall_counts` BPF map with `sudo -n bpftool`. It refuses to run as root, without
+`--ack-vm`, or if `kb-checker` is running. Tests: `python -m pytest tests`.
