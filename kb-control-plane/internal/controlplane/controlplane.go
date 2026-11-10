@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pardhuvarmax/kernel-borderlands/kb-control-plane/internal/audit"
@@ -88,6 +89,21 @@ type ControlPlane struct {
 
 	alertMu   sync.Mutex
 	alertSubs []chan *pb.Alert
+
+	// Back-pressure accounting for the feed. fanOutEvent and fanOutAlert never block, so a subscriber whose buffer
+	// is full silently loses the event; these count every such loss and drive a rate-limited warning
+	// (noteFanoutDrop). Added after the latency report found the drops were invisible.
+	fanoutDroppedEvents atomic.Uint64
+	fanoutDroppedAlerts atomic.Uint64
+	fanoutDropLogNs     atomic.Int64  // unix nanoseconds of the last warning
+	fanoutDropReported  atomic.Uint64 // drops already covered by a warning
+
+	// transitionSeen: pid -> seenTransition, the last zone transition that went through OnZoneTransition's
+	// enforcement path for that process. Lets OnProcessState tell whether a process whose first state is already
+	// above SAFE still needs a transition (see firstSightTransition).
+	transitionSeen          sync.Map
+	staleTransitionsSkipped atomic.Uint64 // transitions dropped by the PID-reuse guard
+	firstSightTransitions   atomic.Uint64 // transitions synthesised for first-sight flagged processes
 
 	// Live metrics tracking
 	metricMu        sync.Mutex
@@ -600,6 +616,7 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 	cp.recordEventTime()
 	cp.commCache.Store(msg.PID, msg.Comm)
 
+	_, known := cp.store.GetProcessState(msg.PID) // before the upsert: is this the first state kbd sees for the pid?
 	err := cp.store.UpsertProcessState(msg)
 	if err != nil {
 		chatter.Printf("store", "[KB] store: %v", err)
@@ -686,6 +703,35 @@ func (cp *ControlPlane) OnProcessState(msg *ipc.ProcessStateMsg) {
 		Timestamp:  int64(msg.LastUpdatedNs),
 		Metadata:   md,
 	})
+	cp.firstSightTransition(msg, known)
+}
+
+// seenTransition is what transitionSeen remembers per pid.
+type seenTransition struct {
+	StartTimeNs uint64
+	To          ipc.KBZone
+}
+
+// firstSightTransition makes a process whose FIRST state is already above SAFE go through the same audit, alert and
+// containment path as any other zone entry. Alerts and policy containment run only in OnZoneTransition, and the
+// corpora show flagged processes (48 of 385 flagged attack executions, 5 of them first seen in BORDERLANDS) whose
+// first state arrived with no preceding zone-transition message: they were never audited, alerted or contained.
+// Whether the sensor omits the message or the PID-reuse guard drops it was not determined; this closes the gap on
+// the kbd side either way. If a transition for this pid and zone was already handled it does nothing.
+func (cp *ControlPlane) firstSightTransition(msg *ipc.ProcessStateMsg, known bool) {
+	if known || msg.Zone == ipc.ZoneSafe {
+		return
+	}
+	if v, ok := cp.transitionSeen.Load(msg.PID); ok {
+		if t := v.(seenTransition); t.StartTimeNs == msg.StartTimeNs && t.To == msg.Zone {
+			return
+		}
+	}
+	cp.firstSightTransitions.Add(1)
+	cp.OnZoneTransition(&ipc.ZoneTransitionMsg{
+		PID: msg.PID, StartTimeNs: msg.StartTimeNs, FromZone: ipc.ZoneSafe, ToZone: msg.Zone,
+		Score: msg.EMAScore, TsNs: msg.LastUpdatedNs,
+	})
 }
 
 // OnProcessCounters implements ipc.ProcessCountersHandler (msg_type 11).
@@ -707,6 +753,7 @@ func (cp *ControlPlane) OnProcessExit(msg *ipc.ProcessExitMsg) {
 	cp.tree.Exit(msg.PID) // keeps contributing to its ancestors briefly; see tree.go
 	cp.countersCache.Delete(msg.PID)
 	cp.timingCache.Delete(msg.PID)
+	cp.transitionSeen.Delete(msg.PID)
 
 	// Push exit details to L2 DB
 	if err := cp.store.TerminateProcessState(msg.PID, msg.ExitTimeNs, msg.ExitCode); err != nil {
@@ -862,9 +909,11 @@ func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
 	if err != nil {
 		chatter.Printf("verify", "[KB] start_time verify: %v — allowing", err)
 	} else if !ok {
+		cp.staleTransitionsSkipped.Add(1)
 		chatter.Printf("stale", "[KB] PID=%d start_time mismatch — stale transition, skipping enforcement", msg.PID)
 		return
 	}
+	cp.transitionSeen.Store(msg.PID, seenTransition{StartTimeNs: msg.StartTimeNs, To: msg.ToZone})
 
 	cp.store.InsertZoneTransition(msg, comm)
 	cp.audit.LogZoneTransition(msg, comm)
@@ -937,6 +986,9 @@ func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
 	})
 }
 
+// fanOutDropLogInterval bounds the "subscriber buffer full" warning so a sustained overload cannot flood the journal.
+const fanOutDropLogInterval = 10 * time.Second
+
 func (cp *ControlPlane) fanOutEvent(e *pb.KBEvent) {
 	cp.subMu.Lock()
 	defer cp.subMu.Unlock()
@@ -944,6 +996,7 @@ func (cp *ControlPlane) fanOutEvent(e *pb.KBEvent) {
 		select {
 		case ch <- e:
 		default:
+			cp.noteFanoutDrop(&cp.fanoutDroppedEvents)
 		}
 	}
 }
@@ -955,8 +1008,36 @@ func (cp *ControlPlane) fanOutAlert(a *pb.Alert) {
 		select {
 		case ch <- a:
 		default:
+			cp.noteFanoutDrop(&cp.fanoutDroppedAlerts)
 		}
 	}
+}
+
+// noteFanoutDrop counts one event or alert discarded because a subscriber's buffer was full and, at most once per
+// fanOutDropLogInterval, logs how many were lost since the previous warning. Non-blocking by design: it adds two
+// atomic operations to the discard path and never waits.
+func (cp *ControlPlane) noteFanoutDrop(counter *atomic.Uint64) {
+	counter.Add(1)
+	now := time.Now().UnixNano()
+	last := cp.fanoutDropLogNs.Load()
+	if now-last < fanOutDropLogInterval.Nanoseconds() || !cp.fanoutDropLogNs.CompareAndSwap(last, now) {
+		return
+	}
+	ev, al := cp.fanoutDroppedEvents.Load(), cp.fanoutDroppedAlerts.Load()
+	since := ev + al - cp.fanoutDropReported.Swap(ev+al)
+	log.Printf("[KB] WARNING: event feed subscriber buffer full: %d dropped since the last warning (%d events, %d alerts since start); a slow consumer is losing data",
+		since, ev, al)
+}
+
+// FanoutDrops returns the number of events and alerts discarded since start because a subscriber's buffer was full.
+func (cp *ControlPlane) FanoutDrops() (events, alerts uint64) {
+	return cp.fanoutDroppedEvents.Load(), cp.fanoutDroppedAlerts.Load()
+}
+
+// TransitionCounters returns the number of zone transitions dropped by the PID-reuse guard and the number
+// synthesised for processes first seen already above SAFE.
+func (cp *ControlPlane) TransitionCounters() (staleSkipped, firstSight uint64) {
+	return cp.staleTransitionsSkipped.Load(), cp.firstSightTransitions.Load()
 }
 
 func (cp *ControlPlane) recordEventTime() {
