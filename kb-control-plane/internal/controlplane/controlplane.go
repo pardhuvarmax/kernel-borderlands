@@ -712,8 +712,9 @@ type seenTransition struct {
 	To          ipc.KBZone
 }
 
-// firstSightTransition makes a process whose FIRST state is already above SAFE go through the same audit, alert and
-// containment path as any other zone entry. Alerts and policy containment run only in OnZoneTransition, and the
+// firstSightTransition makes a process whose FIRST state is already above SAFE go through the same audit, feed and
+// alert path as any other zone entry (automatic containment is deferred, see handleZoneTransition). Alerts and policy
+// containment run only in OnZoneTransition, and the
 // corpora show flagged processes (48 of 385 flagged attack executions, 5 of them first seen in BORDERLANDS) whose
 // first state arrived with no preceding zone-transition message: they were never audited, alerted or contained.
 // Whether the sensor omits the message or the PID-reuse guard drops it was not determined; this closes the gap on
@@ -728,10 +729,10 @@ func (cp *ControlPlane) firstSightTransition(msg *ipc.ProcessStateMsg, known boo
 		}
 	}
 	cp.firstSightTransitions.Add(1)
-	cp.OnZoneTransition(&ipc.ZoneTransitionMsg{
+	cp.handleZoneTransition(&ipc.ZoneTransitionMsg{
 		PID: msg.PID, StartTimeNs: msg.StartTimeNs, FromZone: ipc.ZoneSafe, ToZone: msg.Zone,
 		Score: msg.EMAScore, TsNs: msg.LastUpdatedNs,
-	})
+	}, true)
 }
 
 // OnProcessCounters implements ipc.ProcessCountersHandler (msg_type 11).
@@ -895,6 +896,16 @@ func (cp *ControlPlane) autoContain(pid uint32, comm string, level pb.Containmen
 }
 
 func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
+	cp.handleZoneTransition(msg, false)
+}
+
+// handleZoneTransition is OnZoneTransition's body. deferContainment is true only for a transition kbd synthesised
+// for a process first seen already above SAFE (firstSightTransition): audit, feed event and BORDERLANDS alert run as
+// usual, but automatic containment is NOT applied; an audit entry records what would have been done. Reason: replaying
+// the attack-lab corpora showed such processes include desktop and system processes (gnome-shell, gnome-session,
+// update-manager) that the rules score as BORDERLANDS and whose transition messages were lost, so enabling
+// containment for them would newly throttle real processes on a rules false positive.
+func (cp *ControlPlane) handleZoneTransition(msg *ipc.ZoneTransitionMsg, deferContainment bool) {
 	cp.recordEventTime()
 	comm := ""
 	if v, ok := cp.commCache.Load(msg.PID); ok {
@@ -958,7 +969,14 @@ func (cp *ControlPlane) OnZoneTransition(msg *ipc.ZoneTransitionMsg) {
 		cp.policyMu.RLock()
 		autoTerminate := cp.policy.AutoTerminate(comm)
 		cp.policyMu.RUnlock()
-		if autoTerminate {
+		if deferContainment {
+			would := "CGROUP_THROTTLE"
+			if autoTerminate {
+				would = "AUTO_TERMINATE"
+			}
+			cp.audit.Log("FIRST_SIGHT_CONTAINMENT_DEFERRED", fmt.Sprintf("pid=%d comm=%s", msg.PID, comm), "SYSTEM_AUTO",
+				fmt.Sprintf("zone=BORDERLANDS first seen without a transition message; automatic containment not applied (would be %s)", would))
+		} else if autoTerminate {
 			cp.autoContain(msg.PID, comm, pb.ContainmentLevel_TERMINATE, "policy:auto_terminate=true",
 				"AUTO_TERMINATE", "policy:auto_terminate=true")
 		} else {

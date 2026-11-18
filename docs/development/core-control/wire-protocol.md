@@ -84,8 +84,11 @@ Total: 40 bytes — matches the 40B `ZoneTransition` figure in the root `CLAUDE.
 **First-sight behaviour (kbd side, no wire change).** Alerts, audit rows and policy containment run only when `kbd`
 handles a zone transition. If the first `process_state` `kbd` receives for a pid already carries a zone above SAFE and
 no transition for that pid and zone was handled, `kbd` treats it as a SAFE-to-zone transition and runs the same path
-(audit row, feed event, BORDERLANDS alert and containment, which observe-only mode turns into an audited
-`OBSERVE_ONLY_WOULD_*` entry). Reason: the attack-lab corpora contain flagged processes whose first state arrived with
+(audit row, feed event, BORDERLANDS alert), except that **automatic containment is deferred**: an audited
+`FIRST_SIGHT_CONTAINMENT_DEFERRED` entry records what would have been applied. Reason: replaying the attack-lab corpora
+found desktop and system processes (gnome-shell, gnome-session, update-manager) among them whose rules score is
+BORDERLANDS and whose transition messages were lost, so containing them would newly throttle real processes on a
+rules false positive. Reason: the attack-lab corpora contain flagged processes whose first state arrived with
 no preceding transition message; whether the sensor omitted it or the PID-reuse guard dropped it was not determined.
 `kbd` also counts transitions skipped by the PID-reuse guard (`TransitionCounters`) and events or alerts discarded
 because a feed subscriber's buffer was full (`FanoutDrops`), with a warning logged at most once per 10 s.

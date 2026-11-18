@@ -78,6 +78,11 @@ func TestFirstSightFlaggedStateGoesThroughTheTransitionPath(t *testing.T) {
 	cp.OnProcessState(&ipc.ProcessStateMsg{PID: 500, Comm: "injector", StartTimeNs: 1000, EMAScore: 60, Zone: ipc.ZoneBorderlands})
 
 	waitForCount(t, zoneAuditCount(t, cp, "ZONE_SAFE_TO_BORDERLANDS"), 1)
+	// containment is deferred for a synthesised transition: recorded, not applied
+	waitForCount(t, zoneAuditCount(t, cp, "FIRST_SIGHT_CONTAINMENT_DEFERRED"), 1)
+	if n, _ := zoneAuditCount(t, cp, "CGROUP_THROTTLE")(); n != 0 {
+		t.Fatalf("containment was applied (%d CGROUP_THROTTLE audit rows) for a first-sight transition", n)
+	}
 	if _, first := cp.TransitionCounters(); first != 1 {
 		t.Fatalf("first-sight transitions = %d, want 1", first)
 	}
